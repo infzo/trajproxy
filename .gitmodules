@@ -1,0 +1,3 @@
+[submodule "traj_proxy/mindforge-gateway-litellm"]
+	path = traj_proxy/mindforge-gateway-litellm
+	url = git@github.com:PGCodeLLM/mindforge-gateway-litellm.git
