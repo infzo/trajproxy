@@ -19,6 +19,10 @@ _REASONING_PARSERS_TO_REGISTER = {
         "deepseek_v3_reasoning_parser",
         "DeepSeekV3ReasoningParser",
     ),
+    "deepseek": (
+        "deepseek_reasoning_parser",
+        "DeepSeekReasoningParser",
+    ),
     # Qwen 系列
     "qwen3": (
         "qwen3_reasoning_parser",

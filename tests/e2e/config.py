@@ -23,8 +23,8 @@ LITELLM_URL = os.getenv("LITELLM_URL", "http://localhost:4000")
 # 预置模型名称（在 config.yaml 中配置）
 DEFAULT_MODEL = os.getenv("TEST_MODEL", "qwen3.5-2b")
 
-# 测试用的 job_id（如果模型按 job_id 隔离）
-DEFAULT_JOB_ID = os.getenv("TEST_JOB_ID", "")
+# 测试用的 run_id（如果模型按 run_id 隔离）
+DEFAULT_RUN_ID = os.getenv("TEST_RUN_ID", "")
 
 # ============================================
 # 测试数据配置
@@ -51,9 +51,9 @@ def get_session_id(sample_id: str = "sample_001", task_id: str = "task_001") -> 
     """
     生成测试用的 session_id
 
-    格式: {prefix}#{sample_id}#{task_id}
+    格式: {prefix};{sample_id};{task_id}
     """
-    return f"{SESSION_PREFIX}#{sample_id}#{task_id}"
+    return f"{SESSION_PREFIX};{sample_id};{task_id}"
 
 
 def get_headers(session_id: str = None) -> dict:

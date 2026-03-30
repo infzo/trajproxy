@@ -56,12 +56,7 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
             model = parts[0]
             session_id = parts[1]
 
-        # session_id 是必须的，用于解析 job_id 路由到正确的 processor
-        if not session_id:
-            raise HTTPException(
-                status_code=400,
-                detail="缺少 session_id，无法路由请求。请在 header 中提供 x-session-id，格式为 {job_id}#{sample_id}#{task_id}"
-            )
+        # session_id 可以为空，为空时 run_id 将等于 model_name
 
         # 其他请求参数
         request_params = {}
@@ -77,7 +72,7 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
         # 获取 ProcessorManager 实例
         processor_manager = get_processor_manager()
 
-        # 根据 session_id 解析 job_id，结合 model_name 获取对应的 processor
+        # 根据 session_id 解析 run_id，结合 model_name 获取对应的 processor
         processor = processor_manager.get_processor_by_session(model, session_id)
         if processor is None:
             logger.warning(f"模型未注册: {model}, session_id={session_id}")
@@ -150,10 +145,10 @@ async def list_models():
     processor_manager = get_processor_manager()
     model_keys = processor_manager.list_models()
 
-    # 构建 OpenAI 格式的响应，id 格式为 job_id/model_name
+    # 构建 OpenAI 格式的响应，id 格式为 run_id/model_name
     data = [
-        ModelInfo(id=f"{job_id}/{model_name}" if job_id else model_name)
-        for job_id, model_name in model_keys
+        ModelInfo(id=f"{run_id}/{model_name}" if run_id else model_name)
+        for run_id, model_name in model_keys
     ]
 
     return ListModelsResponse(data=data)
@@ -183,19 +178,19 @@ async def register_model(request: RegisterModelRequest):
             tokenizer_path=request.tokenizer_path,
             token_in_token_out=request.token_in_token_out,
             persist_to_db=True,
-            job_id=request.job_id,
+            run_id=request.run_id,
             tool_parser=request.tool_parser,
             reasoning_parser=request.reasoning_parser
         )
 
-        logger.info(f"注册模型成功: job_id={request.job_id}, model_name={request.model_name}")
+        logger.info(f"注册模型成功: run_id={request.run_id}, model_name={request.model_name}")
 
         return RegisterModelResponse(
             status="success",
-            job_id=request.job_id,
+            run_id=request.run_id,
             model_name=request.model_name,
             detail={
-                "job_id": processor.job_id,
+                "run_id": processor.run_id,
                 "model": processor.model,
                 "tokenizer_path": processor.tokenizer_path,
                 "token_in_token_out": processor.token_in_token_out,
@@ -219,13 +214,13 @@ async def register_model(request: RegisterModelRequest):
 
 
 @admin_router.delete("/{model_name}", response_model=DeleteModelResponse)
-async def delete_model(model_name: str, job_id: str = ""):
+async def delete_model(model_name: str, run_id: str = ""):
     """
     删除已注册的模型（会自动从所有 Worker 中删除）
 
     参数:
         model_name: 模型名称
-        job_id: 作业ID（查询参数，默认为空字符串表示全局模型）
+        run_id: 运行ID（查询参数，默认为空字符串表示全局模型）
 
     返回:
         删除结果
@@ -233,16 +228,16 @@ async def delete_model(model_name: str, job_id: str = ""):
     try:
         processor_manager = get_processor_manager()
 
-        deleted = await processor_manager.unregister_dynamic_processor(model_name, persist_to_db=True, job_id=job_id)
+        deleted = await processor_manager.unregister_dynamic_processor(model_name, persist_to_db=True, run_id=run_id)
 
         if not deleted:
-            raise HTTPException(status_code=404, detail=f"模型 '{model_name}' 不存在 (job_id={job_id})")
+            raise HTTPException(status_code=404, detail=f"模型 '{model_name}' 不存在 (run_id={run_id})")
 
-        logger.info(f"删除模型成功: job_id={job_id}, model_name={model_name}")
+        logger.info(f"删除模型成功: run_id={run_id}, model_name={model_name}")
 
         return DeleteModelResponse(
             status="success",
-            job_id=job_id,
+            run_id=run_id,
             model_name=model_name,
             deleted=True
         )

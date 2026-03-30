@@ -28,6 +28,10 @@ _TOOL_PARSERS_TO_REGISTER = {
         "qwen3coder_tool_parser",
         "Qwen3CoderToolParser",
     ),
+    "qwen_xml": (
+        "qwen_xml_parser",
+        "QwenXMLToolParser",
+    ),
     # GLM 系列
     "glm45": (
         "glm4_moe_tool_parser",
@@ -36,6 +40,11 @@ _TOOL_PARSERS_TO_REGISTER = {
     "glm47": (
         "glm47_moe_tool_parser",
         "Glm47MoeModelToolParser",
+    ),
+    # Llama 系列
+    "llama3_json": (
+        "llama3_json_parser",
+        "Llama3JSONToolParser",
     ),
 }
 

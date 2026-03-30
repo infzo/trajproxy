@@ -36,7 +36,7 @@ class ModelRepository:
         api_key: str,
         tokenizer_path: str,
         token_in_token_out: bool = False,
-        job_id: str = ""
+        run_id: str = ""
     ) -> ModelConfig:
         """注册新模型到数据库（使用 UPSERT）
 
@@ -46,7 +46,7 @@ class ModelRepository:
             api_key: API 密钥
             tokenizer_path: Tokenizer 路径
             token_in_token_out: 是否使用 Token-in-Token-out 模式
-            job_id: 作业ID，空字符串表示全局模型
+            run_id: 运行ID，空字符串表示全局模型
 
         Returns:
             ModelConfig 实例
@@ -59,19 +59,19 @@ class ModelRepository:
                 now = datetime.now()
                 await conn.execute("""
                     INSERT INTO model_registry
-                    (job_id, model_name, url, api_key, tokenizer_path, token_in_token_out, updated_at)
+                    (run_id, model_name, url, api_key, tokenizer_path, token_in_token_out, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (job_id, model_name)
+                    ON CONFLICT (run_id, model_name)
                     DO UPDATE SET
                         url = EXCLUDED.url,
                         api_key = EXCLUDED.api_key,
                         tokenizer_path = EXCLUDED.tokenizer_path,
                         token_in_token_out = EXCLUDED.token_in_token_out,
                         updated_at = EXCLUDED.updated_at
-                """, (job_id, model_name, url, api_key, tokenizer_path, token_in_token_out, now))
+                """, (run_id, model_name, url, api_key, tokenizer_path, token_in_token_out, now))
 
                 return ModelConfig(
-                    job_id=job_id,
+                    run_id=run_id,
                     model_name=model_name,
                     url=url,
                     api_key=api_key,
@@ -83,12 +83,12 @@ class ModelRepository:
             import traceback
             raise DatabaseError(f"注册模型到数据库失败: {str(e)}\n{traceback.format_exc()}")
 
-    async def unregister(self, model_name: str, job_id: str = "") -> bool:
+    async def unregister(self, model_name: str, run_id: str = "") -> bool:
         """从数据库删除模型
 
         Args:
             model_name: 模型名称
-            job_id: 作业ID，空字符串表示全局模型
+            run_id: 运行ID，空字符串表示全局模型
 
         Returns:
             是否成功删除
@@ -100,8 +100,8 @@ class ModelRepository:
             async with self.pool.connection() as conn:
                 result = await conn.execute("""
                     DELETE FROM model_registry
-                    WHERE job_id = %s AND model_name = %s
-                """, (job_id, model_name))
+                    WHERE run_id = %s AND model_name = %s
+                """, (run_id, model_name))
 
                 return result.rowcount > 0
         except Exception as e:
@@ -121,15 +121,15 @@ class ModelRepository:
             async with self.pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute("""
-                        SELECT job_id, model_name, url, api_key, tokenizer_path, token_in_token_out, updated_at
+                        SELECT run_id, model_name, url, api_key, tokenizer_path, token_in_token_out, updated_at
                         FROM model_registry
-                        ORDER BY job_id, model_name
+                        ORDER BY run_id, model_name
                     """)
                     rows = await cur.fetchall()
 
                     return [
                         ModelConfig(
-                            job_id=row[0],
+                            run_id=row[0],
                             model_name=row[1],
                             url=row[2],
                             api_key=row[3],

@@ -156,11 +156,11 @@ class TestChatCompletion:
         registered_model_name: str
     ):
         """
-        测试缺少 session_id 的请求
+        测试没有 session_id 的请求
 
         验证点:
-        - 返回状态码 400
-        - 错误信息提示缺少 session_id
+        - 返回状态码 200（session_id 可以为空，run_id 将使用 model_name）
+        - 响应格式符合 OpenAI API 规范
         """
         response = proxy_client.post(
             f"{PROXY_URL}/proxy/v1/chat/completions",
@@ -173,11 +173,11 @@ class TestChatCompletion:
             }
         )
 
-        assert response.status_code == 400, f"预期返回 400，实际返回 {response.status_code}"
+        # session_id 可以为空，run_id 将使用 model_name
+        assert response.status_code == 200, f"预期返回 200，实际返回 {response.status_code}: {response.text}"
 
         data = response.json()
-        assert "session_id" in data.get("detail", "").lower() or "缺少" in data.get("detail", ""), \
-            f"错误信息未提示缺少 session_id: {data}"
+        assert "choices" in data, f"响应缺少 choices 字段: {data}"
 
     def test_chat_with_invalid_model(
         self,

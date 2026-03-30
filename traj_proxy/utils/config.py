@@ -18,7 +18,7 @@ def get_config_path(config_name: str = "config.yaml") -> Path:
         return Path(env_path).expanduser().resolve()
 
     # 从 traj_proxy/ 向上一级到项目根目录，然后进入 configs/
-    return Path(__file__).resolve().parents[1] / "configs" / config_name
+    return Path(__file__).resolve().parents[2] / "configs" / config_name
 
 
 def load_yaml_config(config_name: str = "config.yaml") -> dict:

@@ -15,11 +15,11 @@ class ModelConfig:
 
     对应 model_registry 表。
     """
-    job_id: str = ""  # 作业ID，空字符串表示全局模型
-    model_name: str = ""
     url: str
     api_key: str
     tokenizer_path: str
+    run_id: str = ""  # 运行ID，空字符串表示全局模型
+    model_name: str = ""
     token_in_token_out: bool = False
     updated_at: Optional[datetime] = None
 

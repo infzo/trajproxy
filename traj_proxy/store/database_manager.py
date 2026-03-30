@@ -232,21 +232,21 @@ class DatabaseManager:
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS model_registry (
                     id SERIAL PRIMARY KEY,
-                    job_id TEXT NOT NULL DEFAULT '',
+                    run_id TEXT NOT NULL DEFAULT '',
                     model_name TEXT NOT NULL,
                     url TEXT NOT NULL,
                     api_key TEXT NOT NULL,
                     tokenizer_path TEXT NOT NULL,
                     token_in_token_out BOOLEAN DEFAULT FALSE,
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                    CONSTRAINT unique_job_model UNIQUE (job_id, model_name)
+                    CONSTRAINT unique_run_model UNIQUE (run_id, model_name)
                 )
             """)
 
-            # 作业ID索引
-            await self._create_table_index(conn, "model_registry_job_id_idx", """
-                CREATE INDEX model_registry_job_id_idx
-                    ON model_registry (job_id)
+            # 运行ID索引
+            await self._create_table_index(conn, "model_registry_run_id_idx", """
+                CREATE INDEX model_registry_run_id_idx
+                    ON model_registry (run_id)
             """)
 
             # 模型名称索引

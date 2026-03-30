@@ -168,20 +168,3 @@ class TokenBuilder:
         context.stream_buffer_text = full_text
 
         return new_text
-
-    def concat_token_ids(
-        self,
-        *token_id_lists: List[int]
-    ) -> List[int]:
-        """拼接多个 token ID 列表
-
-        Args:
-            *token_id_lists: 可变数量的 token ID 列表
-
-        Returns:
-            拼接后的 token ID 列表
-        """
-        result = []
-        for token_list in token_id_lists:
-            result.extend(token_list)
-        return result

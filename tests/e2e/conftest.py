@@ -38,10 +38,10 @@ def unique_session_id() -> str:
     生成唯一的 session_id，确保测试隔离
 
     返回:
-        格式为 {prefix}_{uuid}#{sample_id}#{task_id} 的唯一 session_id
+        格式为 {prefix}_{uuid};{sample_id};{task_id} 的唯一 session_id
     """
     unique_prefix = f"e2e_{uuid.uuid4().hex[:8]}"
-    return f"{unique_prefix}#sample_001#task_001"
+    return f"{unique_prefix};sample_001;task_001"
 
 
 @pytest.fixture
@@ -91,7 +91,7 @@ def check_service_available():
     在所有测试开始前检查 TrajProxy 是否运行
     """
     try:
-        response = requests.get(f"{PROXY_URL}/proxy/health", timeout=5)
+        response = requests.get(f"{PROXY_URL}/health", timeout=5)
         if response.status_code != 200:
             pytest.fail(f"TrajProxy 服务不可用: {PROXY_URL}")
     except requests.exceptions.ConnectionError:

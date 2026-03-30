@@ -41,7 +41,7 @@ class Processor:
         request_repository: RequestRepository = None,
         infer_client=None,
         config: Optional[Dict[str, Any]] = None,
-        job_id: str = "",
+        run_id: str = "",
         tool_parser: str = "",
         reasoning_parser: str = ""
     ):
@@ -53,12 +53,12 @@ class Processor:
             request_repository: 请求记录仓库，用于存储轨迹记录
             infer_client: Infer 服务客户端
             config: 完整配置字典（由worker传入）
-            job_id: 作业ID，空字符串表示全局模型
+            run_id: 运行ID，空字符串表示全局模型
             tool_parser: Tool parser 名称
             reasoning_parser: Reasoning parser 名称
         """
         self.model = model
-        self.job_id = job_id
+        self.run_id = run_id
         self.tokenizer_path = tokenizer_path
         self.request_repository = request_repository
         self.infer_client = infer_client
@@ -204,7 +204,7 @@ class Processor:
         Args:
             messages: OpenAI 格式的消息列表
             request_id: 请求 ID
-            session_id: 会话 ID（格式: app_id#sample_id#task_id）
+            session_id: 会话 ID（格式: app_id;sample_id;task_id）
             **request_params: 请求参数（如 max_tokens, temperature 等）
 
         Returns:
@@ -214,7 +214,7 @@ class Processor:
             各种异常，包括 DatabaseError、InferServiceError 等
         """
         # 构建 unique_id
-        unique_id = f"{session_id}#{request_id}" if session_id else request_id
+        unique_id = f"{session_id};{request_id}" if session_id else request_id
 
         # 初始化上下文
         context = ProcessContext(
@@ -322,14 +322,14 @@ class Processor:
         Args:
             messages: OpenAI 格式的消息列表
             request_id: 请求 ID
-            session_id: 会话 ID（格式: app_id#sample_id#task_id）
+            session_id: 会话 ID（格式: app_id;sample_id;task_id）
             **request_params: 请求参数（如 max_tokens, temperature 等）
 
         Yields:
             OpenAI 格式的流式响应块
         """
         # 构建 unique_id
-        unique_id = f"{session_id}#{request_id}" if session_id else request_id
+        unique_id = f"{session_id};{request_id}" if session_id else request_id
 
         # 初始化上下文
         context = ProcessContext(

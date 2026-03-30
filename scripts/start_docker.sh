@@ -5,6 +5,9 @@
 # 切换到 dockers 目录
 cd "$(dirname "$0")/../dockers"
 
+# 停止所有服务
+docker-compose down
+
 # 启动所有服务
 docker-compose up -d
 

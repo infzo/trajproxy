@@ -86,7 +86,7 @@ class TestModelsAPI:
                 "model_name": test_model_name,
                 "url": "http://localhost:1234",  # 测试用的推理服务地址
                 "api_key": "sk-test-key",
-                "tokenizer": "test/tokenizer",
+                "tokenizer_path": "Qwen/Qwen3.5-2B",
                 "token_in_token_out": False
             }
         )
@@ -139,7 +139,7 @@ class TestModelsAPI:
                 "model_name": registered_model_name,
                 "url": "http://localhost:1234",
                 "api_key": "sk-test-key",
-                "tokenizer": "test/tokenizer"
+                "tokenizer_path": "test/tokenizer"
             }
         )
 

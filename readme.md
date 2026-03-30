@@ -541,10 +541,8 @@ print(response.choices[0].message.content)
 ### 案例 5：查询对话历史
 
 ```bash
-curl "http://localhost:12300/transcript/trajectory?session_id=app_001%23sample_001%23task_001"
+curl "http://localhost:12300/transcript/trajectory?session_id=app_001;sample_001;task_001"
 ```
-
-注意：URL 中的 `#` 需要转义为 `%23`。
 
 ---
 
@@ -590,7 +588,7 @@ psql -h localhost -U llmproxy -d litellm
 SELECT * FROM request_records ORDER BY start_time DESC LIMIT 10;
 
 # 查询特定会话的记录
-SELECT * FROM request_records WHERE session_id = 'app_001#sample_001#task_001';
+SELECT * FROM request_records WHERE session_id = 'app_001;sample_001;task_001';
 ```
 
 **Docker 容器模式：**
@@ -602,7 +600,7 @@ docker-compose exec db psql -U llmproxy -d litellm
 SELECT * FROM request_records ORDER BY start_time DESC LIMIT 10;
 
 # 查询特定会话的记录
-SELECT * FROM request_records WHERE session_id = 'app_001#sample_001#task_001';
+SELECT * FROM request_records WHERE session_id = 'app_001;sample_001;task_001';
 ```
 
 ### 查看日志

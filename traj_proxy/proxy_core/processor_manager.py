@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 class RegisterModelRequest(BaseModel):
     """注册模型请求"""
-    job_id: str = Field(default="", description="作业ID，空字符串表示全局模型")
+    run_id: str = Field(default="", description="运行ID，空字符串表示全局模型")
     model_name: str = Field(..., description="模型名称")
     url: str = Field(..., description="Infer 服务 URL")
     api_key: str = Field(..., description="API 密钥")
@@ -39,7 +39,7 @@ class RegisterModelRequest(BaseModel):
 class RegisterModelResponse(BaseModel):
     """注册模型响应"""
     status: str
-    job_id: str
+    run_id: str
     model_name: str
     detail: dict
 
@@ -47,7 +47,7 @@ class RegisterModelResponse(BaseModel):
 class DeleteModelResponse(BaseModel):
     """删除模型响应"""
     status: str
-    job_id: str
+    run_id: str
     model_name: str
     deleted: bool
 
@@ -71,11 +71,11 @@ class ListModelsResponse(BaseModel):
 class ProcessorManager:
     """多模型处理器管理器
 
-    管理 (job_id, model_name) 到 Processor 的映射，支持：
+    管理 (run_id, model_name) 到 Processor 的映射，支持：
     - 动态注册新模型
     - 删除已注册模型
-    - 根据 job_id 和 model_name 获取 Processor
-    - 从 session_id 解析 job_id 进行路由
+    - 根据 run_id 和 model_name 获取 Processor
+    - 从 session_id 解析 run_id 进行路由
     - 列出所有已注册模型
     """
 
@@ -86,7 +86,7 @@ class ProcessorManager:
             db_manager: 数据库管理器（所有 Processor 共享）
         """
         self.db_manager = db_manager
-        # 分离存储：预置模型和动态模型，键为 (job_id, model_name) 元组
+        # 分离存储：预置模型和动态模型，键为 (run_id, model_name) 元组
         self.config_processors: Dict[Tuple[str, str], Processor] = {}  # 预置模型（不存数据库）
         self.dynamic_processors: Dict[Tuple[str, str], Processor] = {}  # 动态模型（从数据库同步）
 
@@ -108,7 +108,7 @@ class ProcessorManager:
         api_key: str,
         tokenizer_path: str,
         token_in_token_out: bool = False,
-        job_id: str = "",
+        run_id: str = "",
         tool_parser: str = "",
         reasoning_parser: str = ""
     ) -> Processor:
@@ -120,7 +120,7 @@ class ProcessorManager:
             api_key: API 密钥
             tokenizer_path: Tokenizer 路径
             token_in_token_out: 是否使用 Token-in-Token-out 模式
-            job_id: 作业ID，空字符串表示全局模型
+            run_id: 运行ID，空字符串表示全局模型
             tool_parser: Tool parser 名称
             reasoning_parser: Reasoning parser 名称
 
@@ -138,7 +138,7 @@ class ProcessorManager:
 
         processor = Processor(
             model=model_name,
-            job_id=job_id,
+            run_id=run_id,
             tokenizer_path=tokenizer_path,
             request_repository=self.request_repository,
             infer_client=infer_client,
@@ -199,13 +199,13 @@ class ProcessorManager:
         try:
             # 只获取动态模型
             db_dynamic_models = await self.model_registry.get_all()
-            db_dynamic_model_keys = {(m.job_id, m.model_name) for m in db_dynamic_models}
+            db_dynamic_model_keys = {(m.run_id, m.model_name) for m in db_dynamic_models}
 
             local_dynamic_model_keys = set(self.dynamic_processors.keys())
 
             # 添加或更新动态模型
             for config in db_dynamic_models:
-                key = (config.job_id, config.model_name)
+                key = (config.run_id, config.model_name)
                 if key not in self.dynamic_processors:
                     # 新增动态模型
                     self._create_processor_from_model_config(config, target='dynamic')
@@ -221,7 +221,7 @@ class ProcessorManager:
             to_remove = local_dynamic_model_keys - db_dynamic_model_keys
             for key in to_remove:
                 del self.dynamic_processors[key]
-                logger.info(f"同步删除动态模型: job_id={key[0]}, model_name={key[1]}")
+                logger.info(f"同步删除动态模型: run_id={key[0]}, model_name={key[1]}")
 
         except Exception as e:
             import traceback
@@ -241,20 +241,20 @@ class ProcessorManager:
             api_key=config.api_key,
             tokenizer_path=config.tokenizer_path,
             token_in_token_out=config.token_in_token_out,
-            job_id=config.job_id,
+            run_id=config.run_id,
             tool_parser=getattr(config, 'tool_parser', ''),
             reasoning_parser=getattr(config, 'reasoning_parser', '')
         )
 
-        key = (config.job_id, config.model_name)
+        key = (config.run_id, config.model_name)
 
         # 根据目标选择字典
         if target == 'config':
             self.config_processors[key] = processor
-            logger.info(f"注册预置模型: job_id={config.job_id}, model_name={config.model_name}")
+            logger.info(f"注册预置模型: run_id={config.run_id}, model_name={config.model_name}")
         else:
             self.dynamic_processors[key] = processor
-            logger.info(f"注册动态模型: job_id={config.job_id}, model_name={config.model_name}")
+            logger.info(f"注册动态模型: run_id={config.run_id}, model_name={config.model_name}")
 
     async def register_dynamic_processor(
         self,
@@ -264,7 +264,7 @@ class ProcessorManager:
         tokenizer_path: str,
         token_in_token_out: bool = False,
         persist_to_db: bool = True,
-        job_id: str = "",
+        run_id: str = "",
         tool_parser: str = "",
         reasoning_parser: str = ""
     ) -> Processor:
@@ -277,7 +277,7 @@ class ProcessorManager:
             tokenizer_path: Tokenizer 路径（本地路径或 HuggingFace 模型名称）
             token_in_token_out: 是否使用 Token-in-Token-out 模式
             persist_to_db: 是否持久化到数据库（默认 True）
-            job_id: 作业ID，空字符串表示全局模型
+            run_id: 运行ID，空字符串表示全局模型
             tool_parser: Tool parser 名称
             reasoning_parser: Reasoning parser 名称
 
@@ -285,14 +285,14 @@ class ProcessorManager:
             新创建的 Processor 实例
 
         Raises:
-            ValueError: 如果 (job_id, model_name) 已存在（包括预置模型）或 tokenizer 不存在
+            ValueError: 如果 (run_id, model_name) 已存在（包括预置模型）或 tokenizer 不存在
             DatabaseError: 数据库操作失败
         """
-        key = (job_id, model_name)
+        key = (run_id, model_name)
 
         # 检查是否已存在（包括预置模型）
         if key in self.config_processors or key in self.dynamic_processors:
-            raise ValueError(f"模型 '{model_name}' 已存在 (job_id={job_id})")
+            raise ValueError(f"模型 '{model_name}' 已存在 (run_id={run_id})")
 
         # 解析 tokenizer 路径
         resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
@@ -304,14 +304,14 @@ class ProcessorManager:
             api_key=api_key,
             tokenizer_path=resolved_tokenizer_path,
             token_in_token_out=token_in_token_out,
-            job_id=job_id,
+            run_id=run_id,
             tool_parser=tool_parser,
             reasoning_parser=reasoning_parser
         )
 
         # 只存入 dynamic_processors
         self.dynamic_processors[key] = processor
-        logger.info(f"注册动态模型成功: job_id={job_id}, model_name={model_name}, url={url}, tokenizer={resolved_tokenizer_path}, token_in_token_out={token_in_token_out}, tool_parser={tool_parser}, reasoning_parser={reasoning_parser}")
+        logger.info(f"注册动态模型成功: run_id={run_id}, model_name={model_name}, url={url}, tokenizer={resolved_tokenizer_path}, token_in_token_out={token_in_token_out}, tool_parser={tool_parser}, reasoning_parser={reasoning_parser}")
 
         # 持久化到数据库（同步，快速失败）
         if persist_to_db:
@@ -322,7 +322,7 @@ class ProcessorManager:
                     api_key=api_key,
                     tokenizer_path=resolved_tokenizer_path,
                     token_in_token_out=token_in_token_out,
-                    job_id=job_id
+                    run_id=run_id
                 )
             except Exception as e:
                 # 数据库失败时，回滚本地注册
@@ -341,7 +341,7 @@ class ProcessorManager:
         api_key: str,
         tokenizer_path: str,
         token_in_token_out: bool = False,
-        job_id: str = "",
+        run_id: str = "",
         tool_parser: str = "",
         reasoning_parser: str = ""
     ) -> Processor:
@@ -353,7 +353,7 @@ class ProcessorManager:
             api_key: API 密钥
             tokenizer_path: Tokenizer 路径（本地路径或 HuggingFace 模型名称）
             token_in_token_out: 是否使用 Token-in-Token-out 模式
-            job_id: 作业ID，空字符串表示全局模型
+            run_id: 运行ID，空字符串表示全局模型
             tool_parser: Tool parser 名称
             reasoning_parser: Reasoning parser 名称
 
@@ -361,13 +361,13 @@ class ProcessorManager:
             新创建的 Processor 实例
 
         Raises:
-            ValueError: 如果 (job_id, model_name) 已存在（包括动态模型）或 tokenizer 不存在
+            ValueError: 如果 (run_id, model_name) 已存在（包括动态模型）或 tokenizer 不存在
         """
-        key = (job_id, model_name)
+        key = (run_id, model_name)
 
         # 检查是否已存在（包括动态模型）
         if key in self.config_processors or key in self.dynamic_processors:
-            raise ValueError(f"模型 '{model_name}' 已存在 (job_id={job_id})")
+            raise ValueError(f"模型 '{model_name}' 已存在 (run_id={run_id})")
 
         # 解析 tokenizer 路径
         resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
@@ -379,24 +379,24 @@ class ProcessorManager:
             api_key=api_key,
             tokenizer_path=resolved_tokenizer_path,
             token_in_token_out=token_in_token_out,
-            job_id=job_id,
+            run_id=run_id,
             tool_parser=tool_parser,
             reasoning_parser=reasoning_parser
         )
 
         # 只存入 config_processors
         self.config_processors[key] = processor
-        logger.info(f"注册预置模型成功: job_id={job_id}, model_name={model_name}（不持久化到数据库）")
+        logger.info(f"注册预置模型成功: run_id={run_id}, model_name={model_name}（不持久化到数据库）")
 
         return processor
 
-    async def unregister_dynamic_processor(self, model_name: str, persist_to_db: bool = True, job_id: str = "") -> bool:
+    async def unregister_dynamic_processor(self, model_name: str, persist_to_db: bool = True, run_id: str = "") -> bool:
         """删除已注册的 Processor（优先删除动态模型）
 
         Args:
             model_name: 模型名称
             persist_to_db: 是否从数据库删除（默认 True）
-            job_id: 作业ID，空字符串表示全局模型
+            run_id: 运行ID，空字符串表示全局模型
 
         Returns:
             是否成功删除（False 表示模型不存在或为预置模型）
@@ -404,28 +404,28 @@ class ProcessorManager:
         Raises:
             DatabaseError: 数据库操作失败
         """
-        key = (job_id, model_name)
+        key = (run_id, model_name)
 
         # 优先从 dynamic_processors 删除
         if key in self.dynamic_processors:
             del self.dynamic_processors[key]
-            logger.info(f"删除动态模型成功: job_id={job_id}, model_name={model_name}")
+            logger.info(f"删除动态模型成功: run_id={run_id}, model_name={model_name}")
             deleted = True
         elif key in self.config_processors:
             # 预置模型不允许通过 API 删除
-            logger.warning(f"尝试删除预置模型（不允许）: job_id={job_id}, model_name={model_name}")
+            logger.warning(f"尝试删除预置模型（不允许）: run_id={run_id}, model_name={model_name}")
             return False
         else:
-            logger.warning(f"尝试删除不存在的模型: job_id={job_id}, model_name={model_name}")
+            logger.warning(f"尝试删除不存在的模型: run_id={run_id}, model_name={model_name}")
             return False
 
         # 从数据库删除（同步，快速失败）
         if persist_to_db and deleted:
             try:
-                success = await self.model_registry.unregister(model_name, job_id)
+                success = await self.model_registry.unregister(model_name, run_id)
                 if not success:
                     # 数据库中不存在，记录警告但不抛出异常
-                    logger.warning(f"数据库中未找到模型: job_id={job_id}, model_name={model_name}")
+                    logger.warning(f"数据库中未找到模型: run_id={run_id}, model_name={model_name}")
             except Exception as e:
                 import traceback
                 logger.error(f"从数据库删除模型失败: {e}\n{traceback.format_exc()}")
@@ -433,50 +433,69 @@ class ProcessorManager:
 
         return deleted
 
-    def get_processor(self, job_id: str, model_name: str) -> Optional[Processor]:
-        """根据 job_id 和 model_name 获取 Processor（优先返回动态模型）
+    def get_processor(self, run_id: str, model_name: str) -> Optional[Processor]:
+        """根据 run_id 和 model_name 获取 Processor（优先返回动态模型）
 
         Args:
-            job_id: 作业ID
+            run_id: 运行ID
             model_name: 模型名称
 
         Returns:
             Processor 实例，如果不存在则返回 None
         """
-        key = (job_id, model_name)
+        key = (run_id, model_name)
         return self.dynamic_processors.get(key) or self.config_processors.get(key)
 
     def get_processor_by_session(self, model_name: str, session_id: str) -> Optional[Processor]:
         """根据 session_id 和 model_name 获取 Processor
 
+        如果 session_id 为空，则 run_id 等于 model_name。
+        如果 run_id 为空，则 run_id 等于 model_name。
+
         Args:
             model_name: 模型名称
-            session_id: 会话ID，格式为 {job_id}#{sample_id}#{task_id}
+            session_id: 会话ID，格式为 {run_id};{sample_id};{task_id}
 
         Returns:
             Processor 实例，如果不存在则返回 None
         """
-        job_id = self._extract_job_id(session_id)
-        return self.get_processor(job_id, model_name)
+        # 如果 session_id 为空，run_id 使用 model_name
+        if not session_id:
+            run_id = model_name
+        else:
+            run_id = self._extract_run_id(session_id)
+            # 如果 run_id 为空，使用 model_name
+            if not run_id:
+                run_id = model_name
 
-    def _extract_job_id(self, session_id: str) -> str:
-        """从 session_id 提取作业ID
+        processor = self.get_processor(run_id, model_name)
+
+        # 如果找不到特定 run_id 的模型，回退到全局模型
+        if processor is None and run_id != "":
+            processor = self.get_processor("", model_name)
+            if processor:
+                logger.debug(f"使用全局模型: model_name={model_name} (session_id={session_id})")
+
+        return processor
+
+    def _extract_run_id(self, session_id: str) -> str:
+        """从 session_id 提取运行ID
 
         Args:
-            session_id: 会话ID，格式为 {job_id}#{sample_id}#{task_id}
+            session_id: 会话ID，格式为 {run_id};{sample_id};{task_id}
 
         Returns:
-            作业ID
+            运行ID
         """
-        if session_id and '#' in session_id:
-            return session_id.split('#')[0]
+        if session_id and ';' in session_id:
+            return session_id.split(';')[0]
         return ""
 
-    def get_processor_or_raise(self, job_id: str, model_name: str) -> Processor:
-        """根据 job_id 和 model_name 获取 Processor，不存在时抛出异常
+    def get_processor_or_raise(self, run_id: str, model_name: str) -> Processor:
+        """根据 run_id 和 model_name 获取 Processor，不存在时抛出异常
 
         Args:
-            job_id: 作业ID
+            run_id: 运行ID
             model_name: 模型名称
 
         Returns:
@@ -485,36 +504,36 @@ class ProcessorManager:
         Raises:
             ValueError: 如果模型不存在
         """
-        processor = self.get_processor(job_id, model_name)
+        processor = self.get_processor(run_id, model_name)
         if processor is None:
-            raise ValueError(f"模型 '{model_name}' 未注册 (job_id={job_id})")
+            raise ValueError(f"模型 '{model_name}' 未注册 (run_id={run_id})")
         return processor
 
     def list_models(self) -> List[Tuple[str, str]]:
         """列出所有已注册的模型（预置 + 动态）
 
         Returns:
-            (job_id, model_name) 元组列表
+            (run_id, model_name) 元组列表
         """
         all_keys = set(self.config_processors.keys()) | set(self.dynamic_processors.keys())
         return sorted(all_keys)
 
-    def get_processor_info(self, job_id: str, model_name: str) -> Optional[Dict]:
+    def get_processor_info(self, run_id: str, model_name: str) -> Optional[Dict]:
         """获取 Processor 的详细信息
 
         Args:
-            job_id: 作业ID
+            run_id: 运行ID
             model_name: 模型名称
 
         Returns:
             包含模型信息的字典，如果不存在则返回 None
         """
-        processor = self.get_processor(job_id, model_name)
+        processor = self.get_processor(run_id, model_name)
         if processor is None:
             return None
 
         return {
-            "job_id": job_id,
+            "run_id": run_id,
             "model_name": processor.model,
             "tokenizer_path": processor.tokenizer_path,
             "token_in_token_out": processor.token_in_token_out,
@@ -546,7 +565,7 @@ class ProcessorManager:
             ValueError: 如果 tokenizer 不存在
         """
         # 如果是路径，直接使用
-        if os.path.sep in tokenizer or os.path.isabs(tokenizer):
+        if os.path.isabs(tokenizer):
             if not os.path.exists(tokenizer):
                 raise ValueError(f"Tokenizer 路径不存在: {tokenizer}")
             return tokenizer

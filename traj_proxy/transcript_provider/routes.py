@@ -32,7 +32,7 @@ async def get_trajectory(
     根据 session_id 获取所有轨迹记录
 
     参数:
-        session_id: 会话ID (格式: app_id#sample_id#task_id)
+        session_id: 会话ID (格式: app_id;sample_id;task_id)
         limit: 最多返回的记录数，默认为100
 
     返回:

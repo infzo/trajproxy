@@ -46,7 +46,7 @@ TrajProxy 是一个分布式 LLM 请求代理系统，提供 OpenAI 兼容的聊
 |--------|------|------|------|
 | Content-Type | string | 是 | 固定值: `application/json` |
 | Authorization | string | 否 | Bearer Token 认证 |
-| x-session-id | string | 是 | 会话 ID，用于请求追踪和模型路由，格式: `app_id#sample_id#task_id`（解析 job_id 用于路由到正确的 processor）|
+| x-session-id | string | 否 | 会话 ID，用于请求追踪和模型路由，格式: `run_id;sample_id;task_id`。如果为空，run_id 将使用 model_name|
 
 **请求体**:
 ```json
@@ -115,7 +115,7 @@ TrajProxy 是一个分布式 LLM 请求代理系统，提供 OpenAI 兼容的聊
 curl -X POST http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-1234" \
-  -H "x-session-id: app_001#sample_001#task_001" \
+  -H "x-session-id: app_001;sample_001;task_001" \
   -d '{
     "model": "qwen3.5-2b",
     "messages": [
@@ -129,7 +129,7 @@ curl -X POST http://localhost:4000/v1/chat/completions \
 # 或直接调用 ProxyWorker
 curl -X POST http://localhost:12300/proxy/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "x-session-id: app_001#sample_001#task_001" \
+  -H "x-session-id: app_001;sample_001;task_001" \
   -d '{
     "model": "qwen3.5-2b",
     "messages": [
@@ -188,24 +188,28 @@ curl -X POST http://localhost:12300/proxy/v1/chat/completions \
 **请求体**:
 ```json
 {
-  "job_id": "",
+  "run_id": "",
   "model_name": "gpt-4",
   "url": "https://api.openai.com/v1",
   "api_key": "sk-xxxxx",
   "tokenizer_path": "/path/to/tokenizer",
-  "token_in_token_out": false
+  "token_in_token_out": false,
+  "tool_parser": "",
+  "reasoning_parser": ""
 }
 ```
 
 **请求参数说明**:
 | 参数名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
-| job_id | string | 否 | 作业ID，空字符串表示全局模型，默认为空 |
+| run_id | string | 否 | 运行ID，空字符串表示全局模型，默认为空。如果为空，将使用 model_name 作为 run_id |
 | model_name | string | 是 | 模型名称 |
 | url | string | 是 | Infer 服务 URL |
 | api_key | string | 是 | API 密钥 |
 | tokenizer_path | string | 是 | Tokenizer 路径（本地路径或 HuggingFace 模型名称）|
 | token_in_token_out | boolean | 否 | 是否使用 Token-in-Token-out 模式，默认 false |
+| tool_parser | string | 否 | Tool Parser 名称，支持: deepseek_v3, deepseek_v31, deepseek_v32, qwen3_coder, qwen_xml, glm45, glm47, llama3_json |
+| reasoning_parser | string | 否 | Reasoning Parser 名称，支持: deepseek_r1, deepseek_v3, deepseek, qwen3, glm45 |
 
 **响应示例 (成功)**:
 ```json
@@ -241,7 +245,7 @@ curl -X POST http://localhost:12300/proxy/v1/chat/completions \
 **查询参数**:
 | 参数名 | 类型 | 必填 | 默认值 | 说明 |
 |--------|------|------|--------|------|
-| job_id | string | 否 | "" | 作业ID，空字符串表示全局模型 |
+| run_id | string | 否 | "" | 运行ID，空字符串表示全局模型 |
 
 **响应示例 (成功)**:
 ```json
@@ -302,19 +306,19 @@ curl -X POST http://localhost:12300/proxy/v1/chat/completions \
 **查询参数**:
 | 参数名 | 类型 | 必填 | 默认值 | 说明 |
 |--------|------|------|--------|------|
-| session_id | string | 是 | - | 会话 ID，格式为 `app_id#sample_id#task_id` |
+| session_id | string | 是 | - | 会话 ID，格式为 `run_id;sample_id;task_id` |
 | limit | integer | 否 | 10000 | 最多返回的记录数 |
 
 **响应示例 (成功)**:
 ```json
 {
-  "session_id": "app_001#sample_001#task_001",
+  "session_id": "app_001;sample_001;task_001",
   "count": 2,
   "records": [
     {
-      "unique_id": "app_001#sample_001#task_001#req-001",
+      "unique_id": "app_001;sample_001;task_001;req-001",
       "request_id": "req-001",
-      "session_id": "app_001#sample_001#task_001",
+      "session_id": "app_001;sample_001;task_001",
       "model": "qwen3.5-2b",
       "tokenizer_path": "/path/to/tokenizer",
       "prompt_text": "你好",
@@ -324,9 +328,9 @@ curl -X POST http://localhost:12300/proxy/v1/chat/completions \
       "start_time": "2024-01-01T00:00:00Z"
     },
     {
-      "unique_id": "app_001#sample_001#task_001#req-002",
+      "unique_id": "app_001;sample_001;task_001;req-002",
       "request_id": "req-002",
-      "session_id": "app_001#sample_001#task_001",
+      "session_id": "app_001;sample_001;task_001",
       "model": "qwen3.5-2b",
       "tokenizer_path": "/path/to/tokenizer",
       "prompt_text": "介绍一下自己",
@@ -342,7 +346,7 @@ curl -X POST http://localhost:12300/proxy/v1/chat/completions \
 **记录字段说明**:
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
-| unique_id | string | 唯一标识，格式为 `{session_id}#{request_id}` |
+| unique_id | string | 唯一标识，格式为 `{session_id};{request_id}` |
 | request_id | string | 请求 ID |
 | session_id | string | 会话 ID |
 | model | string | 使用的模型名称 |
@@ -362,8 +366,7 @@ curl -X POST http://localhost:12300/proxy/v1/chat/completions \
 
 **cURL 示例**:
 ```bash
-# 注意：URL 中的 # 需要转义为 %23
-curl "http://localhost:12300/transcript/trajectory?session_id=app_001%23sample_001%23task_001&limit=100"
+curl "http://localhost:12300/transcript/trajectory?session_id=app_001;sample_001;task_001&limit=100"
 ```
 
 ---
@@ -395,7 +398,7 @@ response = requests.post(
     headers={
         "Content-Type": "application/json",
         "Authorization": "Bearer sk-1234",
-        "x-session-id": "app_001#sample_001#task_001"
+        "x-session-id": "app_001;sample_001;task_001"
     },
     json={
         "model": "qwen3.5-2b",
@@ -409,7 +412,7 @@ response = requests.post(
     f"{WORKER_BASE_URL}/proxy/v1/chat/completions",
     headers={
         "Content-Type": "application/json",
-        "x-session-id": "app_001#sample_001#task_001"
+        "x-session-id": "app_001;sample_001;task_001"
     },
     json={
         "model": "qwen3.5-2b",
@@ -430,11 +433,11 @@ response = requests.post(
 )
 print(response.json())
 
-# 4. 查询轨迹（注意 # 需要转义）
+# 4. 查询轨迹
 response = requests.get(
     f"{WORKER_BASE_URL}/transcript/trajectory",
     params={
-        "session_id": "app_001#sample_001#task_001",
+        "session_id": "app_001;sample_001;task_001",
         "limit": 100
     }
 )
@@ -461,7 +464,7 @@ client = OpenAI(
 response = client.chat.completions.create(
     model="qwen3.5-2b",
     messages=[{"role": "user", "content": "你好"}],
-    extra_headers={"x-session-id": "app_001#sample_001#task_001"}
+    extra_headers={"x-session-id": "app_001;sample_001;task_001"}
 )
 print(response.choices[0].message.content)
 ```
@@ -480,7 +483,7 @@ client = OpenAI(
 response = client.chat.completions.create(
     model="qwen3.5-2b",
     messages=[{"role": "user", "content": "你好"}],
-    extra_headers={"x-session-id": "app_001#sample_001#task_001"}
+    extra_headers={"x-session-id": "app_001;sample_001;task_001"}
 )
 print(response.choices[0].message.content)
 ```

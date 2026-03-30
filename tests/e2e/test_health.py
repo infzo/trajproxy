@@ -21,7 +21,7 @@ class TestHealthCheck:
         - 返回状态码 200
         - 响应体包含 {"status": "ok"}
         """
-        response = proxy_client.get(f"{PROXY_URL}/proxy/health")
+        response = proxy_client.get(f"{PROXY_URL}/health")
 
         assert response.status_code == 200, f"健康检查失败: {response.text}"
 
@@ -38,7 +38,7 @@ class TestHealthCheck:
         import time
 
         start = time.time()
-        response = proxy_client.get(f"{PROXY_URL}/proxy/health")
+        response = proxy_client.get(f"{PROXY_URL}/health")
         elapsed = time.time() - start
 
         assert response.status_code == 200

@@ -22,7 +22,7 @@ class TestTrajectoryAPI:
         - 返回状态码 200（API 设计如此，返回空列表）
         - 响应包含 session_id 和空的 records
         """
-        session_id = "nonexistent_session_xyz#sample_001#task_001"
+        session_id = "nonexistent_session_xyz;sample_001;task_001"
 
         response = proxy_client.get(
             f"{PROXY_URL}/transcript/trajectory",

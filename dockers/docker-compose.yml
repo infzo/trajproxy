@@ -53,7 +53,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ../postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -d litellm -U llmproxy"]
       interval: 1s
@@ -87,9 +87,9 @@ services:
     ports:
       - "12300-12320:12300-12320"
     volumes:
-      - ../configs/config.yaml:/app/config.yaml
+      - ../traj_proxy:/app/traj_proxy
+      - ../configs/config.yaml:/app/configs/config.yaml
       - ../logs:/app/logs
-      - /Users/liujiang/.lmstudio/models/mlx-community:/Users/liujiang/.lmstudio/models/mlx-community
     environment:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy
@@ -99,7 +99,7 @@ services:
       - db
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:12300/proxy/health')\""]
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:12300/health')\""]
       interval: 30s
       timeout: 10s
       retries: 3

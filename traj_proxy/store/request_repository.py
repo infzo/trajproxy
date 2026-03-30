@@ -91,7 +91,7 @@ class RequestRepository:
         按创建时间倒序排列，用于前缀匹配。
 
         Args:
-            session_id: 会话 ID (格式: app_id#sample_id#task_id)
+            session_id: 会话 ID (格式: app_id;sample_id;task_id)
             limit: 最多返回的记录数
 
         Returns:

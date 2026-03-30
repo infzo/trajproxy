@@ -22,8 +22,8 @@ class ProcessContext:
     model: str
     messages: List[Dict[str, Any]]  # OpenAI Message 格式
     request_params: Dict[str, Any] = field(default_factory=dict)
-    session_id: Optional[str] = None  # 格式: app_id#sample_id#task_id
-    unique_id: Optional[str] = None   # 格式: {session_id}#{req_id}
+    session_id: Optional[str] = None  # 格式: app_id;sample_id;task_id
+    unique_id: Optional[str] = None   # 格式: {session_id};{req_id}
 
     # 中间数据 - Prompt 相关
     prompt_text: Optional[str] = None

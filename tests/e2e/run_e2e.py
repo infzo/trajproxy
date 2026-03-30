@@ -66,7 +66,7 @@ def check_service() -> bool:
     from tests.e2e.config import PROXY_URL
 
     try:
-        response = requests.get(f"{PROXY_URL}/proxy/health", timeout=5)
+        response = requests.get(f"{PROXY_URL}/health", timeout=5)
         return response.status_code == 200
     except Exception:
         return False

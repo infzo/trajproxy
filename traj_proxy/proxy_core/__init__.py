@@ -43,28 +43,3 @@ CacheError = exceptions_module.CacheError
 InferServiceError = exceptions_module.InferServiceError
 DatabaseError = exceptions_module.DatabaseError
 SessionIdError = exceptions_module.SessionIdError
-
-
-def parse_and_validate_session_id(session_id: str) -> tuple[str, str, str]:
-    """解析并验证 Session ID
-
-    Args:
-        session_id: 格式为 app_id#sample_id#task_id
-
-    Returns:
-        (app_id, sample_id, task_id)
-
-    Raises:
-        SessionIdError: 格式错误时抛出
-    """
-    parts = session_id.split('#')
-    if len(parts) != 3:
-        raise SessionIdError(
-            f"Session ID 格式错误，应为 app_id#sample_id#task_id，实际为: {session_id}"
-        )
-    app_id, sample_id, task_id = parts
-    if not app_id or not sample_id or not task_id:
-        raise SessionIdError(
-            f"Session ID 部分不能为空: {session_id}"
-        )
-    return app_id, sample_id, task_id
