@@ -76,6 +76,22 @@ def get_database_config() -> Dict:
     return get_config().get("database", {})
 
 
+def get_database_pool_config() -> Dict:
+    """
+    获取数据库连接池配置
+
+    返回:
+        连接池配置字典，包含 min_size, max_size, timeout
+    """
+    db_config = get_database_config()
+    pool_config = db_config.get("pool", {})
+    return {
+        "min_size": pool_config.get("min_size", 2),
+        "max_size": pool_config.get("max_size", 20),
+        "timeout": pool_config.get("timeout", 30)
+    }
+
+
 def get_ray_config() -> Dict:
     """
     获取 ray 配置
@@ -84,3 +100,43 @@ def get_ray_config() -> Dict:
         ray 配置字典
     """
     return get_config().get("ray", {})
+
+
+def get_processor_manager_config() -> Dict:
+    """
+    获取 ProcessorManager 配置
+
+    返回:
+        processor_manager 配置字典
+    """
+    return get_config().get("processor_manager", {})
+
+
+def get_sync_interval() -> int:
+    """
+    获取模型同步间隔
+
+    返回:
+        同步间隔（秒）
+    """
+    return get_processor_manager_config().get("sync_interval", 30)
+
+
+def get_sync_max_retries() -> int:
+    """
+    获取同步失败最大重试次数
+
+    返回:
+        最大重试次数
+    """
+    return get_processor_manager_config().get("sync_max_retries", 3)
+
+
+def get_sync_retry_delay() -> int:
+    """
+    获取同步重试初始延迟
+
+    返回:
+        初始延迟（秒）
+    """
+    return get_processor_manager_config().get("sync_retry_delay", 5)

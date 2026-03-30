@@ -7,6 +7,7 @@ InferClient - Infer 服务客户端
 from typing import Dict, Any, AsyncIterator, List, Union, Optional
 import httpx
 import json
+import asyncio
 
 from traj_proxy.exceptions import InferServiceError
 from traj_proxy.utils.logger import get_logger
@@ -23,7 +24,13 @@ class InferClient:
 
     提供 send_completion (非流式) 和 send_completion_stream (流式) 两种调用方式。
     prompt 参数支持 string 或 List[int] (token ids)，兼容 OpenAI 标准。
+
+    使用连接池复用 HTTP 连接，提高性能。
     """
+
+    # 类级别的客户端连接池（延迟初始化）
+    _shared_client: Optional[httpx.AsyncClient] = None
+    _client_lock = asyncio.Lock()
 
     def __init__(
         self,
@@ -43,6 +50,38 @@ class InferClient:
 
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+
+    @classmethod
+    async def get_shared_client(cls) -> httpx.AsyncClient:
+        """获取共享的 AsyncClient 实例（单例模式）
+
+        Returns:
+            共享的 httpx.AsyncClient 实例
+        """
+        if cls._shared_client is None or cls._shared_client.is_closed:
+            async with cls._client_lock:
+                # 双重检查
+                if cls._shared_client is None or cls._shared_client.is_closed:
+                    cls._shared_client = httpx.AsyncClient(
+                        timeout=httpx.Timeout(300.0, connect=60.0),
+                        limits=httpx.Limits(
+                            max_connections=100,
+                            max_keepalive_connections=20,
+                            keepalive_expiry=30.0
+                        )
+                    )
+                    logger.debug("InferClient: 创建新的共享 HTTP 客户端")
+        return cls._shared_client
+
+    @classmethod
+    async def close_shared_client(cls):
+        """关闭共享的 AsyncClient 实例"""
+        if cls._shared_client is not None and not cls._shared_client.is_closed:
+            async with cls._client_lock:
+                if cls._shared_client is not None and not cls._shared_client.is_closed:
+                    await cls._shared_client.aclose()
+                    cls._shared_client = None
+                    logger.debug("InferClient: 关闭共享 HTTP 客户端")
 
     def _build_request_body(
         self,
@@ -120,11 +159,11 @@ class InferClient:
 
         logger.debug(f"发送 Infer 请求: url={url}, model={model}, prompt_type={type(prompt).__name__}")
         try:
-            async with httpx.AsyncClient(timeout=300) as client:
-                response = await client.post(url, json=request_body, headers=headers)
-                response.raise_for_status()
-                logger.debug(f"Infer 响应: status={response.status_code}")
-                return response.json()
+            client = await self.get_shared_client()
+            response = await client.post(url, json=request_body, headers=headers)
+            response.raise_for_status()
+            logger.debug(f"Infer 响应: status={response.status_code}")
+            return response.json()
         except httpx.HTTPStatusError as e:
             raise InferServiceError(f"Infer 服务请求失败: {e.response.status_code} - {e.response.text}")
         except Exception as e:
@@ -160,18 +199,18 @@ class InferClient:
         request_body = self._build_request_body(prompt, model, stream=True, **kwargs)
 
         try:
-            async with httpx.AsyncClient(timeout=300) as client:
-                async with client.stream("POST", url, json=request_body, headers=headers) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                            if data_str == "[DONE]":
-                                break
-                            try:
-                                yield json.loads(data_str)
-                            except json.JSONDecodeError:
-                                continue
+            client = await self.get_shared_client()
+            async with client.stream("POST", url, json=request_body, headers=headers) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            yield json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
         except httpx.HTTPStatusError as e:
             raise InferServiceError(f"Infer 服务流式请求失败: {e.response.status_code} - {e.response.text}")
         except Exception as e:

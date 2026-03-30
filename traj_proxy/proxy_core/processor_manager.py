@@ -17,6 +17,7 @@ from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.store.models import ModelConfig
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
+from traj_proxy.utils.config import get_sync_interval, get_sync_max_retries, get_sync_retry_delay
 
 logger = get_logger(__name__)
 
@@ -29,7 +30,7 @@ class RegisterModelRequest(BaseModel):
     model_name: str = Field(..., description="模型名称")
     url: str = Field(..., description="Infer 服务 URL")
     api_key: str = Field(..., description="API 密钥")
-    tokenizer: str = Field(..., description="Tokenizer（路径或 HF 模型名称）")
+    tokenizer_path: str = Field(..., description="Tokenizer 路径（本地路径或 HuggingFace 模型名称）")
     token_in_token_out: bool = Field(default=False, description="是否使用 Token-in-Token-out 模式")
 
 
@@ -91,9 +92,12 @@ class ProcessorManager:
         self.model_registry = ModelRepository(db_manager.pool)
         self.request_repository = RequestRepository(db_manager.pool)
         self._sync_task: Optional[asyncio.Task] = None
-        self._sync_interval = 30  # 轮询间隔（秒）
+        # 从配置读取同步参数
+        self._sync_interval = get_sync_interval()
+        self._sync_max_retries = get_sync_max_retries()
+        self._sync_retry_delay = get_sync_retry_delay()
 
-        logger.info("ProcessorManager 初始化完成")
+        logger.info(f"ProcessorManager 初始化完成，同步间隔: {self._sync_interval}秒")
 
     def _create_processor(
         self,
@@ -154,33 +158,32 @@ class ProcessorManager:
 
     async def _periodic_sync(self):
         """定期从数据库同步模型配置（带重试机制）"""
-        max_retries = 3
-        retry_delay = 5  # 初始重试延迟（秒）
-        base_delay = 30   # 同步间隔和错误等待基础时间
+        retry_count = 0
+        current_retry_delay = self._sync_retry_delay
 
         while True:
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    await asyncio.sleep(base_delay)
-                    await self._sync_from_db()
-                    logger.debug("模型同步完成")
-                    break  # 成功完成，跳出重试循环
-                except DatabaseError as e:
-                    retry_count += 1
-                    if retry_count >= max_retries:
-                        logger.error(f"模型同步失败（达到最大重试次数 {max_retries}）: {e}")
-                        # 等待后重新开始下一轮同步
-                        await asyncio.sleep(base_delay)
-                        break
-                    else:
-                        delay = retry_delay * (2 ** (retry_count - 1))  # 指数退避
-                        logger.warning(f"模型同步失败（第 {retry_count}/{max_retries} 次），{delay}秒后重试: {e}")
-                        await asyncio.sleep(delay)
-                except Exception as e:
-                    logger.error(f"模型同步出现非数据库错误: {e}")
-                    await asyncio.sleep(base_delay)
-                    break
+            try:
+                await asyncio.sleep(self._sync_interval)
+                await self._sync_from_db()
+                logger.debug("模型同步完成")
+                # 成功后重置重试计数
+                retry_count = 0
+                current_retry_delay = self._sync_retry_delay
+            except DatabaseError as e:
+                retry_count += 1
+                if retry_count >= self._sync_max_retries:
+                    logger.error(f"模型同步失败（达到最大重试次数 {self._sync_max_retries}）: {e}")
+                    # 重置重试计数，等待下一轮
+                    retry_count = 0
+                    current_retry_delay = self._sync_retry_delay
+                else:
+                    # 指数退避
+                    delay = current_retry_delay * (2 ** (retry_count - 1))
+                    logger.warning(f"模型同步失败（第 {retry_count}/{self._sync_max_retries} 次），{delay}秒后重试: {e}")
+                    await asyncio.sleep(delay)
+            except Exception as e:
+                logger.error(f"模型同步出现非数据库错误: {e}")
+                await asyncio.sleep(self._sync_interval)
 
     async def _sync_from_db(self):
         """从数据库同步动态模型到内存（预置模型不受影响）"""
@@ -246,7 +249,7 @@ class ProcessorManager:
         model_name: str,
         url: str,
         api_key: str,
-        tokenizer: str,
+        tokenizer_path: str,
         token_in_token_out: bool = False,
         persist_to_db: bool = True,
         job_id: str = ""
@@ -257,7 +260,7 @@ class ProcessorManager:
             model_name: 模型名称
             url: Infer 服务 URL
             api_key: API 密钥
-            tokenizer: Tokenizer（路径或 HF 模型名称）
+            tokenizer_path: Tokenizer 路径（本地路径或 HuggingFace 模型名称）
             token_in_token_out: 是否使用 Token-in-Token-out 模式
             persist_to_db: 是否持久化到数据库（默认 True）
             job_id: 作业ID，空字符串表示全局模型
@@ -275,22 +278,22 @@ class ProcessorManager:
         if key in self.config_processors or key in self.dynamic_processors:
             raise ValueError(f"模型 '{model_name}' 已存在 (job_id={job_id})")
 
-        # 转换 tokenizer 到 tokenizer_path
-        tokenizer_path = self._resolve_tokenizer_path(tokenizer)
+        # 解析 tokenizer 路径
+        resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
 
         # 创建 Processor
         processor = self._create_processor(
             model_name=model_name,
             url=url,
             api_key=api_key,
-            tokenizer_path=tokenizer_path,
+            tokenizer_path=resolved_tokenizer_path,
             token_in_token_out=token_in_token_out,
             job_id=job_id
         )
 
         # 只存入 dynamic_processors
         self.dynamic_processors[key] = processor
-        logger.info(f"注册动态模型成功: job_id={job_id}, model_name={model_name}, url={url}, tokenizer={tokenizer_path}, token_in_token_out={token_in_token_out}")
+        logger.info(f"注册动态模型成功: job_id={job_id}, model_name={model_name}, url={url}, tokenizer={resolved_tokenizer_path}, token_in_token_out={token_in_token_out}")
 
         # 持久化到数据库（同步，快速失败）
         if persist_to_db:
@@ -299,7 +302,7 @@ class ProcessorManager:
                     model_name=model_name,
                     url=url,
                     api_key=api_key,
-                    tokenizer_path=tokenizer_path,
+                    tokenizer_path=resolved_tokenizer_path,
                     token_in_token_out=token_in_token_out,
                     job_id=job_id
                 )
@@ -317,7 +320,7 @@ class ProcessorManager:
         model_name: str,
         url: str,
         api_key: str,
-        tokenizer: str,
+        tokenizer_path: str,
         token_in_token_out: bool = False,
         job_id: str = ""
     ) -> Processor:
@@ -327,7 +330,7 @@ class ProcessorManager:
             model_name: 模型名称
             url: Infer 服务 URL
             api_key: API 密钥
-            tokenizer: Tokenizer（路径或 HF 模型名称）
+            tokenizer_path: Tokenizer 路径（本地路径或 HuggingFace 模型名称）
             token_in_token_out: 是否使用 Token-in-Token-out 模式
             job_id: 作业ID，空字符串表示全局模型
 
@@ -343,15 +346,15 @@ class ProcessorManager:
         if key in self.config_processors or key in self.dynamic_processors:
             raise ValueError(f"模型 '{model_name}' 已存在 (job_id={job_id})")
 
-        # 转换 tokenizer 到 tokenizer_path
-        tokenizer_path = self._resolve_tokenizer_path(tokenizer)
+        # 解析 tokenizer 路径
+        resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
 
         # 创建 Processor
         processor = self._create_processor(
             model_name=model_name,
             url=url,
             api_key=api_key,
-            tokenizer_path=tokenizer_path,
+            tokenizer_path=resolved_tokenizer_path,
             token_in_token_out=token_in_token_out,
             job_id=job_id
         )

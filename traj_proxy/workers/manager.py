@@ -182,10 +182,11 @@ class WorkerManager:
             包含所有Worker状态的字典
         """
         # 使用异步方式获取所有Worker状态
+        # ray.get() 是同步阻塞的，应直接使用 asyncio.gather
         futures = [w.get_info.remote() for w in self.workers]
 
-        # 等待结果
-        status = await asyncio.gather(*[ray.get(f) for f in futures])
+        # 使用 ray.awaitable 转换为异步可等待对象
+        status = await asyncio.gather(*[ray.get_async(f) for f in futures])
 
         return {
             "workers": status

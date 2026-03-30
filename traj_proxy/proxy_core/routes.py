@@ -179,7 +179,7 @@ async def register_model(request: RegisterModelRequest):
             model_name=request.model_name,
             url=request.url,
             api_key=request.api_key,
-            tokenizer=request.tokenizer,
+            tokenizer_path=request.tokenizer_path,
             token_in_token_out=request.token_in_token_out,
             persist_to_db=True,
             job_id=request.job_id

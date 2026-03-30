@@ -5,6 +5,7 @@ DatabaseManager - 数据库管理器
 """
 
 import asyncio
+import re
 from typing import Optional
 from urllib.parse import urlparse
 import psycopg
@@ -24,14 +25,21 @@ class DatabaseManager:
     - model_registry: 模型配置注册表
     """
 
-    def __init__(self, db_url: str):
+    def __init__(self, db_url: str, pool_config: Optional[dict] = None):
         """初始化 DatabaseManager
 
         Args:
             db_url: 数据库连接 URL（如 postgresql://user:pass@host:port/dbname）
+            pool_config: 连接池配置，包含 min_size, max_size, timeout
         """
         self.db_url = db_url
         self.pool: Optional[AsyncConnectionPool] = None
+        # 使用传入的配置或默认值
+        self.pool_config = pool_config or {
+            "min_size": 2,
+            "max_size": 20,
+            "timeout": 30
+        }
 
     async def _ensure_database_exists(self):
         """确保目标数据库存在，如果不存在则创建"""
@@ -41,6 +49,14 @@ class DatabaseManager:
         port = parsed.port or 5432
         user = parsed.username
         password = parsed.password
+
+        # 验证数据库名和用户名，防止 SQL 注入
+        # PostgreSQL 标识符只允许字母、数字和下划线，且不能以数字开头
+        identifier_pattern = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+        if not identifier_pattern.match(db_name):
+            raise DatabaseError(f"无效的数据库名称: {db_name}")
+        if not identifier_pattern.match(user):
+            raise DatabaseError(f"无效的用户名称: {user}")
 
         # 连接到默认的 postgres 数据库检查目标数据库是否存在
         default_url = f"postgresql://{user}:{password}@{host}:{port}/postgres"
@@ -57,8 +73,13 @@ class DatabaseManager:
 
                     if not result:
                         logger.info(f"DatabaseManager: 数据库 '{db_name}' 不存在，正在创建...")
-                        # 创建数据库
-                        await cur.execute(f'CREATE DATABASE "{db_name}" OWNER "{user}"')
+                        # 创建数据库（使用参数化查询避免 SQL 注入）
+                        await cur.execute(
+                            'CREATE DATABASE {} OWNER {}'.format(
+                                psycopg.sql.Identifier(db_name).as_string(conn),
+                                psycopg.sql.Identifier(user).as_string(conn)
+                            )
+                        )
                         logger.info(f"DatabaseManager: 数据库 '{db_name}' 创建成功")
                     else:
                         logger.debug(f"DatabaseManager: 数据库 '{db_name}' 已存在")
@@ -75,9 +96,9 @@ class DatabaseManager:
 
             self.pool = AsyncConnectionPool(
                 conninfo=self.db_url,
-                min_size=2,
-                max_size=20,
-                timeout=30
+                min_size=self.pool_config["min_size"],
+                max_size=self.pool_config["max_size"],
+                timeout=self.pool_config["timeout"]
             )
             # 显式打开连接池
             logger.info("DatabaseManager: 正在打开连接池...")

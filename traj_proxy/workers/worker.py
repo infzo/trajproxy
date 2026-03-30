@@ -15,6 +15,7 @@ from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.proxy_core.processor_manager import ProcessorManager
 from traj_proxy.transcript_provider.provider import TranscriptProvider
 from traj_proxy.utils.logger import get_logger
+from traj_proxy.utils.config import get_database_pool_config
 
 logger = get_logger(__name__)
 
@@ -92,11 +93,15 @@ class ProxyWorker:
             client_host = request.client.host if request.client else "unknown"
 
             # 获取模型名（如果有的话）
-            try:
-                body = await request.json()
-                model = body.get("model", "unknown")
-            except Exception:
-                model = "unknown"
+            # 注意：不能直接调用 request.json()，否则会消费请求体
+            # 从 query 参数或 header 中获取 model 信息作为替代
+            model = request.query_params.get("model", "unknown")
+            if model == "unknown":
+                # 尝试从 path 中提取
+                if "/chat/completions" in url:
+                    model = "chat"
+                elif "/models" in url:
+                    model = "models"
 
             self.logger.info(
                 f"Request: {method} {url} | "
@@ -177,8 +182,11 @@ class ProxyWorker:
         proxy_workers_config = get_proxy_workers_config()
         models_config = proxy_workers_config.get("models", [])
 
+        # 获取连接池配置
+        pool_config = get_database_pool_config()
+
         # 初始化数据库管理器（共享）
-        self.db_manager = DatabaseManager(self.db_url)
+        self.db_manager = DatabaseManager(self.db_url, pool_config)
         await self.db_manager.initialize()
 
         # 初始化 RequestRepository（共享）
