@@ -1,117 +1,215 @@
 """
-Parser 管理器
-负责注册、获取和创建 Parser 实例
+统一 Parser 管理器
+参考 vLLM 0.16.0 的 ParserManager 设计
+
+委托给 ToolParserManager 和 ReasoningParserManager，
+并提供统一的 Parser 获取接口。
+
+默认行为（与 vLLM 一致）：
+- reasoning_parser 和 tool_parser 默认为空字符串
+- 如果不指定，返回 None，不做解析
+- 需要用户显式指定 parser（通过配置文件或动态注册）
 """
 
-from typing import Dict, Type, Optional, Any, List
+import os
+from typing import Type, Optional, Dict, Any, List
 
-from .base import BaseToolParser, BaseReasoningParser
+from .base import BaseToolParser, BaseReasoningParser, BaseParser
+from .tool_parser_manager import ToolParserManager
+from .reasoning_parser_manager import ReasoningParserManager
+from .unified_parser import _WrappedParser, IdentityParser
 
 
 class ParserManager:
-    """Parser 管理器"""
+    """
+    统一 Parser 管理器
 
-    # 工具解析器注册表
-    _tool_parsers: Dict[str, Type[BaseToolParser]] = {}
+    提供：
+    - 统一的 Parser 获取接口
+    - 动态导入自定义 parser
 
-    # 推理解析器注册表
-    _reasoning_parsers: Dict[str, Type[BaseReasoningParser]] = {}
-
-    # 模型配置映射
-    _model_configs: Dict[str, Dict[str, Any]] = {}
-
-    @classmethod
-    def register_tool_parser(cls, name: str, parser_cls: Type[BaseToolParser]):
-        """注册工具解析器"""
-        cls._tool_parsers[name] = parser_cls
-
-    @classmethod
-    def register_reasoning_parser(cls, name: str, parser_cls: Type[BaseReasoningParser]):
-        """注册推理解析器"""
-        cls._reasoning_parsers[name] = parser_cls
-
-    @classmethod
-    def register_model(cls, model_name: str, config: Dict[str, Any]):
-        """
-        注册模型配置
-
-        Args:
-            model_name: 模型名称
-            config: {
-                "tool_parser": "qwen_xml",
-                "reasoning_parser": "qwen3",
-            }
-        """
-        cls._model_configs[model_name] = config
+    默认行为：
+    - 如果 reasoning_parser_name 为空，不做 reasoning 解析
+    - 如果 tool_parser_name 为空，不做 tool 解析
+    - 如果都为空，返回 None
+    """
 
     @classmethod
     def get_tool_parser_cls(cls, name: str) -> Optional[Type[BaseToolParser]]:
-        """获取工具解析器类"""
-        return cls._tool_parsers.get(name)
+        """
+        获取 ToolParser 类
+
+        Args:
+            name: parser 名称，空字符串返回 None
+
+        Returns:
+            ToolParser 类或 None
+        """
+        # 空字符串或 None 表示不做解析
+        if not name:
+            return None
+        try:
+            return ToolParserManager.get_tool_parser(name)
+        except KeyError:
+            return None
 
     @classmethod
     def get_reasoning_parser_cls(cls, name: str) -> Optional[Type[BaseReasoningParser]]:
-        """获取推理解析器类"""
-        return cls._reasoning_parsers.get(name)
+        """
+        获取 ReasoningParser 类
+
+        Args:
+            name: parser 名称，空字符串返回 None
+
+        Returns:
+            ReasoningParser 类或 None
+        """
+        # 空字符串或 None 表示不做解析
+        if not name:
+            return None
+        try:
+            return ReasoningParserManager.get_reasoning_parser(name)
+        except KeyError:
+            return None
 
     @classmethod
-    def get_model_config(cls, model_name: str) -> Dict[str, Any]:
-        """获取模型配置，支持模糊匹配"""
-        # 精确匹配
-        if model_name in cls._model_configs:
-            return cls._model_configs[model_name]
-
-        # 模糊匹配（模型名称可能包含版本号等）
-        model_lower = model_name.lower()
-        for key in cls._model_configs:
-            key_lower = key.lower()
-            if key_lower in model_lower or model_lower in key_lower:
-                return cls._model_configs[key]
-
-        return {}
-
-    @classmethod
-    def create_parsers_for_model(
+    def get_parser(
         cls,
-        model_name: str,
+        tool_parser_name: Optional[str] = None,
+        reasoning_parser_name: Optional[str] = None,
+    ) -> Optional[Type[BaseParser]]:
+        """
+        获取统一的 Parser 类
+
+        参考 vLLM 的行为：
+        - 如果 tool_parser_name 和 reasoning_parser_name 都为空，返回 None
+        - 否则创建 _WrappedParser 组合独立的 parser
+
+        Args:
+            tool_parser_name: tool parser 名称，空字符串表示不做解析
+            reasoning_parser_name: reasoning parser 名称，空字符串表示不做解析
+
+        Returns:
+            Parser 类或 None（都不指定时）
+        """
+        # 都不指定，返回 None（不做任何解析）
+        if not tool_parser_name and not reasoning_parser_name:
+            return None
+
+        # 获取 parser 类
+        reasoning_parser_cls = cls.get_reasoning_parser_cls(reasoning_parser_name)
+        tool_parser_cls = cls.get_tool_parser_cls(tool_parser_name)
+
+        # 如果都获取不到，返回 None
+        if reasoning_parser_cls is None and tool_parser_cls is None:
+            return None
+
+        # 设置类属性并返回
+        _WrappedParser.reasoning_parser_cls = reasoning_parser_cls
+        _WrappedParser.tool_parser_cls = tool_parser_cls
+
+        return _WrappedParser
+
+    @classmethod
+    def get_identity_parser(cls) -> Type[BaseParser]:
+        """
+        获取恒等 Parser（不做解析）
+
+        Returns:
+            IdentityParser 类
+        """
+        return IdentityParser
+
+    @classmethod
+    def create_parsers(
+        cls,
+        tool_parser_name: Optional[str] = None,
+        reasoning_parser_name: Optional[str] = None,
         tokenizer=None
     ) -> tuple[Optional[BaseToolParser], Optional[BaseReasoningParser]]:
-        """为模型创建 Parser 实例"""
-        config = cls.get_model_config(model_name)
+        """
+        创建 Parser 实例
 
+        Args:
+            tool_parser_name: tool parser 名称，None/空字符串表示不做解析
+            reasoning_parser_name: reasoning parser 名称，None/空字符串表示不做解析
+            tokenizer: tokenizer 实例
+
+        Returns:
+            (tool_parser, reasoning_parser) 元组，未指定的返回 None
+        """
         tool_parser = None
         reasoning_parser = None
 
-        if config.get("tool_parser"):
-            parser_cls = cls.get_tool_parser_cls(config["tool_parser"])
+        if tool_parser_name:
+            parser_cls = cls.get_tool_parser_cls(tool_parser_name)
             if parser_cls:
                 tool_parser = parser_cls(tokenizer)
 
-        if config.get("reasoning_parser"):
-            parser_cls = cls.get_reasoning_parser_cls(config["reasoning_parser"])
+        if reasoning_parser_name:
+            parser_cls = cls.get_reasoning_parser_cls(reasoning_parser_name)
             if parser_cls:
                 reasoning_parser = parser_cls(tokenizer)
 
         return tool_parser, reasoning_parser
 
     @classmethod
+    def create_parser(
+        cls,
+        tool_parser_name: Optional[str] = None,
+        reasoning_parser_name: Optional[str] = None,
+        tokenizer=None
+    ) -> Optional[BaseParser]:
+        """
+        创建统一的 Parser 实例
+
+        Args:
+            tool_parser_name: tool parser 名称
+            reasoning_parser_name: reasoning parser 名称
+            tokenizer: tokenizer 实例
+
+        Returns:
+            Parser 实例或 None（都不指定时）
+        """
+        parser_cls = cls.get_parser(tool_parser_name, reasoning_parser_name)
+        if parser_cls:
+            return parser_cls(tokenizer)
+        # 都不指定，返回 None（不做解析）
+        return None
+
+    @classmethod
     def list_tool_parsers(cls) -> List[str]:
         """列出所有注册的工具解析器"""
-        return list(cls._tool_parsers.keys())
+        return ToolParserManager.list_registered()
 
     @classmethod
     def list_reasoning_parsers(cls) -> List[str]:
         """列出所有注册的推理解析器"""
-        return list(cls._reasoning_parsers.keys())
+        return ReasoningParserManager.list_registered()
 
     @classmethod
-    def list_models(cls) -> List[str]:
-        """列出所有注册的模型"""
-        return list(cls._model_configs.keys())
+    def import_parser(cls, plugin_path: str) -> None:
+        """
+        从文件路径导入自定义 parser
+
+        Args:
+            plugin_path: parser 文件的绝对路径
+        """
+        module_name = os.path.splitext(os.path.basename(plugin_path))[0]
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(module_name, plugin_path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+        except Exception as e:
+            import traceback
+            raise ImportError(
+                f"Failed to load module '{module_name}' from {plugin_path}: {e}\n{traceback.format_exc()}"
+            ) from e
 
     @classmethod
-    def clear(cls):
+    def clear(cls) -> None:
         """清空所有注册（用于测试）"""
-        cls._tool_parsers.clear()
-        cls._reasoning_parsers.clear()
-        cls._model_configs.clear()
+        ToolParserManager.clear()
+        ReasoningParserManager.clear()

@@ -78,7 +78,8 @@ class RequestRepository:
                     )
                 )
         except Exception as e:
-            raise DatabaseError(f"插入轨迹记录失败: {str(e)}")
+            import traceback
+            raise DatabaseError(f"插入轨迹记录失败: {str(e)}\n{traceback.format_exc()}")
 
     async def get_by_session(
         self,
@@ -112,4 +113,5 @@ class RequestRepository:
                     """, (session_id, limit))
                     return await cur.fetchall()
         except Exception as e:
-            raise DatabaseError(f"查询 session 记录失败: {str(e)}")
+            import traceback
+            raise DatabaseError(f"查询 session 记录失败: {str(e)}\n{traceback.format_exc()}")

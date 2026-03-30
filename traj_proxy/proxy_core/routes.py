@@ -105,7 +105,8 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
                         await processor.request_repository.insert(ctx, processor.tokenizer_path)
                         logger.info(f"[{ctx.unique_id}] 流式记录存储成功")
                     except Exception as e:
-                        logger.error(f"[{ctx.unique_id}] 流式记录存储失败: {e}")
+                        import traceback
+                        logger.error(f"[{ctx.unique_id}] 流式记录存储失败: {e}\n{traceback.format_exc()}")
 
             background_tasks.add_task(save_stream_record)
 
@@ -182,7 +183,9 @@ async def register_model(request: RegisterModelRequest):
             tokenizer_path=request.tokenizer_path,
             token_in_token_out=request.token_in_token_out,
             persist_to_db=True,
-            job_id=request.job_id
+            job_id=request.job_id,
+            tool_parser=request.tool_parser,
+            reasoning_parser=request.reasoning_parser
         )
 
         logger.info(f"注册模型成功: job_id={request.job_id}, model_name={request.model_name}")
@@ -196,6 +199,8 @@ async def register_model(request: RegisterModelRequest):
                 "model": processor.model,
                 "tokenizer_path": processor.tokenizer_path,
                 "token_in_token_out": processor.token_in_token_out,
+                "tool_parser": processor.tool_parser_name,
+                "reasoning_parser": processor.reasoning_parser_name,
                 "sync_info": "模型已持久化到数据库，其他 Worker 将在 30 秒内自动同步"
             }
         )
@@ -208,7 +213,8 @@ async def register_model(request: RegisterModelRequest):
         logger.error(f"数据库错误: {str(e)}")
         raise HTTPException(status_code=503, detail=f"数据库不可用: {str(e)}")
     except Exception as e:
-        logger.error(f"注册模型异常: {str(e)}")
+        import traceback
+        logger.error(f"注册模型异常: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"注册模型失败: {str(e)}")
 
 
@@ -247,7 +253,8 @@ async def delete_model(model_name: str, job_id: str = ""):
         logger.error(f"数据库错误: {str(e)}")
         raise HTTPException(status_code=503, detail=f"数据库不可用: {str(e)}")
     except Exception as e:
-        logger.error(f"删除模型异常: {str(e)}")
+        import traceback
+        logger.error(f"删除模型异常: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"删除模型失败: {str(e)}")
 
 
@@ -270,5 +277,6 @@ async def list_admin_models():
         }
 
     except Exception as e:
-        logger.error(f"列出模型异常: {str(e)}")
+        import traceback
+        logger.error(f"列出模型异常: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"列出模型失败: {str(e)}")

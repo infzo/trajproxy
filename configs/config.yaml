@@ -8,12 +8,17 @@ proxy_workers:
       api_key: sk-1234
       tokenizer_path: Qwen/Qwen3.5-2B
       token_in_token_out: true  # 启用 Token-in-Token-out 模式，支持前缀匹配缓存
+      # parser 配置（可选，不指定则不做解析）
+      # tool_parser: "qwen3_coder"
+      # reasoning_parser: "qwen3"
     # 添加更多模型配置
-    # - model_name: gpt-4
+    # - model_name: deepseek-v3
     #   url: http://openai-proxy:8080
     #   api_key: sk-abcd
-    #   tokenizer_path: openai/gpt-4
+    #   tokenizer_path: deepseek-ai/DeepSeek-V3
     #   token_in_token_out: false
+    #   tool_parser: "deepseek_v3"
+    #   reasoning_parser: "deepseek_v3"
 
 # Ray 配置
 ray:

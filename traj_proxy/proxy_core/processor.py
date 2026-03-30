@@ -41,7 +41,9 @@ class Processor:
         request_repository: RequestRepository = None,
         infer_client=None,
         config: Optional[Dict[str, Any]] = None,
-        job_id: str = ""
+        job_id: str = "",
+        tool_parser: str = "",
+        reasoning_parser: str = ""
     ):
         """初始化 Processor
 
@@ -52,12 +54,16 @@ class Processor:
             infer_client: Infer 服务客户端
             config: 完整配置字典（由worker传入）
             job_id: 作业ID，空字符串表示全局模型
+            tool_parser: Tool parser 名称
+            reasoning_parser: Reasoning parser 名称
         """
         self.model = model
         self.job_id = job_id
         self.tokenizer_path = tokenizer_path
         self.request_repository = request_repository
         self.infer_client = infer_client
+        self.tool_parser_name = tool_parser
+        self.reasoning_parser_name = reasoning_parser
 
         # 从传入的配置读取 token_in_token_out
         if config:
@@ -66,7 +72,9 @@ class Processor:
             self.token_in_token_out = False
 
         # 初始化构建器
-        self.prompt_builder = PromptBuilder(model, tokenizer_path)
+        self.prompt_builder = PromptBuilder(
+            model, tokenizer_path, tool_parser=tool_parser, reasoning_parser=reasoning_parser
+        )
         # 只有在 token_in_token_out 模式下才需要 TokenBuilder
         if self.token_in_token_out:
             self.token_builder = TokenBuilder(model, tokenizer_path, request_repository)

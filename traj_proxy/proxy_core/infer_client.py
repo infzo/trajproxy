@@ -167,7 +167,8 @@ class InferClient:
         except httpx.HTTPStatusError as e:
             raise InferServiceError(f"Infer 服务请求失败: {e.response.status_code} - {e.response.text}")
         except Exception as e:
-            raise InferServiceError(f"Infer 服务请求异常: {str(e)}")
+            import traceback
+            raise InferServiceError(f"Infer 服务请求异常: {str(e)}\n{traceback.format_exc()}")
 
     async def send_completion_stream(
         self,
@@ -214,4 +215,5 @@ class InferClient:
         except httpx.HTTPStatusError as e:
             raise InferServiceError(f"Infer 服务流式请求失败: {e.response.status_code} - {e.response.text}")
         except Exception as e:
-            raise InferServiceError(f"Infer 服务流式请求异常: {str(e)}")
+            import traceback
+            raise InferServiceError(f"Infer 服务流式请求异常: {str(e)}\n{traceback.format_exc()}")

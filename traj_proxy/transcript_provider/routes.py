@@ -45,6 +45,7 @@ async def get_trajectory(
         provider = get_provider()
         return await provider.get_trajectory(session_id, limit)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        raise HTTPException(status_code=500, detail=f"{str(e)}\n{traceback.format_exc()}")
 
 

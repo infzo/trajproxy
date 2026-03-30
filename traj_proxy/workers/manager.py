@@ -74,7 +74,8 @@ class RemoteWorker:
 
             self.worker_logger.info(f"Started uvicorn server for {self.worker_class.__name__}-{self.worker_id} on port {self.port}")
         except Exception as e:
-            self.worker_logger.error(f"Failed to initialize RemoteWorker: {e}")
+            import traceback
+            self.worker_logger.error(f"Failed to initialize RemoteWorker: {e}\n{traceback.format_exc()}")
             raise
 
     def get_info(self) -> Dict:

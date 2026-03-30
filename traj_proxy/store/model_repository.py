@@ -80,7 +80,8 @@ class ModelRepository:
                     updated_at=now
                 )
         except Exception as e:
-            raise DatabaseError(f"注册模型到数据库失败: {str(e)}")
+            import traceback
+            raise DatabaseError(f"注册模型到数据库失败: {str(e)}\n{traceback.format_exc()}")
 
     async def unregister(self, model_name: str, job_id: str = "") -> bool:
         """从数据库删除模型
@@ -104,7 +105,8 @@ class ModelRepository:
 
                 return result.rowcount > 0
         except Exception as e:
-            raise DatabaseError(f"从数据库删除模型失败: {str(e)}")
+            import traceback
+            raise DatabaseError(f"从数据库删除模型失败: {str(e)}\n{traceback.format_exc()}")
 
     async def get_all(self) -> List[ModelConfig]:
         """获取所有模型配置（动态模型）
@@ -142,4 +144,5 @@ class ModelRepository:
             logger.info("model_registry 表不存在，返回空列表")
             return []
         except Exception as e:
-            raise DatabaseError(f"从数据库获取模型列表失败: {str(e)}")
+            import traceback
+            raise DatabaseError(f"从数据库获取模型列表失败: {str(e)}\n{traceback.format_exc()}")

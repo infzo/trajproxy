@@ -37,7 +37,8 @@ async def main():
         config = load_config()
         logger.info(f"配置加载成功")
     except FileNotFoundError as e:
-        logger.error(f"错误: {e}")
+        import traceback
+        logger.error(f"错误: {e}\n{traceback.format_exc()}")
         sys.exit(1)
 
     # 创建管理器

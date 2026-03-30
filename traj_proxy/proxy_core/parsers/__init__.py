@@ -1,10 +1,18 @@
 """
 Parser 模块入口
 
-注册所有内置 Parser 和模型配置
+提供统一的 Parser 注册和管理接口。
+参考 vLLM 0.16.0 的默认行为：
+- reasoning_parser 和 tool_parser 默认为空
+- 如果不指定，返回 None，不做解析
+- 需要用户通过配置文件或动态注册显式指定 parser
 """
 
 from .parser_manager import ParserManager
+from .tool_parser_manager import ToolParserManager
+from .reasoning_parser_manager import ReasoningParserManager
+from .unified_parser import Parser, DelegatingParser, IdentityParser
+
 from .base import (
     ToolCall,
     DeltaToolCall,
@@ -12,66 +20,16 @@ from .base import (
     DeltaMessage,
     BaseToolParser,
     BaseReasoningParser,
+    BaseParser,
 )
 
-# 导入 Parser 实现（延迟导入避免循环依赖）
+
+# 注册内置 Parser
 def _register_parsers():
     """注册所有内置 Parser"""
-    from .tool_parsers.qwen_xml_parser import QwenXMLToolParser
-    from .tool_parsers.deepseek_v3_parser import DeepSeekV3ToolParser
-    from .tool_parsers.llama3_json_parser import Llama3JSONToolParser
-
-    from .reasoning_parsers.qwen3_reasoning_parser import Qwen3ReasoningParser
-    from .reasoning_parsers.deepseek_reasoning_parser import DeepSeekReasoningParser
-
-    # 注册 Tool Parser
-    ParserManager.register_tool_parser("qwen_xml", QwenXMLToolParser)
-    ParserManager.register_tool_parser("deepseek_v3", DeepSeekV3ToolParser)
-    ParserManager.register_tool_parser("llama3_json", Llama3JSONToolParser)
-
-    # 注册 Reasoning Parser
-    ParserManager.register_reasoning_parser("qwen3", Qwen3ReasoningParser)
-    ParserManager.register_reasoning_parser("deepseek", DeepSeekReasoningParser)
-
-    # ==================== 注册模型配置 ====================
-
-    # Qwen 系列
-    ParserManager.register_model("qwen3-coder", {
-        "tool_parser": "qwen_xml",
-        "reasoning_parser": "qwen3",
-    })
-
-    ParserManager.register_model("qwen3.5", {
-        "tool_parser": "qwen_xml",
-        "reasoning_parser": "qwen3",
-    })
-
-    ParserManager.register_model("qwen3", {
-        "tool_parser": "qwen_xml",
-        "reasoning_parser": "qwen3",
-    })
-
-    # DeepSeek 系列
-    ParserManager.register_model("deepseek-v3", {
-        "tool_parser": "deepseek_v3",
-        "reasoning_parser": "deepseek",
-    })
-
-    ParserManager.register_model("deepseek-coder", {
-        "tool_parser": "deepseek_v3",
-        "reasoning_parser": None,
-    })
-
-    # Llama 系列
-    ParserManager.register_model("llama-3.1", {
-        "tool_parser": "llama3_json",
-        "reasoning_parser": None,
-    })
-
-    ParserManager.register_model("llama-3.2", {
-        "tool_parser": "llama3_json",
-        "reasoning_parser": None,
-    })
+    # Tool Parsers 在 tool_parsers/__init__.py 中注册
+    # Reasoning Parsers 在 reasoning_parsers/__init__.py 中注册
+    pass
 
 
 # 模块加载时注册
@@ -79,11 +37,21 @@ _register_parsers()
 
 # 导出
 __all__ = [
+    # 管理器
     "ParserManager",
+    "ToolParserManager",
+    "ReasoningParserManager",
+    # 统一 Parser
+    "Parser",
+    "DelegatingParser",
+    "IdentityParser",
+    # 基类
+    "BaseToolParser",
+    "BaseReasoningParser",
+    "BaseParser",
+    # 数据结构
     "ToolCall",
     "DeltaToolCall",
     "ExtractedToolCallInfo",
     "DeltaMessage",
-    "BaseToolParser",
-    "BaseReasoningParser",
 ]

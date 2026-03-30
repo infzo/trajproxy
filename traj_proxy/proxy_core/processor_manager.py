@@ -32,6 +32,8 @@ class RegisterModelRequest(BaseModel):
     api_key: str = Field(..., description="API 密钥")
     tokenizer_path: str = Field(..., description="Tokenizer 路径（本地路径或 HuggingFace 模型名称）")
     token_in_token_out: bool = Field(default=False, description="是否使用 Token-in-Token-out 模式")
+    tool_parser: str = Field(default="", description="Tool parser 名称")
+    reasoning_parser: str = Field(default="", description="Reasoning parser 名称")
 
 
 class RegisterModelResponse(BaseModel):
@@ -106,7 +108,9 @@ class ProcessorManager:
         api_key: str,
         tokenizer_path: str,
         token_in_token_out: bool = False,
-        job_id: str = ""
+        job_id: str = "",
+        tool_parser: str = "",
+        reasoning_parser: str = ""
     ) -> Processor:
         """创建 Processor 实例的工厂方法
 
@@ -117,6 +121,8 @@ class ProcessorManager:
             tokenizer_path: Tokenizer 路径
             token_in_token_out: 是否使用 Token-in-Token-out 模式
             job_id: 作业ID，空字符串表示全局模型
+            tool_parser: Tool parser 名称
+            reasoning_parser: Reasoning parser 名称
 
         Returns:
             新创建的 Processor 实例
@@ -136,7 +142,9 @@ class ProcessorManager:
             tokenizer_path=tokenizer_path,
             request_repository=self.request_repository,
             infer_client=infer_client,
-            config=config
+            config=config,
+            tool_parser=tool_parser,
+            reasoning_parser=reasoning_parser
         )
 
         return processor
@@ -182,7 +190,8 @@ class ProcessorManager:
                     logger.warning(f"模型同步失败（第 {retry_count}/{self._sync_max_retries} 次），{delay}秒后重试: {e}")
                     await asyncio.sleep(delay)
             except Exception as e:
-                logger.error(f"模型同步出现非数据库错误: {e}")
+                import traceback
+                logger.error(f"模型同步出现非数据库错误: {e}\n{traceback.format_exc()}")
                 await asyncio.sleep(self._sync_interval)
 
     async def _sync_from_db(self):
@@ -215,7 +224,8 @@ class ProcessorManager:
                 logger.info(f"同步删除动态模型: job_id={key[0]}, model_name={key[1]}")
 
         except Exception as e:
-            logger.error(f"从数据库同步动态模型失败: {e}")
+            import traceback
+            logger.error(f"从数据库同步动态模型失败: {e}\n{traceback.format_exc()}")
             raise
 
     def _create_processor_from_model_config(self, config: ModelConfig, target: str = 'dynamic'):
@@ -231,7 +241,9 @@ class ProcessorManager:
             api_key=config.api_key,
             tokenizer_path=config.tokenizer_path,
             token_in_token_out=config.token_in_token_out,
-            job_id=config.job_id
+            job_id=config.job_id,
+            tool_parser=getattr(config, 'tool_parser', ''),
+            reasoning_parser=getattr(config, 'reasoning_parser', '')
         )
 
         key = (config.job_id, config.model_name)
@@ -252,7 +264,9 @@ class ProcessorManager:
         tokenizer_path: str,
         token_in_token_out: bool = False,
         persist_to_db: bool = True,
-        job_id: str = ""
+        job_id: str = "",
+        tool_parser: str = "",
+        reasoning_parser: str = ""
     ) -> Processor:
         """注册新的 Processor（仅动态模型）
 
@@ -264,6 +278,8 @@ class ProcessorManager:
             token_in_token_out: 是否使用 Token-in-Token-out 模式
             persist_to_db: 是否持久化到数据库（默认 True）
             job_id: 作业ID，空字符串表示全局模型
+            tool_parser: Tool parser 名称
+            reasoning_parser: Reasoning parser 名称
 
         Returns:
             新创建的 Processor 实例
@@ -288,12 +304,14 @@ class ProcessorManager:
             api_key=api_key,
             tokenizer_path=resolved_tokenizer_path,
             token_in_token_out=token_in_token_out,
-            job_id=job_id
+            job_id=job_id,
+            tool_parser=tool_parser,
+            reasoning_parser=reasoning_parser
         )
 
         # 只存入 dynamic_processors
         self.dynamic_processors[key] = processor
-        logger.info(f"注册动态模型成功: job_id={job_id}, model_name={model_name}, url={url}, tokenizer={resolved_tokenizer_path}, token_in_token_out={token_in_token_out}")
+        logger.info(f"注册动态模型成功: job_id={job_id}, model_name={model_name}, url={url}, tokenizer={resolved_tokenizer_path}, token_in_token_out={token_in_token_out}, tool_parser={tool_parser}, reasoning_parser={reasoning_parser}")
 
         # 持久化到数据库（同步，快速失败）
         if persist_to_db:
@@ -308,9 +326,10 @@ class ProcessorManager:
                 )
             except Exception as e:
                 # 数据库失败时，回滚本地注册
+                import traceback
                 if key in self.dynamic_processors:
                     del self.dynamic_processors[key]
-                logger.error(f"持久化模型到数据库失败: {e}")
+                logger.error(f"持久化模型到数据库失败: {e}\n{traceback.format_exc()}")
                 raise DatabaseError(f"注册模型失败（数据库错误）: {str(e)}")
 
         return processor
@@ -322,7 +341,9 @@ class ProcessorManager:
         api_key: str,
         tokenizer_path: str,
         token_in_token_out: bool = False,
-        job_id: str = ""
+        job_id: str = "",
+        tool_parser: str = "",
+        reasoning_parser: str = ""
     ) -> Processor:
         """注册预置模型（仅内存，不持久化到数据库）
 
@@ -333,6 +354,8 @@ class ProcessorManager:
             tokenizer_path: Tokenizer 路径（本地路径或 HuggingFace 模型名称）
             token_in_token_out: 是否使用 Token-in-Token-out 模式
             job_id: 作业ID，空字符串表示全局模型
+            tool_parser: Tool parser 名称
+            reasoning_parser: Reasoning parser 名称
 
         Returns:
             新创建的 Processor 实例
@@ -356,7 +379,9 @@ class ProcessorManager:
             api_key=api_key,
             tokenizer_path=resolved_tokenizer_path,
             token_in_token_out=token_in_token_out,
-            job_id=job_id
+            job_id=job_id,
+            tool_parser=tool_parser,
+            reasoning_parser=reasoning_parser
         )
 
         # 只存入 config_processors
@@ -402,7 +427,8 @@ class ProcessorManager:
                     # 数据库中不存在，记录警告但不抛出异常
                     logger.warning(f"数据库中未找到模型: job_id={job_id}, model_name={model_name}")
             except Exception as e:
-                logger.error(f"从数据库删除模型失败: {e}")
+                import traceback
+                logger.error(f"从数据库删除模型失败: {e}\n{traceback.format_exc()}")
                 raise DatabaseError(f"删除模型失败（数据库错误）: {str(e)}")
 
         return deleted

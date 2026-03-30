@@ -115,13 +115,14 @@ class ProxyWorker:
                 response = await call_next(request)
             except Exception as e:
                 # 记录异常
+                import traceback
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 self.logger.error(
                     f"Request failed: {method} {url} | "
                     f"request_id={request_id} | "
                     f"status=500 | "
                     f"elapsed={elapsed_ms}ms | "
-                    f"error={str(e)}"
+                    f"error={str(e)}\n{traceback.format_exc()}"
                 )
                 raise
 
@@ -212,13 +213,16 @@ class ProxyWorker:
                         url=model_config.get('url'),
                         api_key=model_config.get('api_key'),
                         tokenizer_path=model_config.get('tokenizer_path'),
-                        token_in_token_out=model_config.get('token_in_token_out', False)
+                        token_in_token_out=model_config.get('token_in_token_out', False),
+                        tool_parser=model_config.get('tool_parser', ''),
+                        reasoning_parser=model_config.get('reasoning_parser', '')
                     )
                     logger.info(f"预置模型注册成功: {model_config.get('model_name')}")
                 except ValueError as e:
                     logger.warning(f"预置模型注册失败（可能已存在）: {model_config.get('model_name')}, 错误: {e}")
                 except Exception as e:
-                    logger.error(f"预置模型注册异常: {model_config.get('model_name')}, 错误: {e}")
+                    import traceback
+                    logger.error(f"预置模型注册异常: {model_config.get('model_name')}, 错误: {e}\n{traceback.format_exc()}")
 
         logger.info(f"ProxyWorker 初始化完成，预置模型: {len(self.processor_manager.config_processors)}, 动态模型: {len(self.processor_manager.dynamic_processors)}")
 
@@ -228,7 +232,8 @@ class ProxyWorker:
             try:
                 await self.processor_manager.stop_sync()
             except Exception as e:
-                logger.error(f"停止同步失败: {e}")
+                import traceback
+                logger.error(f"停止同步失败: {e}\n{traceback.format_exc()}")
 
         if self.db_manager:
             await self.db_manager.close()

@@ -77,7 +77,8 @@ class StreamingResponseGenerator:
             yield format_sse("[DONE]")
 
         except Exception as e:
-            logger.error(f"流式响应生成错误: {e}")
+            import traceback
+            logger.error(f"流式响应生成错误: {e}\n{traceback.format_exc()}")
             # 发送错误信息
             error_chunk = {
                 "error": {

@@ -31,20 +31,24 @@ class PromptBuilder:
     3. 从响应文本解析 reasoning
     """
 
-    def __init__(self, model: str, tokenizer_path: str):
+    def __init__(self, model: str, tokenizer_path: str, tool_parser: str = "", reasoning_parser: str = ""):
         """初始化 PromptBuilder
 
         Args:
-            model: 模型名称（用于响应中的 model 字段和 Parser 选择）
+            model: 模型名称（用于响应中的 model 字段）
             tokenizer_path: Tokenizer 路径，用于加载模型特定的聊天模板
+            tool_parser: Tool parser 名称，空字符串表示不做解析
+            reasoning_parser: Reasoning parser 名称，空字符串表示不做解析
         """
         self.model = model
         self.tokenizer_path = tokenizer_path
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
-        # 初始化 Parser
-        self.tool_parser, self.reasoning_parser = ParserManager.create_parsers_for_model(
-            model, self.tokenizer
+        # 初始化 Parser（使用显式指定的 parser 名称）
+        self.tool_parser, self.reasoning_parser = ParserManager.create_parsers(
+            tool_parser_name=tool_parser,
+            reasoning_parser_name=reasoning_parser,
+            tokenizer=self.tokenizer
         )
 
         if self.tool_parser:
@@ -134,7 +138,8 @@ class PromptBuilder:
                     finish_reason = "tool_calls"
                     logger.debug(f"[{context.unique_id}] 从文本解析到 {len(tool_calls)} 个工具调用")
             except Exception as e:
-                logger.warning(f"[{context.unique_id}] 工具调用解析失败: {e}")
+                import traceback
+                logger.warning(f"[{context.unique_id}] 工具调用解析失败: {e}\n{traceback.format_exc()}")
 
         # 3. 解析推理内容
         if self.reasoning_parser:
@@ -149,7 +154,8 @@ class PromptBuilder:
                         content = extracted_content
                         logger.debug(f"[{context.unique_id}] 解析到推理内容，长度: {len(reasoning)}")
             except Exception as e:
-                logger.warning(f"[{context.unique_id}] 推理解析失败: {e}")
+                import traceback
+                logger.warning(f"[{context.unique_id}] 推理解析失败: {e}\n{traceback.format_exc()}")
 
         # 构建消息
         message = {
@@ -332,7 +338,8 @@ class PromptBuilder:
                     content_delta = delta_msg.content
                     reasoning_delta = delta_msg.reasoning
             except Exception as e:
-                logger.warning(f"[{context.unique_id}] 推理流式解析失败: {e}")
+                import traceback
+                logger.warning(f"[{context.unique_id}] 推理流式解析失败: {e}\n{traceback.format_exc()}")
 
         # 2. 处理工具调用解析
         if self.tool_parser and tools:
@@ -363,7 +370,8 @@ class PromptBuilder:
                     if delta_msg.content is not None:
                         content_delta = delta_msg.content
             except Exception as e:
-                logger.warning(f"[{context.unique_id}] 工具调用流式解析失败: {e}")
+                import traceback
+                logger.warning(f"[{context.unique_id}] 工具调用流式解析失败: {e}\n{traceback.format_exc()}")
 
         return content_delta, tool_calls_delta, reasoning_delta
 
