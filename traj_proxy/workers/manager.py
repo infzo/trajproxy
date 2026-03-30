@@ -7,6 +7,7 @@ Ray进程管理器
 import ray
 import asyncio
 import os
+import traceback
 from typing import List, Dict
 from traj_proxy.workers.worker import ProxyWorker
 from traj_proxy.utils.logger import get_logger
@@ -74,7 +75,6 @@ class RemoteWorker:
 
             self.worker_logger.info(f"Started uvicorn server for {self.worker_class.__name__}-{self.worker_id} on port {self.port}")
         except Exception as e:
-            import traceback
             self.worker_logger.error(f"Failed to initialize RemoteWorker: {e}\n{traceback.format_exc()}")
             raise
 
@@ -183,24 +183,11 @@ class WorkerManager:
             包含所有Worker状态的字典
         """
         # 使用异步方式获取所有Worker状态
-        # ray.get() 是同步阻塞的，应直接使用 asyncio.gather
         futures = [w.get_info.remote() for w in self.workers]
 
-        # 使用 ray.awaitable 转换为异步可等待对象
-        status = await asyncio.gather(*[ray.get_async(f) for f in futures])
-
-        return {
-            "workers": status
-        }
-
-    def get_worker_status_sync(self) -> Dict:
-        """
-        同步方式获取所有Worker状态
-
-        返回:
-            包含所有Worker状态的字典
-        """
-        status = [ray.get(w.get_info.remote()) for w in self.workers]
+        # 使用 asyncio.to_thread 在线程池中执行同步的 ray.get
+        # 并行获取所有结果
+        status = await asyncio.gather(*[asyncio.to_thread(ray.get, f) for f in futures])
 
         return {
             "workers": status

@@ -6,6 +6,7 @@ DatabaseManager - 数据库管理器
 
 import asyncio
 import re
+import traceback
 from typing import Optional
 from urllib.parse import urlparse
 import psycopg
@@ -84,7 +85,6 @@ class DatabaseManager:
                     else:
                         logger.debug(f"DatabaseManager: 数据库 '{db_name}' 已存在")
         except Exception as e:
-            import traceback
             logger.warning(f"DatabaseManager: 检查/创建数据库时出错: {e}\n{traceback.format_exc()}")
             # 如果连接 postgres 数据库失败，继续尝试原有逻辑
 
@@ -108,7 +108,6 @@ class DatabaseManager:
             await self._create_tables()
             logger.info("DatabaseManager: 初始化完成")
         except Exception as e:
-            import traceback
             logger.error(f"DatabaseManager: 初始化失败: {e}\n{traceback.format_exc()}")
             raise
 
@@ -151,7 +150,6 @@ class DatabaseManager:
             await conn.execute(sql)
             logger.debug(f"DatabaseManager: 索引 {index_name} 创建成功")
         except Exception as e:
-            import traceback
             # 处理并发创建导致的错误
             error_str = str(e)
             if "already exists" in error_str:
@@ -263,6 +261,5 @@ class DatabaseManager:
 
             logger.info("DatabaseManager: 数据库表创建完成")
         except Exception as e:
-            import traceback
             logger.error(f"DatabaseManager: 创建数据库表失败: {e}\n{traceback.format_exc()}")
             raise

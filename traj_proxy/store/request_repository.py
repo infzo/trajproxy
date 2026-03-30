@@ -5,6 +5,7 @@ RequestRepository - 请求轨迹记录操作
 """
 
 from typing import List, Dict, Any, TYPE_CHECKING
+import traceback
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
@@ -78,7 +79,6 @@ class RequestRepository:
                     )
                 )
         except Exception as e:
-            import traceback
             raise DatabaseError(f"插入轨迹记录失败: {str(e)}\n{traceback.format_exc()}")
 
     async def get_by_session(
@@ -113,5 +113,4 @@ class RequestRepository:
                     """, (session_id, limit))
                     return await cur.fetchall()
         except Exception as e:
-            import traceback
             raise DatabaseError(f"查询 session 记录失败: {str(e)}\n{traceback.format_exc()}")

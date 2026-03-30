@@ -8,6 +8,7 @@ from typing import Dict, Optional, List, Tuple
 from pydantic import BaseModel, Field
 import asyncio
 import os
+import traceback
 
 from traj_proxy.proxy_core.processor import Processor
 from traj_proxy.proxy_core.infer_client import InferClient
@@ -190,8 +191,7 @@ class ProcessorManager:
                     logger.warning(f"模型同步失败（第 {retry_count}/{self._sync_max_retries} 次），{delay}秒后重试: {e}")
                     await asyncio.sleep(delay)
             except Exception as e:
-                import traceback
-                logger.error(f"模型同步出现非数据库错误: {e}\n{traceback.format_exc()}")
+                logger.error(f"模型同步出现非数据库错误: {e}", exc_info=True)
                 await asyncio.sleep(self._sync_interval)
 
     async def _sync_from_db(self):
@@ -224,8 +224,7 @@ class ProcessorManager:
                 logger.info(f"同步删除动态模型: run_id={key[0]}, model_name={key[1]}")
 
         except Exception as e:
-            import traceback
-            logger.error(f"从数据库同步动态模型失败: {e}\n{traceback.format_exc()}")
+            logger.error(f"从数据库同步动态模型失败: {e}", exc_info=True)
             raise
 
     def _create_processor_from_model_config(self, config: ModelConfig, target: str = 'dynamic'):
@@ -251,10 +250,10 @@ class ProcessorManager:
         # 根据目标选择字典
         if target == 'config':
             self.config_processors[key] = processor
-            logger.info(f"注册预置模型: run_id={config.run_id}, model_name={config.model_name}")
+            logger.info(f"[{config.model_name}] 注册预置模型: run_id={config.run_id}")
         else:
             self.dynamic_processors[key] = processor
-            logger.info(f"注册动态模型: run_id={config.run_id}, model_name={config.model_name}")
+            logger.info(f"[{config.model_name}] 注册动态模型: run_id={config.run_id}")
 
     async def register_dynamic_processor(
         self,
@@ -311,7 +310,7 @@ class ProcessorManager:
 
         # 只存入 dynamic_processors
         self.dynamic_processors[key] = processor
-        logger.info(f"注册动态模型成功: run_id={run_id}, model_name={model_name}, url={url}, tokenizer={resolved_tokenizer_path}, token_in_token_out={token_in_token_out}, tool_parser={tool_parser}, reasoning_parser={reasoning_parser}")
+        logger.info(f"[{model_name}] 注册动态模型成功: run_id={run_id}, url={url}")
 
         # 持久化到数据库（同步，快速失败）
         if persist_to_db:
@@ -326,7 +325,6 @@ class ProcessorManager:
                 )
             except Exception as e:
                 # 数据库失败时，回滚本地注册
-                import traceback
                 if key in self.dynamic_processors:
                     del self.dynamic_processors[key]
                 logger.error(f"持久化模型到数据库失败: {e}\n{traceback.format_exc()}")
@@ -386,7 +384,7 @@ class ProcessorManager:
 
         # 只存入 config_processors
         self.config_processors[key] = processor
-        logger.info(f"注册预置模型成功: run_id={run_id}, model_name={model_name}（不持久化到数据库）")
+        logger.info(f"[{model_name}] 注册预置模型成功: run_id={run_id}")
 
         return processor
 
@@ -409,14 +407,14 @@ class ProcessorManager:
         # 优先从 dynamic_processors 删除
         if key in self.dynamic_processors:
             del self.dynamic_processors[key]
-            logger.info(f"删除动态模型成功: run_id={run_id}, model_name={model_name}")
+            logger.info(f"[{model_name}] 删除动态模型成功: run_id={run_id}")
             deleted = True
         elif key in self.config_processors:
             # 预置模型不允许通过 API 删除
-            logger.warning(f"尝试删除预置模型（不允许）: run_id={run_id}, model_name={model_name}")
+            logger.warning(f"[{model_name}] 尝试删除预置模型（不允许）: run_id={run_id}")
             return False
         else:
-            logger.warning(f"尝试删除不存在的模型: run_id={run_id}, model_name={model_name}")
+            logger.warning(f"[{model_name}] 尝试删除不存在的模型: run_id={run_id}")
             return False
 
         # 从数据库删除（同步，快速失败）
@@ -425,10 +423,9 @@ class ProcessorManager:
                 success = await self.model_registry.unregister(model_name, run_id)
                 if not success:
                     # 数据库中不存在，记录警告但不抛出异常
-                    logger.warning(f"数据库中未找到模型: run_id={run_id}, model_name={model_name}")
+                    logger.warning(f"[{model_name}] 数据库中未找到模型: run_id={run_id}")
             except Exception as e:
-                import traceback
-                logger.error(f"从数据库删除模型失败: {e}\n{traceback.format_exc()}")
+                logger.error(f"[{model_name}] 从数据库删除模型失败: {e}\n{traceback.format_exc()}")
                 raise DatabaseError(f"删除模型失败（数据库错误）: {str(e)}")
 
         return deleted

@@ -4,12 +4,17 @@ TranscriptProvider FastAPI路由
 处理轨迹记录查询相关路由
 """
 
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
+import traceback
 
 from traj_proxy.workers.worker import get_transcript_provider as get_provider
 
 
+router = APIRouter()
+
+
+@router.get("/trajectory")
 async def get_trajectory(
     session_id: str,
     limit: int = 10000
@@ -31,7 +36,4 @@ async def get_trajectory(
         provider = get_provider()
         return await provider.get_trajectory(session_id, limit)
     except Exception as e:
-        import traceback
         raise HTTPException(status_code=500, detail=f"{str(e)}\n{traceback.format_exc()}")
-
-

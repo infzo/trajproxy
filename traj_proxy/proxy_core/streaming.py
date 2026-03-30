@@ -5,6 +5,7 @@ Streaming - 流式响应工具
 """
 
 from typing import AsyncIterator, Dict, Any, Optional
+import traceback
 import json
 
 from traj_proxy.utils.logger import get_logger
@@ -33,6 +34,7 @@ class StreamingResponseGenerator:
     - SSE 格式化
     - 错误处理
     - 资源清理
+    - 安全的上下文管理（避免并发覆盖）
     """
 
     def __init__(
@@ -57,6 +59,16 @@ class StreamingResponseGenerator:
         self.request_id = request_id
         self.session_id = session_id
         self.request_params = request_params
+        # 请求级别的上下文容器，避免使用 Processor 实例变量导致并发覆盖
+        self._context_holder: dict = {}
+
+    def get_completed_context(self) -> Optional[Any]:
+        """获取流式处理完成后的上下文
+
+        Returns:
+            处理上下文，如果流式处理未完成则返回 None
+        """
+        return self._context_holder.get('context')
 
     async def generate(self) -> AsyncIterator[str]:
         """生成流式响应
@@ -69,6 +81,7 @@ class StreamingResponseGenerator:
                 messages=self.messages,
                 request_id=self.request_id,
                 session_id=self.session_id,
+                context_holder=self._context_holder,
                 **self.request_params
             ):
                 yield format_sse(chunk)
@@ -77,7 +90,6 @@ class StreamingResponseGenerator:
             yield format_sse("[DONE]")
 
         except Exception as e:
-            import traceback
             logger.error(f"流式响应生成错误: {e}\n{traceback.format_exc()}")
             # 发送错误信息
             error_chunk = {

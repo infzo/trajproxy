@@ -11,7 +11,7 @@ import os
 # ============================================
 
 # Nginx 网关地址（完整链路入口）
-NGINX_URL = os.getenv("NGINX_URL", "http://localhost:80")
+NGINX_URL = os.getenv("NGINX_URL", "http://localhost:12345")
 
 # TrajProxy Worker 直接访问地址
 PROXY_URL = os.getenv("PROXY_URL", "http://localhost:12300")

@@ -283,22 +283,31 @@ class _WrappedParser(DelegatingParser):
     """
     动态包装 Parser
 
-    从类属性实例化底层 parser。
+    通过构造函数参数接收底层 parser 类，避免类属性的并发安全问题。
     用于动态创建组合 reasoning 和 tool parser 的 parser。
 
-    Usage:
-        _WrappedParser.reasoning_parser_cls = MyReasoningParser
-        _WrappedParser.tool_parser_cls = MyToolParser
-        parser = _WrappedParser(tokenizer)
+    注意：不应直接使用此类，应通过 ParserManager.create_parser 创建。
     """
 
-    reasoning_parser_cls: Optional[Type[BaseReasoningParser]] = None
-    tool_parser_cls: Optional[Type[BaseToolParser]] = None
+    def __init__(
+        self,
+        tokenizer=None,
+        reasoning_parser_cls: Optional[Type[BaseReasoningParser]] = None,
+        tool_parser_cls: Optional[Type[BaseToolParser]] = None,
+        **kwargs
+    ):
+        """
+        初始化动态包装 Parser
 
-    def __init__(self, tokenizer=None, **kwargs):
+        Args:
+            tokenizer: tokenizer 实例
+            reasoning_parser_cls: Reasoning Parser 类（可选）
+            tool_parser_cls: Tool Parser 类（可选）
+            **kwargs: 其他参数
+        """
         super().__init__(tokenizer, **kwargs)
-        # 从类属性实例化底层 parser
-        if self.__class__.reasoning_parser_cls is not None:
-            self._reasoning_parser = self.__class__.reasoning_parser_cls(tokenizer, **kwargs)
-        if self.__class__.tool_parser_cls is not None:
-            self._tool_parser = self.__class__.tool_parser_cls(tokenizer, **kwargs)
+        # 从参数实例化底层 parser（避免类属性的并发问题）
+        if reasoning_parser_cls is not None:
+            self._reasoning_parser = reasoning_parser_cls(tokenizer, **kwargs)
+        if tool_parser_cls is not None:
+            self._tool_parser = tool_parser_cls(tokenizer, **kwargs)

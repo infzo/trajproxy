@@ -6,6 +6,7 @@ ModelRepository - 模型配置操作
 
 from typing import List, Optional
 from datetime import datetime
+import traceback
 from psycopg import errors as pg_errors
 
 from traj_proxy.store.models import ModelConfig
@@ -80,7 +81,6 @@ class ModelRepository:
                     updated_at=now
                 )
         except Exception as e:
-            import traceback
             raise DatabaseError(f"注册模型到数据库失败: {str(e)}\n{traceback.format_exc()}")
 
     async def unregister(self, model_name: str, run_id: str = "") -> bool:
@@ -105,7 +105,6 @@ class ModelRepository:
 
                 return result.rowcount > 0
         except Exception as e:
-            import traceback
             raise DatabaseError(f"从数据库删除模型失败: {str(e)}\n{traceback.format_exc()}")
 
     async def get_all(self) -> List[ModelConfig]:
@@ -144,5 +143,4 @@ class ModelRepository:
             logger.info("model_registry 表不存在，返回空列表")
             return []
         except Exception as e:
-            import traceback
             raise DatabaseError(f"从数据库获取模型列表失败: {str(e)}\n{traceback.format_exc()}")

@@ -802,11 +802,11 @@ class TestNginxUnifiedEntry:
         测试通过 nginx 访问管理模型列表接口
 
         验证点:
-        - /models 请求直接转发到 traj_proxy
+        - /models/ 请求直接转发到 traj_proxy 的管理接口
         - 返回状态码 200
         - 返回正确的模型详细信息
         """
-        response = nginx_client.get(f"{nginx_url}/models")
+        response = nginx_client.get(f"{nginx_url}/models/")
 
         assert response.status_code == 200, f"获取管理模型列表失败: {response.text}"
 

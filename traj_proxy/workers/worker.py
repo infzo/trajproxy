@@ -7,6 +7,7 @@ Worker 实现
 from fastapi import FastAPI, Request
 from typing import Optional
 import time
+import traceback
 import uuid
 import logging
 
@@ -20,25 +21,84 @@ from traj_proxy.utils.config import get_database_pool_config
 logger = get_logger(__name__)
 
 
-# 全局实例，用于依赖注入（每个 Ray Actor 有独立的命名空间）
-_processor_manager: Optional[ProcessorManager] = None
-_transcript_provider: Optional[TranscriptProvider] = None
+def get_processor_manager(request: Optional[Request] = None) -> ProcessorManager:
+    """
+    获取 ProcessorManager 实例
 
+    优先从请求上下文获取，其次从全局状态获取。
+    这种设计支持依赖注入，同时保持向后兼容。
 
-def get_processor_manager() -> ProcessorManager:
-    """获取 ProcessorManager 实例，用于依赖注入"""
-    global _processor_manager
-    if _processor_manager is None:
+    Args:
+        request: FastAPI Request 对象（可选）
+
+    Returns:
+        ProcessorManager 实例
+
+    Raises:
+        RuntimeError: Worker 未初始化或 ProcessorManager 未初始化
+    """
+    # 尝试从请求上下文获取
+    if request is not None:
+        pm = getattr(request.app.state, "processor_manager", None)
+        if pm is not None:
+            return pm
+
+    # 使用线程本地存储获取当前 Worker 的 app 实例
+    app = _get_current_app()
+    if app is None:
+        raise RuntimeError("Worker 未初始化")
+
+    pm = getattr(app.state, "processor_manager", None)
+    if pm is None:
         raise RuntimeError("ProcessorManager 未初始化")
-    return _processor_manager
+    return pm
 
 
-def get_transcript_provider() -> TranscriptProvider:
-    """获取 TranscriptProvider 实例，用于依赖注入"""
-    global _transcript_provider
-    if _transcript_provider is None:
+def get_transcript_provider(request: Optional[Request] = None) -> TranscriptProvider:
+    """
+    获取 TranscriptProvider 实例
+
+    优先从请求上下文获取，其次从全局状态获取。
+
+    Args:
+        request: FastAPI Request 对象（可选）
+
+    Returns:
+        TranscriptProvider 实例
+
+    Raises:
+        RuntimeError: Worker 未初始化或 TranscriptProvider 未初始化
+    """
+    # 尝试从请求上下文获取
+    if request is not None:
+        tp = getattr(request.app.state, "transcript_provider", None)
+        if tp is not None:
+            return tp
+
+    # 使用线程本地存储获取当前 Worker 的 app 实例
+    app = _get_current_app()
+    if app is None:
+        raise RuntimeError("Worker 未初始化")
+
+    tp = getattr(app.state, "transcript_provider", None)
+    if tp is None:
         raise RuntimeError("TranscriptProvider 未初始化")
-    return _transcript_provider
+    return tp
+
+
+# 线程本地存储，用于存储当前 Worker 的 app 实例
+import threading
+_thread_local = threading.local()
+
+
+def _get_current_app() -> Optional[FastAPI]:
+    """获取当前线程关联的 FastAPI app 实例"""
+    return getattr(_thread_local, 'app', None)
+
+
+def _set_current_app(app: Optional[FastAPI]):
+    """设置当前线程关联的 FastAPI app 实例"""
+    _thread_local.app = app
 
 
 class ProxyWorker:
@@ -63,6 +123,9 @@ class ProxyWorker:
         self.worker_id = worker_id
         self.port = port
         self.app = FastAPI(title=f"ProxyWorker-{worker_id}")
+
+        # 设置当前线程的 app 引用（用于依赖注入函数）
+        _set_current_app(self.app)
 
         # 为该Worker创建独立的日志记录器
         worker_name = f"ProxyWorker-{worker_id}"
@@ -93,11 +156,8 @@ class ProxyWorker:
             client_host = request.client.host if request.client else "unknown"
 
             # 获取模型名（如果有的话）
-            # 注意：不能直接调用 request.json()，否则会消费请求体
-            # 从 query 参数或 header 中获取 model 信息作为替代
             model = request.query_params.get("model", "unknown")
             if model == "unknown":
-                # 尝试从 path 中提取
                 if "/chat/completions" in url:
                     model = "chat"
                 elif "/models" in url:
@@ -114,8 +174,6 @@ class ProxyWorker:
             try:
                 response = await call_next(request)
             except Exception as e:
-                # 记录异常
-                import traceback
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 self.logger.error(
                     f"Request failed: {method} {url} | "
@@ -142,26 +200,16 @@ class ProxyWorker:
 
             return response
 
-    def _setup_routes(self):
-        """设置路由"""
-        # 使用路由注册器
-        from traj_proxy.workers.route_registrar import RouteRegistrar
-        registrar = RouteRegistrar(self.app)
-        registrar.register_all()
-
-        # ========== 中间件：从路径中提取 session_id ==========
         @self.app.middleware("http")
         async def session_id_path_middleware(request, call_next):
             """从路径中提取 session_id 并注入到请求头 x-session-id"""
             path = request.url.path
 
-            # 检查是否匹配新格式：/s/{session_id}/v1/chat/completions
             if path.startswith("/s/") and "/v1/chat/completions" in path:
                 try:
                     parts = path.split("/")
                     if len(parts) >= 4 and parts[1] == "s" and parts[3] == "v1":
                         session_id = parts[2]
-                        # 如果 header 中没有 session_id，从路径提取
                         if not request.headers.get("x-session-id"):
                             request.state.session_id_from_path = session_id
                 except (IndexError, AttributeError):
@@ -170,12 +218,16 @@ class ProxyWorker:
             response = await call_next(request)
             return response
 
+    def _setup_routes(self):
+        """设置路由"""
+        from traj_proxy.workers.route_registrar import RouteRegistrar
+        registrar = RouteRegistrar(self.app)
+        registrar.register_all()
+
     async def initialize(self):
         """
         初始化数据库连接池、ProcessorManager、TranscriptProvider 和默认模型
         """
-        global _processor_manager, _transcript_provider
-
         # 加载配置
         from traj_proxy.utils.config import get_proxy_workers_config, load_config
 
@@ -195,11 +247,11 @@ class ProxyWorker:
 
         # 创建 ProcessorManager
         self.processor_manager = ProcessorManager(self.db_manager)
-        _processor_manager = self.processor_manager
+        self.app.state.processor_manager = self.processor_manager
 
         # 创建 TranscriptProvider（共享 request_repository）
         self.transcript_provider = TranscriptProvider(request_repository)
-        _transcript_provider = self.transcript_provider
+        self.app.state.transcript_provider = self.transcript_provider
 
         # 启动模型同步
         await self.processor_manager.start_sync()
@@ -221,7 +273,6 @@ class ProxyWorker:
                 except ValueError as e:
                     logger.warning(f"预置模型注册失败（可能已存在）: {model_config.get('model_name')}, 错误: {e}")
                 except Exception as e:
-                    import traceback
                     logger.error(f"预置模型注册异常: {model_config.get('model_name')}, 错误: {e}\n{traceback.format_exc()}")
 
         logger.info(f"ProxyWorker 初始化完成，预置模型: {len(self.processor_manager.config_processors)}, 动态模型: {len(self.processor_manager.dynamic_processors)}")
@@ -232,7 +283,6 @@ class ProxyWorker:
             try:
                 await self.processor_manager.stop_sync()
             except Exception as e:
-                import traceback
                 logger.error(f"停止同步失败: {e}\n{traceback.format_exc()}")
 
         if self.db_manager:

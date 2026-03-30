@@ -8,6 +8,7 @@ import sys
 import time
 import signal
 import asyncio
+import traceback
 import ray
 from pathlib import Path
 from traj_proxy.workers.manager import WorkerManager
@@ -37,7 +38,6 @@ async def main():
         config = load_config()
         logger.info(f"配置加载成功")
     except FileNotFoundError as e:
-        import traceback
         logger.error(f"错误: {e}\n{traceback.format_exc()}")
         sys.exit(1)
 
@@ -53,29 +53,30 @@ async def main():
     logger.info(f"ProxyWorkers: {len(manager.workers)} 个")
     logger.info("=" * 50)
 
-    # 打印状态信息
-    status = manager.get_worker_status_sync()
+    # 异步打印状态信息
+    status = await manager.get_worker_status()
     logger.info("Worker 状态:")
     for worker in status["workers"]:
         logger.info(f"  - Worker {worker['worker_id']}: {worker['status']} (端口: {worker['port']})")
     logger.info("")
 
     # 设置信号处理
+    shutdown_event = asyncio.Event()
+
     def signal_handler(signum, frame):
         logger.warning(f"接收到信号 {signum}，正在关闭...")
-        manager.shutdown()
-        sys.exit(0)
+        shutdown_event.set()
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # 保持主进程运行
+    # 等待关闭信号
     try:
-        while True:
-            time.sleep(10)
+        await shutdown_event.wait()
     except KeyboardInterrupt:
         logger.warning("用户中断，正在关闭...")
-        manager.shutdown()
+
+    manager.shutdown()
 
 
 if __name__ == "__main__":

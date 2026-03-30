@@ -42,13 +42,14 @@ class TestModelsAPI:
 
     def test_list_models_detail(self, proxy_client: requests.Session):
         """
-        测试列出模型详情接口
+        测试列出模型详情接口（管理格式）
 
         验证点:
         - 返回状态码 200
         - 响应包含模型详细信息
         """
-        response = proxy_client.get(f"{PROXY_URL}/models")
+        # 访问根路径获取管理格式的模型详情
+        response = proxy_client.get(f"{PROXY_URL}/models/")
 
         assert response.status_code == 200, f"列出模型详情失败: {response.text}"
 
@@ -97,8 +98,8 @@ class TestModelsAPI:
         assert register_data.get("status") == "success", f"注册状态错误: {register_data}"
         assert register_data.get("model_name") == test_model_name, f"模型名称不匹配: {register_data}"
 
-        # 验证模型已注册
-        list_response = proxy_client.get(f"{PROXY_URL}/proxy/models")
+        # 验证模型已注册（访问管理格式的模型列表）
+        list_response = proxy_client.get(f"{PROXY_URL}/models/")
         assert list_response.status_code == 200
 
         list_data = list_response.json()
@@ -115,7 +116,7 @@ class TestModelsAPI:
         assert delete_data.get("deleted") is True, f"deleted 字段错误: {delete_data}"
 
         # 验证模型已删除
-        list_response2 = proxy_client.get(f"{PROXY_URL}/proxy/models")
+        list_response2 = proxy_client.get(f"{PROXY_URL}/models/")
         list_data2 = list_response2.json()
         model_names2 = [m.get("model_name") for m in list_data2.get("models", [])]
         assert test_model_name not in model_names2, f"删除的模型仍在列表中: {model_names2}"

@@ -1,0 +1,252 @@
+"""
+Parser 管理器基类
+
+提供通用的 Parser 注册、获取和管理逻辑，
+消除 ToolParserManager 和 ReasoningParserManager 的重复代码。
+
+支持两种注册模式：
+1. 急切注册：立即加载 parser 类
+2. 懒加载注册：延迟导入，首次使用时加载
+"""
+
+from abc import ABC, abstractmethod
+import importlib
+import os
+import traceback
+from typing import Type, Callable, Optional, List, Dict, Tuple, Generic, TypeVar
+
+# 定义泛型类型变量
+T = TypeVar('T')
+
+
+class BaseParserManager(ABC, Generic[T]):
+    """
+    Parser 中央注册中心基类
+
+    支持：
+    - 急切注册 via register_module
+    - 懒加载注册 via register_lazy_module
+    - 装饰器注册
+    - 动态导入自定义 parser
+    """
+
+    # 已加载的 parser 类
+    _parsers: Dict[str, Type[T]] = {}
+
+    # 懒加载映射：name -> (module_path, class_name)
+    _lazy_parsers: Dict[str, Tuple[str, str]] = {}
+
+    @classmethod
+    @abstractmethod
+    def _get_parser_base_class(cls) -> Type[T]:
+        """
+        获取 Parser 基类类型
+
+        Returns:
+            Parser 基类
+        """
+        pass
+
+    @classmethod
+    def get_parser(cls, name: str) -> Type[T]:
+        """
+        获取已注册的 Parser 类
+
+        如果是懒加载注册，首次访问时会导入并缓存。
+
+        Args:
+            name: parser 名称
+
+        Returns:
+            Parser 类
+
+        Raises:
+            KeyError: 未找到指定名称的 parser
+        """
+        if name in cls._parsers:
+            return cls._parsers[name]
+
+        if name in cls._lazy_parsers:
+            return cls._load_lazy_parser(name)
+
+        registered = ", ".join(cls.list_registered())
+        parser_type = cls._get_parser_base_class().__name__
+        raise KeyError(f"{parser_type} '{name}' not found. Available parsers: {registered}")
+
+    @classmethod
+    def _load_lazy_parser(cls, name: str) -> Type[T]:
+        """
+        加载懒加载的 parser
+
+        Args:
+            name: parser 名称
+
+        Returns:
+            加载的 Parser 类
+        """
+        module_path, class_name = cls._lazy_parsers[name]
+        try:
+            mod = importlib.import_module(module_path)
+            parser_cls = getattr(mod, class_name)
+            base_class = cls._get_parser_base_class()
+            if not issubclass(parser_cls, base_class):
+                raise TypeError(
+                    f"{class_name} in {module_path} is not a {base_class.__name__} subclass."
+                )
+            cls._parsers[name] = parser_cls  # 缓存
+            return parser_cls
+        except Exception as e:
+            parser_type = cls._get_parser_base_class().__name__
+            raise ImportError(
+                f"Failed to import lazy {parser_type.lower()} '{name}' from {module_path}: {e}\n{traceback.format_exc()}"
+            ) from e
+
+    @classmethod
+    def _register_module(
+        cls,
+        module: Type[T],
+        module_name: str | List[str] | None = None,
+        force: bool = True,
+    ) -> None:
+        """
+        立即注册 Parser 类
+
+        Args:
+            module: Parser 类
+            module_name: 注册名称（可以是多个）
+            force: 是否覆盖已存在的注册
+        """
+        base_class = cls._get_parser_base_class()
+        if not issubclass(module, base_class):
+            raise TypeError(
+                f"module must be subclass of {base_class.__name__}, but got {type(module)}"
+            )
+
+        if module_name is None:
+            module_names = [module.__name__]
+        elif isinstance(module_name, str):
+            module_names = [module_name]
+        else:
+            module_names = module_name
+
+        for name in module_names:
+            if not force and name in cls._parsers:
+                existed = cls._parsers[name]
+                raise KeyError(f"{name} is already registered at {existed.__module__}")
+            cls._parsers[name] = module
+
+    @classmethod
+    def register_lazy_module(
+        cls,
+        name: str,
+        module_path: str,
+        class_name: str
+    ) -> None:
+        """
+        注册懒加载模块映射
+
+        Args:
+            name: parser 名称
+            module_path: 模块路径
+            class_name: 类名
+
+        Example:
+            ParserManager.register_lazy_module(
+                name="my_parser",
+                module_path="traj_proxy.proxy_core.parsers.my_parser",
+                class_name="MyParser",
+            )
+        """
+        cls._lazy_parsers[name] = (module_path, class_name)
+
+    @classmethod
+    def register_module(
+        cls,
+        name: str | List[str] | None = None,
+        force: bool = True,
+        module: Type[T] | None = None,
+    ) -> Type[T] | Callable[[Type[T]], Type[T]]:
+        """
+        注册 Parser 类
+
+        可作为装饰器或直接调用使用。
+
+        Args:
+            name: 注册名称
+            force: 是否覆盖已存在的注册
+            module: Parser 类（直接调用时使用）
+
+        Returns:
+            装饰器或注册的类
+
+        Usage:
+            @ParserManager.register_module("my_parser")
+            class MyParser(BaseParser):
+                ...
+
+        Or:
+            ParserManager.register_module(module=MyParser)
+        """
+        if not isinstance(force, bool):
+            raise TypeError(f"force must be a boolean, but got {type(force)}")
+
+        # 直接注册
+        if module is not None:
+            cls._register_module(module=module, module_name=name, force=force)
+            return module
+
+        # 装饰器模式
+        def _decorator(obj: Type[T]) -> Type[T]:
+            module_path = obj.__module__
+            class_name = obj.__name__
+
+            if isinstance(name, str):
+                names = [name]
+            elif isinstance(name, list):
+                names = name
+            else:
+                names = [class_name]
+
+            for n in names:
+                # 懒加载映射
+                cls._lazy_parsers[n] = (module_path, class_name)
+
+            return obj
+
+        return _decorator
+
+    @classmethod
+    def list_registered(cls) -> List[str]:
+        """
+        列出所有已注册的 parser 名称
+
+        Returns:
+            排序后的 parser 名称列表
+        """
+        return sorted(set(cls._parsers.keys()) | set(cls._lazy_parsers.keys()))
+
+    @classmethod
+    def import_parser(cls, plugin_path: str) -> None:
+        """
+        从文件路径导入自定义 parser
+
+        Args:
+            plugin_path: parser 文件的绝对路径
+        """
+        module_name = os.path.splitext(os.path.basename(plugin_path))[0]
+        try:
+            # 动态导入模块
+            spec = importlib.util.spec_from_file_location(module_name, plugin_path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+        except Exception as e:
+            raise ImportError(
+                f"Failed to load module '{module_name}' from {plugin_path}: {e}\n{traceback.format_exc()}"
+            ) from e
+
+    @classmethod
+    def clear(cls) -> None:
+        """清空所有注册（用于测试）"""
+        cls._parsers.clear()
+        cls._lazy_parsers.clear()

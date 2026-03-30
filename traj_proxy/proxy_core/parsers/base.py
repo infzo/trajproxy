@@ -4,9 +4,10 @@
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Optional, List, Any, Sequence, Dict
+from typing import Optional, List, Any, Dict
 
 
 # ==================== 数据结构 ====================
@@ -268,10 +269,6 @@ class BaseParser(ABC):
     参考vLLM的Parser设计，同时支持 reasoning 和 tool 解析。
     这是统一接口的核心抽象类。
     """
-
-    # 类属性：底层 parser 类（用于兼容现有模式）
-    reasoning_parser_cls: Optional[type] = None
-    tool_parser_cls: Optional[type] = None
 
     def __init__(self, tokenizer=None, **kwargs):
         self.tokenizer = tokenizer

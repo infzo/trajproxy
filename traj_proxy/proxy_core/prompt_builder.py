@@ -7,6 +7,7 @@ PromptBuilder - 消息构建器（增强版）
 
 from typing import List, Dict, Any, Optional
 import time
+import traceback
 from transformers import AutoTokenizer
 
 from traj_proxy.proxy_core.context import ProcessContext
@@ -55,6 +56,16 @@ class PromptBuilder:
             logger.info(f"[{model}] 已加载 Tool Parser: {self.tool_parser.__class__.__name__}")
         if self.reasoning_parser:
             logger.info(f"[{model}] 已加载 Reasoning Parser: {self.reasoning_parser.__class__.__name__}")
+
+    def __enter__(self):
+        """进入上下文管理器，自动重置流式状态"""
+        self.reset_streaming_state()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """退出上下文管理器，确保状态重置"""
+        self.reset_streaming_state()
+        return False
 
     async def build_prompt_text(
         self,
@@ -138,7 +149,6 @@ class PromptBuilder:
                     finish_reason = "tool_calls"
                     logger.debug(f"[{context.unique_id}] 从文本解析到 {len(tool_calls)} 个工具调用")
             except Exception as e:
-                import traceback
                 logger.warning(f"[{context.unique_id}] 工具调用解析失败: {e}\n{traceback.format_exc()}")
 
         # 3. 解析推理内容
@@ -154,7 +164,6 @@ class PromptBuilder:
                         content = extracted_content
                         logger.debug(f"[{context.unique_id}] 解析到推理内容，长度: {len(reasoning)}")
             except Exception as e:
-                import traceback
                 logger.warning(f"[{context.unique_id}] 推理解析失败: {e}\n{traceback.format_exc()}")
 
         # 构建消息
@@ -338,7 +347,6 @@ class PromptBuilder:
                     content_delta = delta_msg.content
                     reasoning_delta = delta_msg.reasoning
             except Exception as e:
-                import traceback
                 logger.warning(f"[{context.unique_id}] 推理流式解析失败: {e}\n{traceback.format_exc()}")
 
         # 2. 处理工具调用解析
@@ -370,7 +378,6 @@ class PromptBuilder:
                     if delta_msg.content is not None:
                         content_delta = delta_msg.content
             except Exception as e:
-                import traceback
                 logger.warning(f"[{context.unique_id}] 工具调用流式解析失败: {e}\n{traceback.format_exc()}")
 
         return content_delta, tool_calls_delta, reasoning_delta

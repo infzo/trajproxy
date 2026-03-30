@@ -7,7 +7,6 @@ ProxyCore FastAPI路由
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from traj_proxy.utils.logger import get_logger
-from traj_proxy.workers.worker import get_processor_manager
 from traj_proxy.proxy_core.processor_manager import (
     RegisterModelRequest,
     RegisterModelResponse,
@@ -17,11 +16,32 @@ from traj_proxy.proxy_core.processor_manager import (
 )
 from traj_proxy.proxy_core.streaming import StreamingResponseGenerator
 from traj_proxy.exceptions import DatabaseError
+import traceback
 import uuid
 
 router = APIRouter()
 admin_router = APIRouter()
 logger = get_logger(__name__)
+
+
+def _get_processor_manager(request: Request):
+    """
+    从请求上下文获取 ProcessorManager
+
+    Args:
+        request: FastAPI Request 对象
+
+    Returns:
+        ProcessorManager 实例
+
+    Raises:
+        HTTPException: 如果 ProcessorManager 未初始化
+    """
+    pm = getattr(request.app.state, "processor_manager", None)
+    if pm is None:
+        logger.error("ProcessorManager 未初始化")
+        raise HTTPException(status_code=500, detail="服务未初始化")
+    return pm
 
 
 @router.post("/chat/completions")
@@ -67,15 +87,15 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
         # 生成 request_id
         request_id = str(uuid.uuid4())
 
-        logger.info(f"处理聊天补全请求: model={model}, stream={stream}, messages={len(messages)}, session_id={session_id}")
+        logger.info(f"[{request_id}] 处理聊天补全请求: model={model}, stream={stream}, messages={len(messages)}, session_id={session_id}")
 
-        # 获取 ProcessorManager 实例
-        processor_manager = get_processor_manager()
+        # 获取 ProcessorManager 实例（从请求上下文）
+        processor_manager = _get_processor_manager(request)
 
         # 根据 session_id 解析 run_id，结合 model_name 获取对应的 processor
         processor = processor_manager.get_processor_by_session(model, session_id)
         if processor is None:
-            logger.warning(f"模型未注册: {model}, session_id={session_id}")
+            logger.warning(f"[{request_id}] 模型未注册: {model}, session_id={session_id}")
             raise HTTPException(
                 status_code=404,
                 detail=f"模型 '{model}' 未注册"
@@ -94,14 +114,13 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
 
             # 注册后台任务：流式结束后存储到数据库
             async def save_stream_record():
-                ctx = processor.get_stream_context()
+                ctx = generator.get_completed_context()
                 if ctx and processor.request_repository:
                     try:
                         await processor.request_repository.insert(ctx, processor.tokenizer_path)
                         logger.info(f"[{ctx.unique_id}] 流式记录存储成功")
                     except Exception as e:
-                        import traceback
-                        logger.error(f"[{ctx.unique_id}] 流式记录存储失败: {e}\n{traceback.format_exc()}")
+                        logger.error(f"[{ctx.unique_id}] 流式记录存储失败: {e}", exc_info=True)
 
             background_tasks.add_task(save_stream_record)
 
@@ -134,15 +153,15 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
 
 
 @router.get("/models")
-async def list_models():
+async def list_models(request: Request):
     """
     列出可用模型
 
     返回:
         可用模型列表
     """
-    # 获取 ProcessorManager 实例
-    processor_manager = get_processor_manager()
+    # 获取 ProcessorManager 实例（从请求上下文）
+    processor_manager = _get_processor_manager(request)
     model_keys = processor_manager.list_models()
 
     # 构建 OpenAI 格式的响应，id 格式为 run_id/model_name
@@ -157,38 +176,39 @@ async def list_models():
 # ========== 管理接口 ==========
 
 @admin_router.post("/register", response_model=RegisterModelResponse)
-async def register_model(request: RegisterModelRequest):
+async def register_model(request: Request, req: RegisterModelRequest):
     """
     注册新模型（模型会自动同步到所有 Worker）
 
     参数:
-        request: 注册模型请求
+        request: FastAPI Request 对象
+        req: 注册模型请求
 
     返回:
         注册结果
     """
     try:
-        processor_manager = get_processor_manager()
+        processor_manager = _get_processor_manager(request)
 
         # 注册模型（会同步持久化到数据库）
         processor = await processor_manager.register_dynamic_processor(
-            model_name=request.model_name,
-            url=request.url,
-            api_key=request.api_key,
-            tokenizer_path=request.tokenizer_path,
-            token_in_token_out=request.token_in_token_out,
+            model_name=req.model_name,
+            url=req.url,
+            api_key=req.api_key,
+            tokenizer_path=req.tokenizer_path,
+            token_in_token_out=req.token_in_token_out,
             persist_to_db=True,
-            run_id=request.run_id,
-            tool_parser=request.tool_parser,
-            reasoning_parser=request.reasoning_parser
+            run_id=req.run_id,
+            tool_parser=req.tool_parser,
+            reasoning_parser=req.reasoning_parser
         )
 
-        logger.info(f"注册模型成功: run_id={request.run_id}, model_name={request.model_name}")
+        logger.info(f"[{req.model_name}] 注册模型成功: run_id={req.run_id}")
 
         return RegisterModelResponse(
             status="success",
-            run_id=request.run_id,
-            model_name=request.model_name,
+            run_id=req.run_id,
+            model_name=req.model_name,
             detail={
                 "run_id": processor.run_id,
                 "model": processor.model,
@@ -208,17 +228,17 @@ async def register_model(request: RegisterModelRequest):
         logger.error(f"数据库错误: {str(e)}")
         raise HTTPException(status_code=503, detail=f"数据库不可用: {str(e)}")
     except Exception as e:
-        import traceback
         logger.error(f"注册模型异常: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"注册模型失败: {str(e)}")
 
 
 @admin_router.delete("/{model_name}", response_model=DeleteModelResponse)
-async def delete_model(model_name: str, run_id: str = ""):
+async def delete_model(request: Request, model_name: str, run_id: str = ""):
     """
     删除已注册的模型（会自动从所有 Worker 中删除）
 
     参数:
+        request: FastAPI Request 对象
         model_name: 模型名称
         run_id: 运行ID（查询参数，默认为空字符串表示全局模型）
 
@@ -226,14 +246,14 @@ async def delete_model(model_name: str, run_id: str = ""):
         删除结果
     """
     try:
-        processor_manager = get_processor_manager()
+        processor_manager = _get_processor_manager(request)
 
         deleted = await processor_manager.unregister_dynamic_processor(model_name, persist_to_db=True, run_id=run_id)
 
         if not deleted:
             raise HTTPException(status_code=404, detail=f"模型 '{model_name}' 不存在 (run_id={run_id})")
 
-        logger.info(f"删除模型成功: run_id={run_id}, model_name={model_name}")
+        logger.info(f"[{model_name}] 删除模型成功: run_id={run_id}")
 
         return DeleteModelResponse(
             status="success",
@@ -248,13 +268,12 @@ async def delete_model(model_name: str, run_id: str = ""):
         logger.error(f"数据库错误: {str(e)}")
         raise HTTPException(status_code=503, detail=f"数据库不可用: {str(e)}")
     except Exception as e:
-        import traceback
         logger.error(f"删除模型异常: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"删除模型失败: {str(e)}")
 
 
-@admin_router.get("")
-async def list_admin_models():
+@admin_router.get("/")
+async def list_admin_models(request: Request):
     """
     列出所有已注册模型（包含详细信息）
 
@@ -262,7 +281,7 @@ async def list_admin_models():
         所有模型的详细信息列表
     """
     try:
-        processor_manager = get_processor_manager()
+        processor_manager = _get_processor_manager(request)
         models_info = processor_manager.get_all_processors_info()
 
         return {
@@ -272,6 +291,5 @@ async def list_admin_models():
         }
 
     except Exception as e:
-        import traceback
         logger.error(f"列出模型异常: {str(e)}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"列出模型失败: {str(e)}")
