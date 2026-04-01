@@ -100,8 +100,11 @@ python run_e2e.py --skip-service-check
 | 模块 | 文件 | 说明 |
 |------|------|------|
 | health | test_health.py | 健康检查接口测试 |
-| chat | test_chat.py | 聊天补全接口测试（流式/非流式） |
-| models | test_models.py | 模型管理接口测试 |
+| http_request_formats | test_http_request_formats.py | HTTP 请求/响应格式测试、Tool Calling |
+| models | test_model_management.py | 模型管理接口测试 |
+| parsers | test_parsers.py | Parser 单元测试 |
+| session_id | test_session_id.py | Session ID 传递和路由测试 |
+| token_mode | test_token_mode.py | Token-in-Token-out 模式测试 |
 | trajectory | test_trajectory.py | 轨迹查询接口测试 |
 
 ## 测试标记

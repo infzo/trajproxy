@@ -270,6 +270,12 @@ class StreamingProcessor:
                 context.end_time - context.start_time
             ).total_seconds() * 1000
 
+            # 如果后端服务未返回 usage 信息，估算 token 数量
+            if context.completion_tokens == 0 and context.response_text:
+                # 估算：假设平均每 4 个字符约 1 个 token
+                context.completion_tokens = len(context.response_text) // 4
+                context.total_tokens = (context.prompt_tokens or 0) + context.completion_tokens
+
             # 构建最终响应（阶段1: raw_response）
             # 直接转发模式下，raw_response 就是推理服务返回的原始响应
             context.raw_response = {
@@ -400,6 +406,7 @@ class StreamingProcessor:
         # 更新上下文
         context.response_text = context.stream_buffer_text
         context.response_ids = context.stream_buffer_ids if self.token_in_token_out else None
+        logger.debug(f"[{context.unique_id}] _finalize_stream: stream_buffer_text 长度: {len(context.stream_buffer_text)}, stream_buffer_ids 长度: {len(context.stream_buffer_ids)}")
         context.full_conversation_text = context.prompt_text + context.response_text
 
         if self.token_in_token_out and context.token_ids and context.response_ids:
@@ -413,7 +420,17 @@ class StreamingProcessor:
 
         # 统计信息
         if self.token_in_token_out:
-            context.completion_tokens = len(context.stream_buffer_ids)
+            # Token 模式：优先使用 token_ids 长度，否则估算
+            if context.stream_buffer_ids:
+                context.completion_tokens = len(context.stream_buffer_ids)
+                logger.debug(f"[{context.unique_id}] Token 模式：使用 stream_buffer_ids 长度: {context.completion_tokens}")
+            elif context.response_text:
+                # 使用字符数估算（粗略估计：4 字符约等于 1 token，至少 1 个 token）
+                context.completion_tokens = max(1, len(context.response_text) // 4)
+                logger.debug(f"[{context.unique_id}] Token 模式：估算 completion_tokens: {context.completion_tokens} (response_text 长度: {len(context.response_text)})")
+            else:
+                context.completion_tokens = 0
+                logger.warning(f"[{context.unique_id}] Token 模式：无法估算 completion_tokens，stream_buffer_ids 和 response_text 都为空")
         else:
             # Text 模式：尝试从 infer 响应获取，或使用字符估算
             if context.token_response and "usage" in context.token_response:

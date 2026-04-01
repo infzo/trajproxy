@@ -90,7 +90,15 @@ class ModelRepository:
                     "model_name": model_name,
                     "timestamp": time.time(),
                 })
-                await conn.execute(f"NOTIFY {CHANNEL}, %s", (payload,))
+                # NOTIFY 语法：NOTIFY channel, 'payload'
+                # 使用 psycopg.sql 安全构建 SQL
+                from psycopg import sql
+                await conn.execute(
+                    sql.SQL("NOTIFY {}, {}").format(
+                        sql.Identifier(CHANNEL),
+                        sql.Literal(payload)
+                    )
+                )
 
                 return ModelConfig(
                     run_id=run_id,
@@ -134,7 +142,13 @@ class ModelRepository:
                         "model_name": model_name,
                         "timestamp": time.time(),
                     })
-                    await conn.execute(f"NOTIFY {CHANNEL}, %s", (payload,))
+                    from psycopg import sql
+                    await conn.execute(
+                        sql.SQL("NOTIFY {}, {}").format(
+                            sql.Identifier(CHANNEL),
+                            sql.Literal(payload)
+                        )
+                    )
 
                 return result.rowcount > 0
         except Exception as e:

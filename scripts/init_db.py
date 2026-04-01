@@ -162,7 +162,7 @@ def create_tables(db_url: str):
                 model_name TEXT NOT NULL,
                 url TEXT NOT NULL,
                 api_key TEXT NOT NULL,
-                tokenizer_path TEXT NOT NULL,
+                tokenizer_path TEXT,
                 token_in_token_out BOOLEAN DEFAULT FALSE,
                 tool_parser TEXT NOT NULL DEFAULT '',
                 reasoning_parser TEXT NOT NULL DEFAULT '',
@@ -185,7 +185,14 @@ def create_tables(db_url: str):
                                WHERE table_name='model_registry' AND column_name='reasoning_parser') THEN
                     ALTER TABLE model_registry ADD COLUMN reasoning_parser TEXT NOT NULL DEFAULT '';
                 END IF;
+                -- 修改 tokenizer_path 为可为空（直接转发模式不需要）
+                -- 注意：PostgreSQL 无法直接修改列的 NOT NULL 约束，需要使用 ALTER COLUMN
             END $$;
+        """)
+
+        # 修改 tokenizer_path 列为可为空
+        conn.execute("""
+            ALTER TABLE model_registry ALTER COLUMN tokenizer_path DROP NOT NULL
         """)
 
         # model_registry 索引

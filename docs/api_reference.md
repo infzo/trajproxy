@@ -64,7 +64,7 @@ curl http://localhost:12300/health
 |--------|------|------|------|
 | Content-Type | string | 是 | `application/json` |
 | Authorization | string | 否 | Bearer Token |
-| x-session-id | string | 否 | 会话 ID，格式: `run_id;sample_id;task_id` |
+| x-session-id | string | 否 | 会话 ID，格式: `run_id,sample_id,task_id` |
 
 **Session ID 传递方式**（按优先级）:
 
@@ -148,14 +148,14 @@ data: [DONE]
 # 方式1：通过请求头传递 session_id
 curl -X POST http://localhost:12300/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "x-session-id: app_001;sample_001;task_001" \
+  -H "x-session-id: app_001,sample_001,task_001" \
   -d '{
     "model": "qwen3.5-2b",
     "messages": [{"role": "user", "content": "你好"}]
   }'
 
 # 方式2：通过路径传递 session_id
-curl -X POST http://localhost:12300/s/app_001;sample_001;task_001/v1/chat/completions \
+curl -X POST http://localhost:12300/s/app_001,sample_001,task_001/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen3.5-2b",
@@ -166,7 +166,7 @@ curl -X POST http://localhost:12300/s/app_001;sample_001;task_001/v1/chat/comple
 curl -X POST http://localhost:12300/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3.5-2b@app_001;sample_001;task_001",
+    "model": "qwen3.5-2b@app_001,sample_001,task_001",
     "messages": [{"role": "user", "content": "你好"}]
   }'
 ```
@@ -335,13 +335,13 @@ curl -X DELETE "http://localhost:12300/models?model_name=gpt-4"
 
 ```json
 {
-  "session_id": "app_001;sample_001;task_001",
+  "session_id": "app_001,sample_001,task_001",
   "count": 2,
   "records": [
     {
-      "unique_id": "app_001;sample_001;task_001;req-001",
+      "unique_id": "app_001,sample_001,task_001,req-001",
       "request_id": "req-001",
-      "session_id": "app_001;sample_001;task_001",
+      "session_id": "app_001,sample_001,task_001",
       "model": "qwen3.5-2b",
       "tokenizer_path": "/path/to/tokenizer",
       "prompt_text": "你好",
@@ -360,7 +360,7 @@ curl -X DELETE "http://localhost:12300/models?model_name=gpt-4"
 
 **示例**:
 ```bash
-curl "http://localhost:12300/trajectory?session_id=app_001;sample_001;task_001&limit=100"
+curl "http://localhost:12300/trajectory?session_id=app_001,sample_001,task_001&limit=100"
 ```
 
 ---
@@ -422,7 +422,7 @@ response = requests.post(
     f"{BASE_URL}/v1/chat/completions",
     headers={
         "Content-Type": "application/json",
-        "x-session-id": "app_001;sample_001;task_001"
+        "x-session-id": "app_001,sample_001,task_001"
     },
     json={
         "model": "qwen3.5-2b",
@@ -446,7 +446,7 @@ print(response.json())
 # 查询轨迹
 response = requests.get(
     f"{BASE_URL}/trajectory",
-    params={"session_id": "app_001;sample_001;task_001"}
+    params={"session_id": "app_001,sample_001,task_001"}
 )
 print(response.json())
 ```
@@ -464,7 +464,7 @@ client = OpenAI(
 response = client.chat.completions.create(
     model="qwen3.5-2b",
     messages=[{"role": "user", "content": "你好"}],
-    extra_headers={"x-session-id": "app_001;sample_001;task_001"}
+    extra_headers={"x-session-id": "app_001,sample_001,task_001"}
 )
 print(response.choices[0].message.content)
 ```
@@ -475,7 +475,7 @@ print(response.choices[0].message.content)
 # 聊天补全
 curl -X POST http://localhost:12300/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "x-session-id: app_001;sample_001;task_001" \
+  -H "x-session-id: app_001,sample_001,task_001" \
   -d '{"model": "qwen3.5-2b", "messages": [{"role": "user", "content": "你好"}]}'
 
 # 流式聊天
@@ -495,5 +495,5 @@ curl -X POST http://localhost:12300/models/register \
 curl -X DELETE "http://localhost:12300/models?model_name=gpt-4"
 
 # 查询轨迹
-curl "http://localhost:12300/trajectory?session_id=app_001;sample_001;task_001"
+curl "http://localhost:12300/trajectory?session_id=app_001,sample_001,task_001"
 ```

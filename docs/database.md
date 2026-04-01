@@ -129,7 +129,7 @@ CREATE TABLE request_records (
 |------|------|------|
 | `unique_id` | TEXT | 全局唯一标识，格式: `{session_id};{request_id}` |
 | `request_id` | TEXT | 请求 ID |
-| `session_id` | TEXT | 会话 ID，格式: `run_id;sample_id;task_id` |
+| `session_id` | TEXT | 会话 ID，格式: `run_id,sample_id,task_id` |
 | `model` | TEXT | 使用的模型名称 |
 
 #### 请求阶段字段
@@ -286,7 +286,7 @@ python scripts/init_db.py --db-url postgresql://user:pass@host:port/dbname
 ```sql
 SELECT unique_id, model, prompt_text, response_text, start_time
 FROM request_records
-WHERE session_id = 'app_001;sample_001;task_001'
+WHERE session_id = 'app_001,sample_001,task_001'
 ORDER BY start_time DESC
 LIMIT 100;
 ```

@@ -36,8 +36,8 @@ class RequestRecord:
     request_id: str
     session_id: str
     model: str
-    tokenizer_path: Optional[str] = None  # 可选，直接转发模式下不需要
     messages: List[Any]
+    tokenizer_path: Optional[str] = None  # 可选，直接转发模式下不需要
 
     # 阶段1: OpenAI Chat 格式
     raw_request: Optional[Any] = None      # 完整 OpenAI 请求

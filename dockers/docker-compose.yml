@@ -11,7 +11,7 @@ services:
       litellm:
         condition: service_healthy
     networks:
-      - litellm-network
+      - traj-proxy-network
     restart: always
 
   litellm:
@@ -34,7 +34,7 @@ services:
       traj_proxy:
         condition: service_started
     networks:
-      - litellm-network
+      - traj-proxy-network
     healthcheck:
       test:
         - CMD-SHELL
@@ -55,7 +55,8 @@ services:
       POSTGRES_PASSWORD: dbpassword9090
     ports:
       - "5432:5432"
-    volumes: [ ]
+    volumes:
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
       # - ../postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -d litellm -U llmproxy"]
@@ -63,7 +64,7 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - litellm-network
+      - traj-proxy-network
 
   prometheus:
     privileged: true
@@ -79,7 +80,7 @@ services:
       - "--storage.tsdb.retention.time=15d"
     restart: always
     networks:
-      - litellm-network
+      - traj-proxy-network
 
   traj_proxy:
     privileged: true
@@ -90,7 +91,7 @@ services:
     ports:
       - "12300-12320:12300-12320"
     volumes:
-      # - ../traj_proxy:/app/traj_proxy
+      - ../traj_proxy:/app/traj_proxy
       - ../configs/config.yaml:/app/configs/config.yaml
       - ../logs:/app/logs
     environment:
@@ -108,7 +109,7 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - litellm-network
+      - traj-proxy-network
 
 volumes:
   prometheus_data:
@@ -117,6 +118,6 @@ volumes:
     name: litellm_postgres_data
 
 networks:
-  litellm-network:
+  traj-proxy-network:
     driver: bridge
-    name: litellm-network
+    name: traj-proxy-network

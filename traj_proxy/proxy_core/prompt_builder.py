@@ -185,9 +185,10 @@ class PromptBuilder:
         content = response_text
         finish_reason = "stop"
 
-        # 1. 尝试从 infer_response 获取 tool_calls（现有逻辑）
-        if context.infer_response:
-            choices = context.infer_response.get("choices", [])
+        # 1. 尝试从 token_response 获取 tool_calls（现有逻辑）
+        infer_response = getattr(context, "token_response", None)
+        if infer_response:
+            choices = infer_response.get("choices", [])
             if choices:
                 tool_calls = choices[0].get("tool_calls")
                 finish_reason = choices[0].get("finish_reason", "stop")
