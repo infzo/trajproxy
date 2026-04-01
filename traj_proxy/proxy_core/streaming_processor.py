@@ -32,6 +32,9 @@ def _merge_stream_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str,
 
     merged = {}
     for tc in tool_calls:
+        if not tc:  # 跳过空字典
+            continue
+
         idx = tc.get("index", 0)
         if idx not in merged:
             merged[idx] = {
@@ -45,8 +48,8 @@ def _merge_stream_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str,
         if tc.get("type"):
             merged[idx]["type"] = tc["type"]
         # 合并 function
-        if "function" in tc:
-            func = tc["function"]
+        func = tc.get("function")
+        if func:
             if func.get("name"):
                 merged[idx]["function"]["name"] = func["name"]
             if func.get("arguments"):
@@ -305,29 +308,29 @@ class StreamingProcessor:
                         context.stream_reasoning += delta["reasoning"]
 
                     # 4. 累积 tool_calls
-                    if "tool_calls" in delta:
+                    if "tool_calls" in delta and delta["tool_calls"]:
                         if context.stream_tool_calls is None:
                             context.stream_tool_calls = []
                         context.stream_tool_calls.extend(delta["tool_calls"])
 
                     # 5. 累积 function_call（旧版格式兼容）
-                    if "function_call" in delta:
+                    if "function_call" in delta and delta["function_call"]:
                         fc = delta["function_call"]
                         if context.stream_function_call is None:
                             context.stream_function_call = {"name": "", "arguments": ""}
-                        if "name" in fc:
+                        if fc.get("name"):
                             context.stream_function_call["name"] = fc["name"]
-                        if "arguments" in fc:
+                        if fc.get("arguments"):
                             context.stream_function_call["arguments"] += fc["arguments"]
 
                     # 6. 累积 logprobs
-                    if "logprobs" in choice:
+                    if "logprobs" in choice and choice["logprobs"]:
                         context.stream_logprobs = choice["logprobs"]
 
                     # 7. 累积 vLLM 扩展字段
-                    if "stop_reason" in choice:
+                    if "stop_reason" in choice and choice["stop_reason"] is not None:
                         context.stream_stop_reason = choice["stop_reason"]
-                    if "token_ids" in choice:
+                    if "token_ids" in choice and choice["token_ids"]:
                         if context.stream_token_ids is None:
                             context.stream_token_ids = []
                         context.stream_token_ids.extend(choice["token_ids"])
