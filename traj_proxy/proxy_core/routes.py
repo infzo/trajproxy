@@ -80,12 +80,11 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
         if not valid:
             raise HTTPException(status_code=422, detail=msg)
 
-        # 校验 session_id
-        valid, msg = validate_session_id(session_id)
-        if not valid:
-            raise HTTPException(status_code=400, detail=msg)
-
-        # session_id 可以为空，为空时 run_id 将等于 model_name
+        if not session_id:
+            # 校验 session_id
+            valid, msg = validate_session_id(session_id)
+            if not valid:
+                raise HTTPException(status_code=422, detail=msg)
 
         # 其他请求参数
         request_params = {}
