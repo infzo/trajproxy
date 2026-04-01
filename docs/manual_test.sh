@@ -299,14 +299,32 @@ test_model_management() {
         TEST_MODEL="test_model_${TEST_RUN_ID}"
     fi
 
+    # 根据测试模式设置参数
+    local token_mode_flag="false"
+    local tool_parser_val=""
+    local reasoning_parser_val=""
+    local tokenizer_path_val=""
+
+    if [[ "$TOKEN_MODE" == true ]]; then
+        token_mode_flag="true"
+        tool_parser_val="qwen_xml"
+        reasoning_parser_val="qwen3"
+        tokenizer_path_val="Qwen/Qwen3.5-2B"
+        log_info "Token模式: 启用 tool_parser=qwen_xml, reasoning_parser=qwen3"
+    else
+        tokenizer_path_val="Qwen/Qwen2.5-3B"
+    fi
+
     log_test "注册测试模型: $TEST_MODEL..."
     url="${PROXY_URL}/models/register"
     local request_data='{
         "model_name": "'"$TEST_MODEL"'",
         "url": "http://localhost:1234",
         "api_key": "sk-test-key",
-        "tokenizer_path": "Qwen/Qwen2.5-3B",
-        "token_in_token_out": false
+        "tokenizer_path": "'"${tokenizer_path_val}"'",
+        "token_in_token_out": '"${token_mode_flag}"',
+        "tool_parser": "'"${tool_parser_val}"'",
+        "reasoning_parser": "'"${reasoning_parser_val}"'"
     }'
 
     local headers="Content-Type: application/json"
