@@ -14,8 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.tuna.tsing
 
 # 复制脚本
 COPY scripts/download_tokenizer.py ./download_tokenizer.py
-COPY scripts/init_db.py ./scripts/init_db.py
-COPY scripts/entrypoint.sh ./scripts/entrypoint.sh
+COPY scripts/init-db.sh ./scripts/init-db.sh
 
 # 复制 models 目录（如果存在）
 RUN mkdir -p ./models
@@ -32,7 +31,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app:$PYTHONPATH
 
 # 赋予执行权限
-RUN chmod +x ./scripts/entrypoint.sh
+RUN chmod +x ./scripts/init-db.sh
 
-# 启动命令 - 通过 entrypoint 在启动应用前自动初始化数据库
-CMD ["./scripts/entrypoint.sh"]
+# 启动命令 - 统一入口：初始化数据库 + 启动应用
+CMD ["./scripts/init-db.sh"]

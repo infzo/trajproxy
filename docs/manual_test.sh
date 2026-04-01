@@ -9,6 +9,7 @@
 #   --nginx-url    Nginx 网关地址 (默认: http://localhost:12345)
 #   --model        测试模型名称 (默认使用已有模型)
 #   --skip-register 跳过模型注册 (使用已有模型)
+#   --token-mode   使用 Token-in-Token-out 模式测试工具调用解析
 #   --verbose      显示详细请求/响应信息
 #   --help         显示帮助信息
 # ============================================
@@ -24,6 +25,7 @@ LITELLM_API_KEY="${LITELLM_API_KEY:-sk-1234}"
 TEST_MODEL=""
 SKIP_REGISTER=false
 VERBOSE=false
+TOKEN_MODE=false
 
 # 测试配置
 TEST_RUN_ID="manual_test_$(date +%Y%m%d_%H%M%S)"
@@ -164,6 +166,10 @@ parse_args() {
                 SKIP_REGISTER=true
                 shift
                 ;;
+            --token-mode)
+                TOKEN_MODE=true
+                shift
+                ;;
             --verbose|-v)
                 VERBOSE=true
                 shift
@@ -176,6 +182,7 @@ parse_args() {
                 echo "  --nginx-url URL     Nginx 网关地址 (默认: http://localhost:12345)"
                 echo "  --model NAME        测试模型名称"
                 echo "  --skip-register     跳过模型注册，使用已有模型"
+                echo "  --token-mode        使用 Token-in-Token-out 模式测试工具调用解析"
                 echo "  --verbose, -v       显示详细请求/响应信息"
                 echo "  --help              显示此帮助信息"
                 echo ""
@@ -183,6 +190,10 @@ parse_args() {
                 echo "  PROXY_URL           TrajProxy 地址"
                 echo "  NGINX_URL           Nginx 网关地址"
                 echo "  LITELLM_API_KEY     LiteLLM API 密钥"
+                echo ""
+                echo "模式说明:"
+                echo "  直接转发模式 (默认): token_in_token_out=false，不解析工具调用"
+                echo "  Token模式 (--token-mode): token_in_token_out=true，解析工具调用"
                 exit 0
                 ;;
             *)
@@ -367,11 +378,11 @@ test_openai_chat() {
         "max_tokens": 10,
         "stream": true
     }'
-    headers="Content-Type: application/json\nx-session-id: ${TEST_SESSION_ID}_stream"
+    headers="Content-Type: application/json\nx-session-id: ${TEST_SESSION_ID}"
 
     response=$(curl -s -w "\n%{http_code}" -X POST "$url" \
         -H "Content-Type: application/json" \
-        -H "x-session-id: ${TEST_SESSION_ID}_stream" \
+        -H "x-session-id: ${TEST_SESSION_ID}" \
         -d "$request_data" 2>/dev/null)
     code=$(http_code "$response")
     body=$(response_body "$response")
@@ -395,7 +406,7 @@ test_openai_chat() {
 
     # 3.3 通过路径传递 session_id
     log_test "通过路径传递 session_id..."
-    url="${PROXY_URL}/s/${TEST_SESSION_ID}_path/v1/chat/completions"
+    url="${PROXY_URL}/s/${TEST_SESSION_ID}/v1/chat/completions"
     request_data='{
         "model": "'"${TEST_MODEL}"'",
         "messages": [{"role": "user", "content": "测试路径传参"}],
@@ -431,7 +442,7 @@ test_claude_chat() {
 
     # 4.1 非流式请求
     log_test "Claude 非流式请求测试..."
-    local url="${NGINX_URL}/s/${TEST_SESSION_ID}_claude/v1/messages"
+    local url="${NGINX_URL}/s/${TEST_SESSION_ID}/v1/messages"
     local request_data='{
         "model": "'"$TEST_MODEL"'",
         "max_tokens": 50,
@@ -503,6 +514,13 @@ test_tool_call() {
         return
     fi
 
+    # 显示当前测试模式
+    if [[ "$TOKEN_MODE" == true ]]; then
+        log_info "Token-in-Token-out 模式：工具调用将被解析为标准格式"
+    else
+        log_info "直接转发模式：工具调用不会被解析，模型返回原始文本"
+    fi
+
     # 5.1 OpenAI 格式 Tool Calling
     log_test "OpenAI 格式 Tool Calling..."
     local url="${PROXY_URL}/v1/chat/completions"
@@ -531,11 +549,11 @@ test_tool_call() {
         "max_tokens": 200
     }'
 
-    local headers="Content-Type: application/json\nx-session-id: ${TEST_SESSION_ID}_tool"
+    local headers="Content-Type: application/json\nx-session-id: ${TEST_SESSION_ID}"
     local response
     response=$(curl -s -w "\n%{http_code}" -X POST "$url" \
         -H "Content-Type: application/json" \
-        -H "x-session-id: ${TEST_SESSION_ID}_tool" \
+        -H "x-session-id: ${TEST_SESSION_ID}" \
         -d "$request_data" 2>/dev/null)
     local code=$(http_code "$response")
     local body=$(response_body "$response")
@@ -547,17 +565,58 @@ test_tool_call() {
 
     if [[ "$code" == "200" ]]; then
         log_success "OpenAI Tool Calling 请求成功 (HTTP $code)"
-        local has_tool_calls=$(echo "$body" | python3 -c "
+
+        # 解析响应
+        local parse_result=$(echo "$body" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 msg=d.get('choices',[{}])[0].get('message',{})
-print('yes' if 'tool_calls' in msg and msg['tool_calls'] else 'no')
-" 2>/dev/null || echo "unknown")
+finish_reason=d.get('choices',[{}])[0].get('finish_reason','')
+
+has_tool_calls='yes' if 'tool_calls' in msg and msg['tool_calls'] else 'no'
+tool_call_count=len(msg.get('tool_calls',[]))
+
+# 检查第一个工具调用
+first_tool_name=''
+first_tool_args=''
+if tool_call_count > 0:
+    tc=msg['tool_calls'][0]
+    first_tool_name=tc.get('function',{}).get('name','')
+    first_tool_args=tc.get('function',{}).get('arguments','')
+
+print(f'{has_tool_calls}|{tool_call_count}|{finish_reason}|{first_tool_name}|{first_tool_args}')
+" 2>/dev/null || echo "parse_error|0|||")
+
+        local has_tool_calls=$(echo "$parse_result" | cut -d'|' -f1)
+        local tool_call_count=$(echo "$parse_result" | cut -d'|' -f2)
+        local finish_reason=$(echo "$parse_result" | cut -d'|' -f3)
+        local first_tool_name=$(echo "$parse_result" | cut -d'|' -f4)
+        local first_tool_args=$(echo "$parse_result" | cut -d'|' -f5)
 
         if [[ "$has_tool_calls" == "yes" ]]; then
-            log_info "模型返回了 tool_calls"
+            log_info "模型返回了 $tool_call_count 个 tool_calls"
+            log_info "finish_reason: $finish_reason"
+            if [[ -n "$first_tool_name" ]]; then
+                log_info "工具名称: $first_tool_name"
+            fi
+            if [[ -n "$first_tool_args" ]]; then
+                log_info "工具参数: $first_tool_args"
+            fi
+
+            # Token-in-Token-out 模式下验证格式
+            if [[ "$TOKEN_MODE" == true ]]; then
+                if [[ "$finish_reason" == "tool_calls" ]]; then
+                    log_success "finish_reason 正确为 'tool_calls'"
+                else
+                    log_error "finish_reason 应为 'tool_calls'，实际为 '$finish_reason'"
+                fi
+            fi
         else
-            log_info "模型未返回 tool_calls（可能是内容回复）"
+            if [[ "$TOKEN_MODE" == true ]]; then
+                log_info "模型未返回 tool_calls（可能是内容回复或模型不支持）"
+            else
+                log_info "直接转发模式：模型返回原始内容，tool_calls 未解析"
+            fi
         fi
     else
         log_error "OpenAI Tool Calling 请求失败 (HTTP $code)"
@@ -579,7 +638,7 @@ print('yes' if 'tool_calls' in msg and msg['tool_calls'] else 'no')
         }
     ]'
 
-    url="${NGINX_URL}/s/${TEST_SESSION_ID}_claude_tool/v1/messages"
+    url="${NGINX_URL}/s/${TEST_SESSION_ID}/v1/messages"
     request_data='{
         "model": "'"${TEST_MODEL}"'",
         "max_tokens": 200,
@@ -692,6 +751,7 @@ print_summary() {
     echo "  - Nginx: $NGINX_URL"
     echo "  - 测试模型: ${TEST_MODEL:-未指定}"
     echo "  - Session ID: $TEST_SESSION_ID"
+    echo "  - 测试模式: $([ "$TOKEN_MODE" == true ] && echo "Token-in-Token-out (工具调用解析)" || echo "直接转发 (无工具调用解析)")"
     echo ""
 }
 
@@ -716,6 +776,11 @@ main() {
     log_info "测试运行 ID: $TEST_RUN_ID"
     log_info "TrajProxy 地址: $PROXY_URL"
     log_info "Nginx 地址: $NGINX_URL"
+    if [[ "$TOKEN_MODE" == true ]]; then
+        log_info "测试模式: Token-in-Token-out (工具调用解析)"
+    else
+        log_info "测试模式: 直接转发 (无工具调用解析)"
+    fi
     if [[ "$VERBOSE" == true ]]; then
         log_info "详细模式: 已启用"
     fi

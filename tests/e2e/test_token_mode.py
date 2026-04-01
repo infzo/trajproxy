@@ -273,11 +273,14 @@ class TestTokenInTokenOutMode:
         """
         测试 Token-in-Token-out 模式下的工具调用
 
-        注意：此测试需要模型支持工具调用
+        重要：只有在 token_in_token_out=True 模式下，工具调用才会被解析。
+        直接转发模式（token_in_token_out=False）不会解析工具调用。
 
         验证点:
         - 请求成功返回
         - 如果模型返回工具调用，格式正确
+        - tool_calls 被 PromptBuilder 正确解析
+        - finish_reason 为 'tool_calls'
         """
         session_id = f"{TOKEN_MODE_RUN_ID},tool_test,task_001"
 
@@ -327,6 +330,11 @@ class TestTokenInTokenOutMode:
 
         # 如果有 tool_calls，验证格式
         if "tool_calls" in message and message["tool_calls"]:
+            # 验证 finish_reason
+            finish_reason = choice.get("finish_reason")
+            assert finish_reason == "tool_calls", \
+                f"当存在 tool_calls 时，finish_reason 应为 'tool_calls'，实际为: {finish_reason}"
+
             for tool_call in message["tool_calls"]:
                 assert "id" in tool_call, "tool_call 缺少 id"
                 assert "type" in tool_call, "tool_call 缺少 type"
@@ -337,9 +345,144 @@ class TestTokenInTokenOutMode:
                 # 验证 arguments 是合法 JSON
                 if "arguments" in tool_call["function"]:
                     try:
-                        json.loads(tool_call["function"]["arguments"])
+                        args = json.loads(tool_call["function"]["arguments"])
+                        # 验证参数中包含 city
+                        assert "city" in args, f"参数应包含 city 字段，实际参数: {args}"
                     except json.JSONDecodeError:
                         pytest.fail(f"arguments 不是合法 JSON: {tool_call['function']['arguments']}")
+
+    @pytest.mark.integration
+    @pytest.mark.slow
+    def test_token_mode_streaming_tool_calls(
+        self,
+        proxy_client: requests.Session,
+        token_mode_model_name: str
+    ):
+        """
+        测试 Token-in-Token-out 模式下的流式工具调用
+
+        验证点:
+        - 流式请求成功
+        - tool_calls 增量正确传输
+        - 最终 finish_reason 为 'tool_calls'
+        """
+        session_id = f"{TOKEN_MODE_RUN_ID},stream_tool_test,task_001"
+
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "获取指定城市的天气",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string", "description": "城市名称"}
+                        },
+                        "required": ["city"]
+                    }
+                }
+            }
+        ]
+
+        response = proxy_client.post(
+            f"{PROXY_URL}/v1/chat/completions",
+            headers={
+                "Content-Type": "application/json",
+                "x-session-id": session_id
+            },
+            json={
+                "model": token_mode_model_name,
+                "messages": [
+                    {"role": "user", "content": "北京今天天气怎么样？"}
+                ],
+                "tools": tools,
+                "tool_choice": "auto",
+                "max_tokens": 100,
+                "stream": True
+            },
+            stream=True,
+            timeout=STREAM_TIMEOUT
+        )
+
+        assert response.status_code == 200, f"流式请求失败: {response.text}"
+
+        # 收集流式数据
+        chunks = []
+        tool_call_parts = {}
+        finish_reason = None
+
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+
+            if line.startswith("data: "):
+                data_str = line[6:]
+
+                if data_str == "[DONE]":
+                    chunks.append("[DONE]")
+                    break
+
+                try:
+                    chunk = json.loads(data_str)
+                    chunks.append(chunk)
+
+                    # 提取 tool_calls 增量
+                    if "choices" in chunk and len(chunk["choices"]) > 0:
+                        choice_data = chunk["choices"][0]
+                        delta = choice_data.get("delta", {})
+
+                        if "tool_calls" in delta:
+                            for tc in delta["tool_calls"]:
+                                idx = tc.get("index", 0)
+                                if idx not in tool_call_parts:
+                                    tool_call_parts[idx] = {
+                                        "id": None,
+                                        "type": None,
+                                        "function": {"name": None, "arguments": ""}
+                                    }
+
+                                if "id" in tc:
+                                    tool_call_parts[idx]["id"] = tc["id"]
+                                if "type" in tc:
+                                    tool_call_parts[idx]["type"] = tc["type"]
+                                if "function" in tc:
+                                    func = tc["function"]
+                                    if "name" in func:
+                                        tool_call_parts[idx]["function"]["name"] = func["name"]
+                                    if "arguments" in func:
+                                        tool_call_parts[idx]["function"]["arguments"] += func["arguments"]
+
+                        # 检查 finish_reason
+                        if choice_data.get("finish_reason"):
+                            finish_reason = choice_data["finish_reason"]
+
+                except json.JSONDecodeError:
+                    pass
+
+        # 验证流式响应
+        assert len(chunks) > 0, "未收到任何流式数据块"
+        assert chunks[-1] == "[DONE]", "流式响应未以 [DONE] 结束"
+
+        # 如果有工具调用，验证格式
+        if tool_call_parts:
+            # 验证 finish_reason
+            assert finish_reason == "tool_calls", \
+                f"当存在 tool_calls 时，finish_reason 应为 'tool_calls'，实际为: {finish_reason}"
+
+            # 验证每个工具调用
+            for idx, tc in tool_call_parts.items():
+                assert tc["id"] is not None, f"tool_call[{idx}] 缺少 id"
+                assert tc["type"] == "function", f"tool_call[{idx}] 类型应为 function"
+                assert tc["function"]["name"] is not None, f"tool_call[{idx}] 缺少 function.name"
+
+                # 验证 arguments 是合法 JSON
+                if tc["function"]["arguments"]:
+                    try:
+                        args = json.loads(tc["function"]["arguments"])
+                        assert "city" in args, f"参数应包含 city 字段，实际参数: {args}"
+                    except json.JSONDecodeError:
+                        pytest.fail(f"tool_call[{idx}] arguments 不是合法 JSON: {tc['function']['arguments']}")
 
     @pytest.mark.integration
     def test_trajectory_record_completeness(
