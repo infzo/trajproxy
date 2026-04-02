@@ -608,14 +608,8 @@ class ProcessorManager:
         Raises:
             ValueError: 如果 session_id 格式无效（存在但不包含逗号）
         """
-        # 如果 session_id 为空，run_id 使用 model_name
         
         run_id = self._extract_run_id(session_id)
-        # session_id 存在但格式无效，抛出异常
-        # if not run_id:
-        #     raise ValueError(
-        #         f"session_id 格式无效: '{session_id}'，期望格式为 {{run_id}},{{sample_id}},{{task_id}}"
-        #     )
 
         processor = self.get_processor(run_id, model_name)
         return processor
