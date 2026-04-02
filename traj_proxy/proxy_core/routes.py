@@ -18,6 +18,7 @@ from traj_proxy.utils.validators import (
     validate_session_id,
     validate_model_name,
     validate_model_for_inference,
+    normalize_run_id,
     DEFAULT_RUN_ID,
 )
 import traceback
@@ -82,7 +83,7 @@ def _parse_model_and_run_id(model: str, session_id: str = None) -> tuple:
         return actual_model, run_id
 
     # 1.1, 1.2: 默认 run_id
-    return actual_model, DEFAULT_RUN_ID
+    return actual_model, normalize_run_id(None)
 
 
 @chat_router.post("/chat/completions")
@@ -219,7 +220,7 @@ async def register_model(request: Request, req: RegisterModelRequest):
 
         # 场景一：run_id 为空，赋默认值 DEFAULT
         # 场景二：run_id 不为空，直接使用
-        run_id = req.run_id if req.run_id else DEFAULT_RUN_ID
+        run_id = normalize_run_id(req.run_id)
 
         # 注册模型（会同步持久化到数据库）
         processor = await processor_manager.register_dynamic_processor(
@@ -281,7 +282,7 @@ async def delete_model(request: Request, model_name: str, run_id: str = ""):
 
         # 场景一：run_id 为空，赋默认值 DEFAULT
         # 场景二：run_id 不为空，直接使用
-        actual_run_id = run_id if run_id else DEFAULT_RUN_ID
+        actual_run_id = normalize_run_id(run_id)
 
         deleted = await processor_manager.unregister_dynamic_processor(
             model_name, persist_to_db=True, run_id=actual_run_id

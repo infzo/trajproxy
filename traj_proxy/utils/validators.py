@@ -15,6 +15,19 @@ DEFAULT_RUN_ID = "DEFAULT"
 SESSION_ID_PATTERN = re.compile(r'^[^,]+,[^,]+,[^,]+$')
 
 
+def normalize_run_id(run_id: Optional[str]) -> str:
+    """
+    将空 run_id 标准化为 DEFAULT
+
+    Args:
+        run_id: 原始 run_id 值
+
+    Returns:
+        标准化后的 run_id（空值返回 DEFAULT，非空返回原值）
+    """
+    return run_id or DEFAULT_RUN_ID
+
+
 def validate_session_id(session_id: Optional[str]) -> Tuple[bool, str]:
     """
     校验 session_id 格式

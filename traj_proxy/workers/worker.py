@@ -17,6 +17,7 @@ from traj_proxy.proxy_core.processor_manager import ProcessorManager
 from traj_proxy.transcript_provider.provider import TranscriptProvider
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.config import get_database_pool_config
+from traj_proxy.utils.validators import normalize_run_id
 
 logger = get_logger(__name__)
 
@@ -266,6 +267,7 @@ class ProxyWorker:
                         api_key=model_config.get('api_key'),
                         tokenizer_path=model_config.get('tokenizer_path'),
                         token_in_token_out=model_config.get('token_in_token_out', False),
+                        run_id=normalize_run_id(model_config.get('run_id')),
                         tool_parser=model_config.get('tool_parser', ''),
                         reasoning_parser=model_config.get('reasoning_parser', '')
                     )
