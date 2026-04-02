@@ -24,3 +24,9 @@ TEST_MODEL_B_NAME="test-model-run"
 TEST_MODEL_B_RUN_ID="test-run-001"
 TEST_MODEL_URL="http://test.example.com/v1"
 TEST_MODEL_API_KEY="test-api-key-12345"
+
+# 推理请求 API Key
+CHAT_API_KEY="sk-1234"
+
+# 后端推理服务地址（通过环境变量配置）
+BACKEND_MODEL_URL="${BACKEND_MODEL_URL:-http://host.docker.internal:8000/v1}"
