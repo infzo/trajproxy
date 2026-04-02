@@ -14,7 +14,12 @@ from traj_proxy.proxy_core.processor_manager import (
 )
 from traj_proxy.proxy_core.streaming import StreamingResponseGenerator
 from traj_proxy.exceptions import DatabaseError
-from traj_proxy.utils.validators import validate_session_id, validate_model_name
+from traj_proxy.utils.validators import (
+    validate_session_id,
+    validate_model_name,
+    validate_model_for_inference,
+    DEFAULT_RUN_ID,
+)
 import traceback
 import uuid
 
@@ -43,6 +48,43 @@ def _get_processor_manager(request: Request):
     return pm
 
 
+def _parse_model_and_run_id(model: str, session_id: str = None) -> tuple:
+    """
+    解析 model 和 session_id，返回 (实际model, run_id)
+
+    优先级：
+    1. model 中包含逗号 -> 从 model 解析 run_id（格式：model_name,run_id）
+    2. session_id 中包含逗号 -> 从 session_id 解析 run_id（格式：run_id,sample_id,task_id）
+    3. 默认 -> run_id = DEFAULT
+
+    Args:
+        model: 模型参数，支持两种格式：
+               - model_name (无逗号)
+               - model_name,run_id (有逗号)
+        session_id: 会话ID，格式为 run_id,sample_id,task_id
+
+    Returns:
+        (实际model_name, run_id)
+    """
+    actual_model = model
+
+    # 场景二：model 中有逗号，格式为 {model_name},{run_id}
+    if ',' in model:
+        parts = model.split(',', 1)
+        actual_model = parts[0].strip()
+        run_id = parts[1].strip()
+        return actual_model, run_id
+
+    # 场景一：model 中无逗号
+    # 1.3: session_id 有逗号，提取 run_id
+    if session_id and ',' in session_id:
+        run_id = session_id.split(',')[0].strip()
+        return actual_model, run_id
+
+    # 1.1, 1.2: 默认 run_id
+    return actual_model, DEFAULT_RUN_ID
+
+
 @chat_router.post("/chat/completions")
 async def chat_completions(request: Request, background_tasks: BackgroundTasks):
     """
@@ -58,33 +100,27 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
     try:
         # 获取请求体
         body = await request.json()
+        print(f"####### {body}")
 
         # 提取请求参数
         messages = body.get("messages", [])
         model = body.get("model")
-        session_id = request.headers.get("x-session-id")
+        x_session_id = request.headers.get("x-session-id")
+        x_sandbox_traj_id = request.headers.get("x-sandbox-traj-id")
+        session_id = x_sandbox_traj_id or x_session_id  # 优先使用 x-sandbox-traj-id
         stream = body.get("stream", False)  # 检查 stream 参数
 
         # 如果 header 中没有，尝试从 request.state 获取（由中间件从路径中提取）
         if not session_id and hasattr(request.state, "session_id_from_path"):
             session_id = request.state.session_id_from_path
 
-        # 如果 session_id 为空，但 model 包含 @，解析 model 获取 session_id
-        if not session_id and model and "@" in model:
-            parts = model.split("@", 1)
-            model = parts[0]
-            session_id = parts[1]
-
-        # 校验 model_name
-        valid, msg = validate_model_name(model or "")
+        # 校验 model 参数格式
+        valid, msg, actual_model = validate_model_for_inference(model or "")
         if not valid:
             raise HTTPException(status_code=422, detail=msg)
 
-        if not session_id:
-            # 校验 session_id
-            valid, msg = validate_session_id(session_id)
-            if not valid:
-                raise HTTPException(status_code=422, detail=msg)
+        # 解析 model 和 run_id
+        actual_model, run_id = _parse_model_and_run_id(actual_model, session_id)
 
         # 其他请求参数
         request_params = {}
@@ -96,24 +132,19 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
         # 生成 request_id
         request_id = str(uuid.uuid4())
 
-        logger.info(f"[{request_id}] 处理聊天补全请求: model={model}, stream={stream}, messages={len(messages)}, session_id={session_id}")
+        logger.info(f"[{request_id}] 处理聊天补全请求: model={actual_model}, run_id={run_id}, stream={stream}, messages={len(messages)}")
 
         # 获取 ProcessorManager 实例（从请求上下文）
         processor_manager = _get_processor_manager(request)
 
-        # 根据 session_id 解析 run_id，结合 model_name 获取对应的 processor
-        try:
-            processor = processor_manager.get_processor_by_session(model, session_id)
-        except ValueError as e:
-            # session_id 格式无效
-            logger.warning(f"[{request_id}] session_id 格式无效: {session_id}")
-            raise HTTPException(status_code=400, detail=str(e))
+        # 根据 run_id 和 model_name 获取对应的 processor
+        processor = processor_manager.get_processor(run_id, actual_model)
 
         if processor is None:
-            logger.warning(f"[{request_id}] 模型未注册: {model}, session_id={session_id}")
+            logger.warning(f"[{request_id}] 模型未注册: model={actual_model}, run_id={run_id}")
             raise HTTPException(
                 status_code=404,
-                detail=f"模型 '{model}' 未注册"
+                detail=f"模型 '{actual_model}' 未注册 (run_id={run_id})"
             )
 
         # 根据是否流式选择处理方式
@@ -186,6 +217,10 @@ async def register_model(request: Request, req: RegisterModelRequest):
     try:
         processor_manager = _get_processor_manager(request)
 
+        # 场景一：run_id 为空，赋默认值 DEFAULT
+        # 场景二：run_id 不为空，直接使用
+        run_id = req.run_id if req.run_id else DEFAULT_RUN_ID
+
         # 注册模型（会同步持久化到数据库）
         processor = await processor_manager.register_dynamic_processor(
             model_name=req.model_name,
@@ -194,16 +229,16 @@ async def register_model(request: Request, req: RegisterModelRequest):
             tokenizer_path=req.tokenizer_path,
             token_in_token_out=req.token_in_token_out,
             persist_to_db=True,
-            run_id=req.run_id,
+            run_id=run_id,
             tool_parser=req.tool_parser,
             reasoning_parser=req.reasoning_parser
         )
 
-        logger.info(f"[{req.model_name}] 注册模型成功: run_id={req.run_id}")
+        logger.info(f"[{req.model_name}] 注册模型成功: run_id={run_id}")
 
         return RegisterModelResponse(
             status="success",
-            run_id=req.run_id,
+            run_id=run_id,
             model_name=req.model_name,
             detail={
                 "run_id": processor.run_id,
@@ -236,7 +271,7 @@ async def delete_model(request: Request, model_name: str, run_id: str = ""):
     参数:
         request: FastAPI Request 对象
         model_name: 模型名称
-        run_id: 运行ID（查询参数，默认为空字符串表示全局模型）
+        run_id: 运行ID（查询参数，默认为空字符串表示使用 DEFAULT）
 
     返回:
         删除结果
@@ -244,16 +279,25 @@ async def delete_model(request: Request, model_name: str, run_id: str = ""):
     try:
         processor_manager = _get_processor_manager(request)
 
-        deleted = await processor_manager.unregister_dynamic_processor(model_name, persist_to_db=True, run_id=run_id)
+        # 场景一：run_id 为空，赋默认值 DEFAULT
+        # 场景二：run_id 不为空，直接使用
+        actual_run_id = run_id if run_id else DEFAULT_RUN_ID
+
+        deleted = await processor_manager.unregister_dynamic_processor(
+            model_name, persist_to_db=True, run_id=actual_run_id
+        )
 
         if not deleted:
-            raise HTTPException(status_code=404, detail=f"模型 '{model_name}' 不存在 (run_id={run_id})")
+            raise HTTPException(
+                status_code=404,
+                detail=f"模型 '{model_name}' 不存在 (run_id={actual_run_id})"
+            )
 
-        logger.info(f"[{model_name}] 删除模型成功: run_id={run_id}")
+        logger.info(f"[{model_name}] 删除模型成功: run_id={actual_run_id}")
 
         return DeleteModelResponse(
             status="success",
-            run_id=run_id,
+            run_id=actual_run_id,
             model_name=model_name,
             deleted=True
         )

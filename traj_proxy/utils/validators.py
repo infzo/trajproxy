@@ -8,6 +8,9 @@ import re
 from typing import Optional, Tuple
 
 
+# 默认 run_id 常量
+DEFAULT_RUN_ID = "DEFAULT"
+
 # session_id 正则: 三段逗号分隔，每段非空
 SESSION_ID_PATTERN = re.compile(r'^[^,]+,[^,]+,[^,]+$')
 
@@ -66,3 +69,30 @@ def validate_model_name(model_name: str) -> Tuple[bool, str]:
         return False, "model_name 不能为空"
 
     return True, ""
+
+
+def validate_model_for_inference(model: str) -> Tuple[bool, str, str]:
+    """
+    校验推理请求中的 model 参数格式
+
+    支持两种格式：
+    - model_name (无逗号)
+    - model_name,run_id (有逗号)
+
+    Args:
+        model: 模型参数
+
+    Returns:
+        (是否有效, 错误信息, 实际model_name)
+    """
+    if not model or not model.strip():
+        return False, "model 不能为空", ""
+
+    if ',' in model:
+        parts = model.split(',', 1)
+        actual_model = parts[0].strip()
+        if not actual_model:
+            return False, "model 格式无效，逗号前不能为空", ""
+        return True, "", actual_model
+
+    return True, "", model.strip()

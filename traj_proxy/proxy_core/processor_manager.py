@@ -563,11 +563,13 @@ class ProcessorManager:
         return deleted
 
     def get_processor(self, run_id: str, model_name: str) -> Optional[Processor]:
-        """根据 run_id 和 model_name 获取 Processor（优先返回动态模型）
+        """根据 run_id 和 model_name 获取 Processor（精确匹配）
 
         查找顺序：
-        1. 精确匹配 (run_id, model_name)
-        2. 如果精确匹配失败，回退到全局预置模型 ("", model_name)
+        1. 动态模型精确匹配 (run_id, model_name)
+        2. 预置模型精确匹配 (run_id, model_name)
+
+        注意：不再回退到全局预置模型，保持严格隔离
 
         Args:
             run_id: 运行ID
@@ -582,50 +584,7 @@ class ProcessorManager:
         if processor:
             return processor
         # 查找预置模型
-        processor = self.config_processors.get(key)
-        if processor:
-            return processor
-        # 回退到全局预置模型（run_id 为空）
-        if run_id:  # 只有当 run_id 非空时才回退
-            fallback_key = ("", model_name)
-            return self.config_processors.get(fallback_key)
-        return None
-
-    def get_processor_by_session(self, model_name: str, session_id: str) -> Optional[Processor]:
-        """根据 session_id 和 model_name 获取 Processor
-
-        严格路由：精确匹配 (run_id, model_name)，无回退逻辑。
-        - 如果 session_id 为空，run_id 等于 model_name
-        - 如果 session_id 存在，必须包含逗号分隔符，否则抛出异常
-
-        Args:
-            model_name: 模型名称
-            session_id: 会话ID，格式为 {run_id},{sample_id},{task_id}
-
-        Returns:
-            Processor 实例，如果不存在则返回 None
-
-        Raises:
-            ValueError: 如果 session_id 格式无效（存在但不包含逗号）
-        """
-        
-        run_id = self._extract_run_id(session_id)
-
-        processor = self.get_processor(run_id, model_name)
-        return processor
-
-    def _extract_run_id(self, session_id: str) -> str:
-        """从 session_id 提取运行ID
-
-        Args:
-            session_id: 会话ID，格式为 {run_id},{sample_id},{task_id}
-
-        Returns:
-            运行ID
-        """
-        if session_id and ',' in session_id:
-            return session_id.split(',')[0]
-        return ""
+        return self.config_processors.get(key)
 
     def get_processor_or_raise(self, run_id: str, model_name: str) -> Processor:
         """根据 run_id 和 model_name 获取 Processor，不存在时抛出异常

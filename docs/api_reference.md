@@ -64,13 +64,13 @@ curl http://localhost:12300/health
 |--------|------|------|------|
 | Content-Type | string | 是 | `application/json` |
 | Authorization | string | 否 | Bearer Token |
-| x-session-id | string | 否 | 会话 ID，格式: `run_id,sample_id,task_id` |
+| x-session-id | string | 否 | 会话 ID |
 
-**Session ID 传递方式**（按优先级）:
+**Run ID 解析规则**（按优先级）:
 
-1. **路径传递**: `/s/{session_id}/v1/chat/completions`
-2. **请求头传递**: `x-session-id` 请求头
-3. **模型名传递**: `model` 参数格式为 `{model_name}@{session_id}`
+1. **Model 参数包含逗号**: `model` 格式为 `{model_name},{run_id}`，使用 model 中解析的 run_id
+2. **Session ID 包含逗号**: `session_id` 格式为 `{run_id},{sample_id},{task_id}`，使用 session_id 中解析的 run_id
+3. **默认值**: run_id 默认为 `DEFAULT`
 
 **请求体**:
 
@@ -94,7 +94,7 @@ curl http://localhost:12300/health
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| model | string | 是 | - | 模型名称 |
+| model | string | 是 | - | 模型名称，支持两种格式：`model_name` 或 `model_name,run_id` |
 | messages | array | 是 | - | 消息列表 |
 | max_tokens | integer | 否 | - | 最大生成 token 数 |
 | temperature | number | 否 | - | 采样温度 (0-2) |
@@ -145,7 +145,7 @@ data: [DONE]
 **示例**:
 
 ```bash
-# 方式1：通过请求头传递 session_id
+# 方式1：通过请求头传递 session_id（run_id 从 session_id 提取）
 curl -X POST http://localhost:12300/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "x-session-id: app_001,sample_001,task_001" \
@@ -162,11 +162,19 @@ curl -X POST http://localhost:12300/s/app_001,sample_001,task_001/v1/chat/comple
     "messages": [{"role": "user", "content": "你好"}]
   }'
 
-# 方式3：通过模型名传递 session_id
+# 方式3：通过 model 参数传递 run_id（推荐）
 curl -X POST http://localhost:12300/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen3.5-2b@app_001,sample_001,task_001",
+    "model": "qwen3.5-2b,app_001",
+    "messages": [{"role": "user", "content": "你好"}]
+  }'
+
+# 方式4：不传 session_id，使用 DEFAULT run_id
+curl -X POST http://localhost:12300/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen3.5-2b",
     "messages": [{"role": "user", "content": "你好"}]
   }'
 ```
@@ -225,7 +233,7 @@ curl http://localhost:12300/models
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| run_id | string | 否 | 运行ID，空字符串表示全局模型 |
+| run_id | string | 否 | 运行ID，空字符串表示使用 DEFAULT |
 | model_name | string | 是 | 模型名称 |
 | url | string | 是 | 推理服务 URL |
 | api_key | string | 是 | API 密钥 |
@@ -298,14 +306,14 @@ curl -X POST http://localhost:12300/models/register \
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | model_name | string | 是 | - | 模型名称 |
-| run_id | string | 否 | "" | 运行ID |
+| run_id | string | 否 | "" | 运行ID，空字符串表示使用 DEFAULT |
 
 **响应**:
 
 ```json
 {
   "status": "success",
-  "run_id": "",
+  "run_id": "DEFAULT",
   "model_name": "gpt-4",
   "deleted": true
 }
@@ -313,7 +321,11 @@ curl -X POST http://localhost:12300/models/register \
 
 **示例**:
 ```bash
+# 删除 DEFAULT 模型
 curl -X DELETE "http://localhost:12300/models?model_name=gpt-4"
+
+# 删除指定 run_id 的模型
+curl -X DELETE "http://localhost:12300/models?model_name=gpt-4&run_id=run_001"
 ```
 
 ---
