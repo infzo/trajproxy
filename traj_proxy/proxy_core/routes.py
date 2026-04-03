@@ -101,7 +101,7 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
     try:
         # 获取请求体
         body = await request.json()
-        print(f"####### {body}")
+        logger.info(f"chat_completions: {request.headers=}, {body=}.")
 
         # 提取请求参数
         messages = body.get("messages", [])

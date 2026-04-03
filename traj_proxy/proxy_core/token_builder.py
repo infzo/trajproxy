@@ -115,7 +115,10 @@ class TokenBuilder:
 
         for trajectory in history:
             # 匹配完整对话文本（请求+响应）
-            cached_text = trajectory.get("full_conversation_text", "")
+            cached_text = trajectory.get("full_conversation_text")
+            # 跳过无效记录（None 或空字符串）
+            if not cached_text:
+                continue
             if text.startswith(cached_text) and len(cached_text) > longest_length:
                 longest_match = trajectory
                 longest_length = len(cached_text)
