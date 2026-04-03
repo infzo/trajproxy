@@ -18,9 +18,9 @@ PromptInput = Union[str, List[int]]
 
 class InferClient:
     """Infer 服务客户端 - 使用 requests 线程池实现 (兼容异步接口)
-    
-    融合了最新的接口规范，并针对 vLLM/Ascend NPU 环境下的网络不稳定性（如 RemoteProtocolError）
-    进行了优化。通过 requests 的 Retry 机制和显式的 Connection: close 头来提升成功率。
+
+    融合了最新的接口规范，并针对 vLLM/Ascend NPU 环境下的网络不稳定性
+    进行了优化。通过 requests 的 Retry 机制处理临时故障，使用线程池保持异步兼容。
     """
 
     def __init__(
@@ -51,33 +51,36 @@ class InferClient:
 
     async def _get_session(self) -> requests.Session:
         """初始化并配置带重试机制的 Session (针对 vLLM 稳定性优化)"""
-        if self._session is None:
-            async with self._client_lock:
-                if self._session is None:
-                    self._session = requests.Session()
-                    # 鲁棒重试策略：针对 502/503/504 进行自动重试
-                    retry_strategy = Retry(
-                        total=2,
-                        backoff_factor=1,
-                        status_forcelist=[502, 503, 504],
-                        allowed_methods=["POST"]
-                    )
-                    adapter = HTTPAdapter(
-                        pool_connections=self._pool_size,
-                        pool_maxsize=self._pool_size,
-                        max_retries=retry_strategy
-                    )
-                    self._session.mount("http://", adapter)
-                    self._session.mount("https://", adapter)
-                    logger.debug(f"[{self.base_url}] InferClient: 已初始化 requests Session")
+        # 无锁快速路径：已初始化时直接返回，避免高并发下的锁竞争
+        if self._session is not None:
+            return self._session
+
+        # 需要初始化时才获取锁
+        async with self._client_lock:
+            if self._session is None:
+                self._session = requests.Session()
+                # 鲁棒重试策略：针对 502/503/504 进行自动重试
+                retry_strategy = Retry(
+                    total=2,
+                    backoff_factor=1,
+                    status_forcelist=[502, 503, 504],
+                    allowed_methods=["POST"]
+                )
+                adapter = HTTPAdapter(
+                    pool_connections=self._pool_size,
+                    pool_maxsize=self._pool_size,
+                    max_retries=retry_strategy
+                )
+                self._session.mount("http://", adapter)
+                self._session.mount("https://", adapter)
+                logger.debug(f"[{self.base_url}] InferClient: 已初始化 requests Session")
         return self._session
 
     def _build_common_headers(self):
-        """构建通用请求头，强制 Connection: close 以解决 vLLM 连接重置问题"""
+        """构建通用请求头"""
         return {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "Connection": "close"  
+            "Content-Type": "application/json"
         }
 
     async def close(self):
@@ -146,19 +149,23 @@ class InferClient:
 
     async def _async_stream_gen(self, response: requests.Response) -> AsyncIterator[Dict[str, Any]]:
         """异步生成器：解析 SSE 流数据"""
+        loop = asyncio.get_event_loop()
         try:
-            # 在单独的线程中迭代 iter_lines 以防阻塞，但简单处理亦可
-            for line in response.iter_lines():
-                if line:
-                    decoded_line = line.decode('utf-8').strip()
-                    if decoded_line.startswith("data: "):
-                        content = decoded_line[6:]
-                        if content == "[DONE]":
-                            break
-                        try:
-                            yield json.loads(content)
-                        except json.JSONDecodeError:
-                            continue
+            iterator = response.iter_lines()
+            while True:
+                # 在线程池中执行迭代，避免阻塞事件循环
+                line = await loop.run_in_executor(self._executor, next, iterator, None)
+                if line is None:
+                    break
+                decoded_line = line.decode('utf-8').strip()
+                if decoded_line.startswith("data: "):
+                    content = decoded_line[6:]
+                    if content == "[DONE]":
+                        break
+                    try:
+                        yield json.loads(content)
+                    except json.JSONDecodeError:
+                        continue
         finally:
             response.close()
 

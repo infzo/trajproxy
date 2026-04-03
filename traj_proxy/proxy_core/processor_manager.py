@@ -373,6 +373,64 @@ class ProcessorManager:
             self.dynamic_processors[key] = processor
             logger.info(f"[{config.model_name}] 注册动态模型: run_id={config.run_id}")
 
+    def _register_processor_impl(
+        self,
+        model_name: str,
+        url: str,
+        api_key: str,
+        tokenizer_path: Optional[str] = None,
+        token_in_token_out: bool = False,
+        run_id: str = "",
+        tool_parser: str = "",
+        reasoning_parser: str = ""
+    ) -> Tuple[Processor, Tuple[str, str]]:
+        """注册处理器的公共逻辑
+
+        Args:
+            model_name: 模型名称
+            url: Infer 服务 URL
+            api_key: API 密钥
+            tokenizer_path: Tokenizer 路径
+            token_in_token_out: 是否使用 Token-in-Token-out 模式
+            run_id: 运行ID
+            tool_parser: Tool parser 名称
+            reasoning_parser: Reasoning parser 名称
+
+        Returns:
+            (processor, key) 元组
+
+        Raises:
+            ValueError: 如果模型已存在或参数无效
+        """
+        key = (run_id, model_name)
+
+        # 检查是否已存在（包括预置模型）
+        if key in self.config_processors or key in self.dynamic_processors:
+            raise ValueError(f"模型 '{model_name}' 已存在 (run_id={run_id})")
+
+        # 验证参数
+        if token_in_token_out and not tokenizer_path:
+            raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
+
+        # 解析 tokenizer 路径（仅在 token_in_token_out=True 时需要）
+        resolved_tokenizer_path = None
+        if token_in_token_out and tokenizer_path:
+            resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
+
+        # 创建 Processor
+        processor = self._create_processor(
+            model_name=model_name,
+            url=url,
+            api_key=api_key,
+            tokenizer_path=resolved_tokenizer_path,
+            token_in_token_out=token_in_token_out,
+            run_id=run_id,
+            tool_parser=tool_parser,
+            reasoning_parser=reasoning_parser
+        )
+
+        return processor, key
+
     async def register_dynamic_processor(
         self,
         model_name: str,
@@ -405,34 +463,19 @@ class ProcessorManager:
             ValueError: 如果 (run_id, model_name) 已存在（包括预置模型）或参数无效
             DatabaseError: 数据库操作失败
         """
-        key = (run_id, model_name)
-
-        # 检查是否已存在（包括预置模型）
-        if key in self.config_processors or key in self.dynamic_processors:
-            raise ValueError(f"模型 '{model_name}' 已存在 (run_id={run_id})")
-
-        # 验证参数
-        if token_in_token_out and not tokenizer_path:
-            raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
-
-        # 解析 tokenizer 路径（仅在 token_in_token_out=True 时需要）
-        resolved_tokenizer_path = None
-        if token_in_token_out and tokenizer_path:
-            resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
-
-        # 创建 Processor
-        processor = self._create_processor(
+        # 调用公共注册逻辑
+        processor, key = self._register_processor_impl(
             model_name=model_name,
             url=url,
             api_key=api_key,
-            tokenizer_path=resolved_tokenizer_path,
+            tokenizer_path=tokenizer_path,
             token_in_token_out=token_in_token_out,
             run_id=run_id,
             tool_parser=tool_parser,
             reasoning_parser=reasoning_parser
         )
 
-        # 只存入 dynamic_processors
+        # 存入 dynamic_processors
         self.dynamic_processors[key] = processor
         logger.info(f"[{model_name}] 注册动态模型成功: run_id={run_id}, url={url}")
 
@@ -443,7 +486,7 @@ class ProcessorManager:
                     model_name=model_name,
                     url=url,
                     api_key=api_key,
-                    tokenizer_path=resolved_tokenizer_path,
+                    tokenizer_path=processor.tokenizer_path,
                     token_in_token_out=token_in_token_out,
                     run_id=run_id,
                     tool_parser=tool_parser,
@@ -487,34 +530,19 @@ class ProcessorManager:
         Raises:
             ValueError: 如果 (run_id, model_name) 已存在（包括动态模型）或参数无效
         """
-        key = (run_id, model_name)
-
-        # 检查是否已存在（包括动态模型）
-        if key in self.config_processors or key in self.dynamic_processors:
-            raise ValueError(f"模型 '{model_name}' 已存在 (run_id={run_id})")
-
-        # 验证参数
-        if token_in_token_out and not tokenizer_path:
-            raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
-
-        # 解析 tokenizer 路径（仅在 token_in_token_out=True 时需要）
-        resolved_tokenizer_path = None
-        if token_in_token_out and tokenizer_path:
-            resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
-
-        # 创建 Processor
-        processor = self._create_processor(
+        # 调用公共注册逻辑
+        processor, key = self._register_processor_impl(
             model_name=model_name,
             url=url,
             api_key=api_key,
-            tokenizer_path=resolved_tokenizer_path,
+            tokenizer_path=tokenizer_path,
             token_in_token_out=token_in_token_out,
             run_id=run_id,
             tool_parser=tool_parser,
             reasoning_parser=reasoning_parser
         )
 
-        # 只存入 config_processors
+        # 存入 config_processors
         self.config_processors[key] = processor
         logger.info(f"[{model_name}] 注册预置模型成功: run_id={run_id}")
 
