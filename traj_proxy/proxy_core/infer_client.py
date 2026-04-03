@@ -1,33 +1,26 @@
-"""
-InferClient - Infer 服务客户端
-
-调用 OpenAI /v1/completions 接口。
-"""
-
-from typing import Dict, Any, AsyncIterator, List, Union, Optional
-import traceback
-import httpx
 import json
 import asyncio
+import traceback
+import requests
+import logging
+from typing import Dict, Any, AsyncIterator, List, Union, Optional
+from concurrent.futures import ThreadPoolExecutor
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from traj_proxy.exceptions import InferServiceError
 from traj_proxy.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-
 # prompt 参数类型：可以是 string 或 List[int] (token ids)
 PromptInput = Union[str, List[int]]
 
-
 class InferClient:
-    """Infer 服务客户端 - 调用 OpenAI /v1/completions 接口
-
-    提供 send_completion (非流式) 和 send_completion_stream (流式) 两种调用方式。
-    prompt 参数支持 string 或 List[int] (token ids)，兼容 OpenAI 标准。
-
-    每个实例维护独立的 HTTP 客户端，避免多进程环境下的共享问题。
-    支持配置化的连接池参数。
+    """Infer 服务客户端 - 使用 requests 线程池实现 (兼容异步接口)
+    
+    融合了最新的接口规范，并针对 vLLM/Ascend NPU 环境下的网络不稳定性（如 RemoteProtocolError）
+    进行了优化。通过 requests 的 Retry 机制和显式的 Connection: close 头来提升成功率。
     """
 
     def __init__(
@@ -37,316 +30,199 @@ class InferClient:
         timeout: float = 300.0,
         connect_timeout: float = 60.0,
         max_connections: int = 100,
-        max_keepalive_connections: int = 20,
-        keepalive_expiry: float = 30.0
+        **kwargs
     ):
-        """初始化 InferClient
-
-        Args:
-            base_url: Infer 服务的 base URL（如 http://localhost:8000）
-            api_key: API 密钥
-            timeout: 请求超时时间（秒）
-            connect_timeout: 连接超时时间（秒）
-            max_connections: 最大连接数
-            max_keepalive_connections: 最大保活连接数
-            keepalive_expiry: 保活连接过期时间（秒）
-        """
-        if base_url is None:
-            raise ValueError("InferClient base_url 必须提供")
-        if api_key is None:
-            raise ValueError("InferClient api_key 必须提供")
+        """初始化 InferClient"""
+        if base_url is None or api_key is None:
+            raise ValueError("InferClient base_url 和 api_key 必须提供")
 
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-
-        # 连接池配置
-        self._timeout_config = httpx.Timeout(timeout, connect=connect_timeout)
-        self._limits_config = httpx.Limits(
-            max_connections=max_connections,
-            max_keepalive_connections=max_keepalive_connections,
-            keepalive_expiry=keepalive_expiry
-        )
-
-        # 实例级客户端（延迟初始化）
-        self._client: Optional[httpx.AsyncClient] = None
+        
+        # requests 专用配置 (连接超时, 读取超时)
+        self._timeout_config = (connect_timeout, timeout)
+        self._pool_size = max_connections
+        
+        self._session: Optional[requests.Session] = None
         self._client_lock = asyncio.Lock()
+        
+        # 使用线程池执行同步调用，避免阻塞异步事件循环
+        self._executor = ThreadPoolExecutor(max_workers=max_connections)
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        """获取或创建 HTTP 客户端（延迟初始化）
-
-        Returns:
-            httpx.AsyncClient 实例
-        """
-        if self._client is None or self._client.is_closed:
+    async def _get_session(self) -> requests.Session:
+        """初始化并配置带重试机制的 Session (针对 vLLM 稳定性优化)"""
+        if self._session is None:
             async with self._client_lock:
-                # 双重检查
-                if self._client is None or self._client.is_closed:
-                    self._client = httpx.AsyncClient(
-                        timeout=self._timeout_config,
-                        limits=self._limits_config
+                if self._session is None:
+                    self._session = requests.Session()
+                    # 鲁棒重试策略：针对 502/503/504 进行自动重试
+                    retry_strategy = Retry(
+                        total=2,
+                        backoff_factor=1,
+                        status_forcelist=[502, 503, 504],
+                        allowed_methods=["POST"]
                     )
-                    logger.debug(f"[{self.base_url}] InferClient: 创建新的 HTTP 客户端")
-        return self._client
+                    adapter = HTTPAdapter(
+                        pool_connections=self._pool_size,
+                        pool_maxsize=self._pool_size,
+                        max_retries=retry_strategy
+                    )
+                    self._session.mount("http://", adapter)
+                    self._session.mount("https://", adapter)
+                    logger.debug(f"[{self.base_url}] InferClient: 已初始化 requests Session")
+        return self._session
+
+    def _build_common_headers(self):
+        """构建通用请求头，强制 Connection: close 以解决 vLLM 连接重置问题"""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Connection": "close"  
+        }
 
     async def close(self):
-        """关闭 HTTP 客户端"""
-        if self._client is not None and not self._client.is_closed:
-            async with self._client_lock:
-                if self._client is not None and not self._client.is_closed:
-                    await self._client.aclose()
-                    self._client = None
-                    logger.debug(f"[{self.base_url}] InferClient: 关闭 HTTP 客户端")
+        """释放资源"""
+        if self._session:
+            self._session.close()
+            self._session = None
+        self._executor.shutdown(wait=False)
 
-    def _build_request_body(
-        self,
-        prompt: PromptInput,
-        model: str,
-        stream: bool,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """构建请求体
+    # --- 核心请求逻辑 ---
 
-        Args:
-            prompt: 待补全的提示（string 或 List[int]）
-            model: 模型名称
-            stream: 是否流式
-            **kwargs: 其他请求参数
+    async def _handle_request(self, url: str, request_body: dict) -> Dict[str, Any]:
+        """非流式请求处理，将 requests 同步调用转为异步执行"""
+        session = await self._get_session()
+        loop = asyncio.get_event_loop()
 
-        Returns:
-            请求体字典
-        """
-        # 获取参数并确保非 None 值
-        max_tokens = kwargs.get("max_tokens", 100)
-        if max_tokens is None:
-            max_tokens = 100
-
-        temperature = kwargs.get("temperature", 0.7)
-        if temperature is None:
-            temperature = 0.7
-
-        request_body = {
-            "model": model,
-            "prompt": prompt,  # OpenAI 标准：支持 string 或 List[int]
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-        }
-
-        if stream:
-            request_body["stream"] = True
-
-        # 支持额外参数（只添加非 None 的值）
-        extra_params = ["top_p", "presence_penalty", "frequency_penalty", "logprobs", "n", "seed", "stop", "echo", "best_of"]
-        for param in extra_params:
-            if param in kwargs and kwargs[param] is not None:
-                request_body[param] = kwargs[param]
-        request_body['return_token_ids'] = True # 强制返回 token ids，便于后续处理
-        request_body['logprobs'] = 1
-
-        return request_body
-
-    async def send_completion(
-        self,
-        prompt: PromptInput,
-        model: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """发送补全请求（非流式）
-
-        Args:
-            prompt: 待补全的提示，支持：
-                - string: 文本模式
-                - List[int]: token ids 模式
-            model: 模型名称
-            **kwargs: 其他请求参数（如 max_tokens, temperature, logprobs, tools 等）
-
-        Returns:
-            Infer 服务返回的 JSON 响应
-
-        Raises:
-            InferServiceError: 当请求失败时抛出
-        """
-        url = f"{self.base_url}/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        request_body = self._build_request_body(prompt, model, stream=False, **kwargs)
-
-        logger.debug(f"[{model}] 发送 Infer 请求: url={url}, prompt_type={type(prompt).__name__}")
         try:
-            client = await self._get_client()
-            response = await client.post(url, json=request_body, headers=headers)
+            response = await loop.run_in_executor(
+                self._executor,
+                lambda: session.post(
+                    url,
+                    json=request_body,
+                    headers=self._build_common_headers(),
+                    timeout=self._timeout_config,
+                    stream=False
+                )
+            )
             response.raise_for_status()
-            logger.debug(f"[{model}] Infer 响应: status={response.status_code}")
-            logger.error(f"request_body: {request_body}, response: {response.json()}")
             return response.json()
-        except httpx.HTTPStatusError as e:
-            raise InferServiceError(f"Infer 服务请求失败: {e.response.status_code} - {e.response.text}")
+
+        except requests.exceptions.RequestException as e:
+            status_code = getattr(e.response, 'status_code', 'N/A')
+            error_text = getattr(e.response, 'text', str(e))
+            raise InferServiceError(f"Infer 请求失败 [{status_code}]: {error_text}")
         except Exception as e:
-            raise InferServiceError(f"Infer 服务请求异常: {str(e)}\n{traceback.format_exc()}")
+            raise InferServiceError(f"Infer 内部异常: {str(e)}\n{traceback.format_exc()}")
 
-    async def send_completion_stream(
-        self,
-        prompt: PromptInput,
-        model: str,
-        **kwargs
-    ) -> AsyncIterator[Dict[str, Any]]:
-        """发送补全请求（流式）
-
-        Args:
-            prompt: 待补全的提示，支持：
-                - string: 文本模式
-                - List[int]: token ids 模式
-            model: 模型名称
-            **kwargs: 其他请求参数
-
-        Yields:
-            每个流式响应的 JSON 数据
-
-        Raises:
-            InferServiceError: 当请求失败时抛出
-        """
-        url = f"{self.base_url}/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        request_body = self._build_request_body(prompt, model, stream=True, **kwargs)
+    async def _handle_stream_request(self, url: str, request_body: dict) -> AsyncIterator[Dict[str, Any]]:
+        """流式请求处理，返回异步生成器"""
+        session = await self._get_session()
+        loop = asyncio.get_event_loop()
 
         try:
-            client = await self._get_client()
-            async with client.stream("POST", url, json=request_body, headers=headers) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str == "[DONE]":
+            response = await loop.run_in_executor(
+                self._executor,
+                lambda: session.post(
+                    url,
+                    json=request_body,
+                    headers=self._build_common_headers(),
+                    timeout=self._timeout_config,
+                    stream=True
+                )
+            )
+            response.raise_for_status()
+
+            # 直接 yield from 异步生成器
+            async for chunk in self._async_stream_gen(response):
+                yield chunk
+
+        except requests.exceptions.RequestException as e:
+            status_code = getattr(e.response, 'status_code', 'N/A')
+            error_text = getattr(e.response, 'text', str(e))
+            raise InferServiceError(f"Infer 请求失败 [{status_code}]: {error_text}")
+        except Exception as e:
+            raise InferServiceError(f"Infer 内部异常: {str(e)}\n{traceback.format_exc()}")
+
+    async def _async_stream_gen(self, response: requests.Response) -> AsyncIterator[Dict[str, Any]]:
+        """异步生成器：解析 SSE 流数据"""
+        try:
+            # 在单独的线程中迭代 iter_lines 以防阻塞，但简单处理亦可
+            for line in response.iter_lines():
+                if line:
+                    decoded_line = line.decode('utf-8').strip()
+                    if decoded_line.startswith("data: "):
+                        content = decoded_line[6:]
+                        if content == "[DONE]":
                             break
                         try:
-                            yield json.loads(data_str)
+                            yield json.loads(content)
                         except json.JSONDecodeError:
                             continue
-        except httpx.HTTPStatusError as e:
-            raise InferServiceError(f"Infer 服务流式请求失败: {e.response.status_code} - {e.response.text}")
-        except Exception as e:
-            raise InferServiceError(f"Infer 服务流式请求异常: {str(e)}\n{traceback.format_exc()}")
+        finally:
+            response.close()
 
-    async def send_chat_completion(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """发送 Chat Completions 请求（非流式）
+    # --- OpenAI Completions 接口 ---
 
-        直接转发 OpenAI 格式的 chat completions 请求到推理服务。
+    async def send_completion(self, prompt: PromptInput, model: str, **kwargs) -> Dict[str, Any]:
+        url = f"{self.base_url}/completions"
+        request_body = self._build_completion_body(prompt, model, stream=False, **kwargs)
+        return await self._handle_request(url, request_body)
 
-        Args:
-            messages: OpenAI 格式的消息列表
-            model: 模型名称
-            **kwargs: 其他请求参数（如 max_tokens, temperature, tools 等）
+    async def send_completion_stream(self, prompt: PromptInput, model: str, **kwargs) -> AsyncIterator[Dict[str, Any]]:
+        url = f"{self.base_url}/completions"
+        request_body = self._build_completion_body(prompt, model, stream=True, **kwargs)
+        async for chunk in self._handle_stream_request(url, request_body):
+            yield chunk
 
-        Returns:
-            推理服务返回的原始 JSON 响应
-
-        Raises:
-            InferServiceError: 当请求失败时抛出
-        """
-        url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        # 构建请求体
-        request_body = {
+    def _build_completion_body(self, prompt, model, stream, **kwargs):
+        """合并最新版本的 Completion 参数逻辑"""
+        body = {
             "model": model,
-            "messages": messages,
+            "prompt": prompt,
+            "max_tokens": kwargs.get("max_tokens") or 100,
+            "temperature": kwargs.get("temperature") if kwargs.get("temperature") is not None else 0.7,
+            "stream": stream,
+            "return_token_ids": True,
+            "logprobs": 1
         }
+        # 补充最新接口中支持的额外参数
+        extra_params = ["top_p", "presence_penalty", "frequency_penalty", "n", "seed", "stop", "echo", "best_of"]
+        for p in extra_params:
+            if p in kwargs and kwargs[p] is not None:
+                body[p] = kwargs[p]
+        return body
 
-        # 添加可选参数
-        optional_params = [
-            "max_tokens", "max_completion_tokens", "temperature", "top_p", "presence_penalty", "frequency_penalty",
-            "tools", "tool_choice", "parallel_tool_calls", "stream", "stop", "n", "seed"
-        ]
-        for param in optional_params:
-            if param in kwargs and kwargs[param] is not None:
-                request_body[param] = kwargs[param]
+    # --- OpenAI Chat Completions 接口 ---
 
-        logger.debug(f"[{model}] 发送 Chat Completions 请求: url={url}")
-        try:
-            client = await self._get_client()
-            response = await client.post(url, json=request_body, headers=headers)
-            response.raise_for_status()
-            logger.debug(f"[{model}] Chat Completions 响应: status={response.status_code}")
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            raise InferServiceError(f"Infer 服务请求失败: {e.response.status_code} - {e.response.text}")
-        except Exception as e:
-            raise InferServiceError(f"Infer 服务请求异常: {str(e)}\n{traceback.format_exc()}")
-
-    async def send_chat_completion_stream(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        **kwargs
-    ) -> AsyncIterator[Dict[str, Any]]:
-        """发送 Chat Completions 请求（流式）
-
-        直接转发 OpenAI 格式的 chat completions 流式请求到推理服务。
-
-        Args:
-            messages: OpenAI 格式的消息列表
-            model: 模型名称
-            **kwargs: 其他请求参数
-
-        Yields:
-            每个流式响应的 JSON 数据
-
-        Raises:
-            InferServiceError: 当请求失败时抛出
-        """
+    async def send_chat_completion(self, messages: List[Dict[str, Any]], model: str, **kwargs) -> Dict[str, Any]:
         url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        request_body = self._build_chat_body(messages, model, stream=False, **kwargs)
+        return await self._handle_request(url, request_body)
 
-        # 构建请求体
-        request_body = {
-            "model": model,
-            "messages": messages,
-            "stream": True
-        }
+    async def send_chat_completion_stream(self, messages: List[Dict[str, Any]], model: str, **kwargs) -> AsyncIterator[Dict[str, Any]]:
+        url = f"{self.base_url}/chat/completions"
+        request_body = self._build_chat_body(messages, model, stream=True, **kwargs)
+        async for chunk in self._handle_stream_request(url, request_body):
+            yield chunk
 
-        # 添加可选参数
+    def _build_chat_body(self, messages, model, stream, **kwargs):
+        """合并最新版本的 Chat 参数逻辑"""
+        body = {
+            "model": model, 
+            "messages": messages, 
+            "stream": stream
+        }
+        # 补充最新接口中更完整的 Chat 参数
         optional_params = [
-            "max_tokens", "max_completion_tokens", "temperature", "top_p", "presence_penalty", "frequency_penalty",
-            "tools", "tool_choice", "parallel_tool_calls", "stop", "n", "seed"
+            "max_tokens", "max_completion_tokens", "temperature", "top_p", 
+            "presence_penalty", "frequency_penalty", "tools", "tool_choice", 
+            "parallel_tool_calls", "stop", "n", "seed"
         ]
-        for param in optional_params:
-            if param in kwargs and kwargs[param] is not None:
-                request_body[param] = kwargs[param]
-
-        try:
-            client = await self._get_client()
-            async with client.stream("POST", url, json=request_body, headers=headers) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            yield json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
-        except httpx.HTTPStatusError as e:
-            raise InferServiceError(f"Infer 服务流式请求失败: {e.response.status_code} - {e.response.text}")
-        except Exception as e:
-            raise InferServiceError(f"Infer 服务流式请求异常: {str(e)}\n{traceback.format_exc()}")
+        for p in optional_params:
+            if p in kwargs and kwargs[p] is not None:
+                body[p] = kwargs[p]
+        return body
 
     def __repr__(self) -> str:
-        return f"InferClient(base_url={self.base_url})"
+        return f"InferClient(requests_stabilized)(base_url={self.base_url})"

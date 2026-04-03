@@ -132,3 +132,18 @@ def get_sync_retry_delay() -> int:
         初始延迟（秒）
     """
     return get_processor_manager_config().get("sync_retry_delay", 5)
+
+
+def get_models_dir() -> str:
+    """
+    获取 models 目录路径
+
+    优先级：
+    1. config.yaml 中的 models_dir 配置
+    2. 默认值 /app/models
+
+    返回:
+        models 目录的绝对路径
+    """
+    models_dir = get_config().get("models_dir", "/app/models")
+    return os.path.abspath(models_dir)

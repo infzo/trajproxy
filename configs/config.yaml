@@ -1,3 +1,7 @@
+# models 目录路径（用于 tokenizer 加载）
+# 容器内默认路径为 /app/models，本地开发可改为相对路径
+models_dir: /app/models
+
 # ProxyWorker 配置
 proxy_workers:
   count: 2                    # Worker 数量

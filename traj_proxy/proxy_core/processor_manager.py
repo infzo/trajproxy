@@ -20,7 +20,7 @@ from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.store.models import ModelConfig
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
-from traj_proxy.utils.config import get_sync_max_retries, get_sync_retry_delay, get_sync_fallback_interval
+from traj_proxy.utils.config import get_sync_max_retries, get_sync_retry_delay, get_sync_fallback_interval, get_models_dir
 
 logger = get_logger(__name__)
 
@@ -659,23 +659,28 @@ class ProcessorManager:
         Raises:
             ValueError: 如果 tokenizer 不存在
         """
-        # 如果是路径，直接使用
+        # 如果是绝对路径，直接使用
         if os.path.isabs(tokenizer):
             if not os.path.exists(tokenizer):
                 raise ValueError(f"Tokenizer 路径不存在: {tokenizer}")
             return tokenizer
 
-        # 检查 models 目录
-        models_dir = os.path.join(os.path.dirname(__file__), "..", "..", "models")
+        # 检查是否是 HuggingFace 模型名称（包含 /）
+        if "/" in tokenizer and not tokenizer.startswith("/"):
+            # 先检查本地 models 目录是否存在
+            models_dir = get_models_dir()
+            local_path = os.path.join(models_dir, tokenizer)
+            if os.path.exists(local_path):
+                return local_path
+            # 本地不存在，返回 HuggingFace 名称，让 AutoTokenizer.from_pretrained 处理
+            return tokenizer
+
+        # 相对路径：在 models 目录下查找
+        models_dir = get_models_dir()
         local_path = os.path.join(models_dir, tokenizer)
 
         if os.path.exists(local_path):
             return local_path
-
-        # 检查是否是 HuggingFace 模型名称（包含 /）
-        if "/" in tokenizer and not tokenizer.startswith("/"):
-            # HuggingFace 模型名称，直接返回，让 AutoTokenizer.from_pretrained 处理
-            return tokenizer
 
         raise ValueError(
             f"Tokenizer '{tokenizer}' 不存在。请使用 download_tokenizer.py 脚本下载，"
