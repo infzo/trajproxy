@@ -207,8 +207,8 @@ class PromptBuilder:
                             "id": tc.id,
                             "type": tc.type,
                             "function": {
-                                "name": tc.name,
-                                "arguments": tc.arguments
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
                             }
                         }
                         for tc in extracted.tool_calls
