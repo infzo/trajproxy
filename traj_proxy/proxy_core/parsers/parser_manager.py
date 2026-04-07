@@ -6,7 +6,7 @@ Parser 管理器
 
 统一管理 Tool Parser 和 Reasoning Parser 的创建和获取。
 """
-from typing import Optional, Tuple, List, Any, Sequence
+from typing import Optional, List, Any, Dict, Sequence, Union, Tuple
 
 # 确保 vllm 兼容层初始化
 from traj_proxy.proxy_core.parsers.vllm_compat import ensure_initialized
@@ -20,10 +20,14 @@ from vllm.reasoning.abs_reasoning_parsers import (
     ReasoningParser,
     ReasoningParserManager,
 )
-from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
+from vllm.entrypoints.openai.chat_completion.protocol import (
+    ChatCompletionRequest,
+    ChatCompletionToolsParam,
+)
 from vllm.entrypoints.openai.engine.protocol import (
     DeltaMessage,
     ExtractedToolCallInformation,
+    FunctionDefinition,
 )
 
 
@@ -47,6 +51,42 @@ class Parser:
     ):
         self._tool_parser = tool_parser
         self._reasoning_parser = reasoning_parser
+
+    @staticmethod
+    def _build_request(request: Union[Dict[str, Any], ChatCompletionRequest]) -> ChatCompletionRequest:
+        """将 dict 格式的请求转换为 ChatCompletionRequest 对象
+
+        Args:
+            request: dict 格式的请求或已有的 ChatCompletionRequest 对象
+
+        Returns:
+            ChatCompletionRequest 对象
+        """
+        if isinstance(request, ChatCompletionRequest):
+            return request
+
+        # 从 dict 构造 ChatCompletionRequest，转换 tools 列表
+        raw_tools = request.get("tools")
+        tools = None
+        if raw_tools:
+            tools = []
+            for tool in raw_tools:
+                func_dict = tool.get("function", {})
+                tools.append(ChatCompletionToolsParam(
+                    type=tool.get("type", "function"),
+                    function=FunctionDefinition(
+                        name=func_dict.get("name", ""),
+                        description=func_dict.get("description"),
+                        parameters=func_dict.get("parameters"),
+                    )
+                ))
+
+        return ChatCompletionRequest(
+            messages=request.get("messages", []),
+            model=request.get("model"),
+            tools=tools,
+            tool_choice=request.get("tool_choice", "auto"),
+        )
 
     # ==================== 流式状态管理 ====================
 
@@ -72,16 +112,22 @@ class Parser:
     def extract_tool_calls(
         self,
         model_output: str,
-        request: ChatCompletionRequest,
+        request: Union[Dict[str, Any], ChatCompletionRequest],
     ) -> ExtractedToolCallInformation:
-        """提取工具调用（非流式）"""
+        """提取工具调用（非流式）
+
+        Args:
+            model_output: 模型输出文本
+            request: dict 格式的请求或 ChatCompletionRequest 对象
+        """
         if not self._tool_parser:
             return ExtractedToolCallInformation(
                 tools_called=False,
                 tool_calls=[],
                 content=model_output
             )
-        return self._tool_parser.extract_tool_calls(model_output, request)
+        req = self._build_request(request)
+        return self._tool_parser.extract_tool_calls(model_output, req)
 
     def extract_tool_calls_streaming(
         self,
@@ -91,11 +137,16 @@ class Parser:
         previous_token_ids: Sequence[int],
         current_token_ids: Sequence[int],
         delta_token_ids: Sequence[int],
-        request: ChatCompletionRequest,
+        request: Union[Dict[str, Any], ChatCompletionRequest],
     ) -> DeltaMessage | None:
-        """提取工具调用（流式）"""
+        """提取工具调用（流式）
+
+        Args:
+            request: dict 格式的请求或 ChatCompletionRequest 对象
+        """
         if not self._tool_parser:
             return None
+        req = self._build_request(request)
         return self._tool_parser.extract_tool_calls_streaming(
             previous_text=previous_text,
             current_text=current_text,
@@ -103,10 +154,29 @@ class Parser:
             previous_token_ids=previous_token_ids,
             current_token_ids=current_token_ids,
             delta_token_ids=delta_token_ids,
-            request=request,
+            request=req,
         )
 
     # ==================== Reasoning Parser 接口 ====================
+
+    def extract_reasoning(
+        self,
+        model_output: str,
+        request: Union[Dict[str, Any], ChatCompletionRequest],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """提取推理内容（非流式）
+
+        Args:
+            model_output: 模型输出文本
+            request: dict 格式的请求或 ChatCompletionRequest 对象
+
+        Returns:
+            (reasoning, content) 元组
+        """
+        if not self._reasoning_parser:
+            return None, model_output
+        req = self._build_request(request)
+        return self._reasoning_parser.extract_reasoning(model_output, req)
 
     def extract_reasoning_streaming(
         self,

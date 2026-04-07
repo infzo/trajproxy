@@ -458,7 +458,9 @@ class TokenPipeline(BasePipeline):
         """
         import traceback
 
-        content_delta = delta_text
+        # 按照 vLLM 的设计: 初始化为 None
+        # 只有在明确需要输出时才设置值
+        content_delta = None
         tool_calls_delta = None
         reasoning_delta = None
 
@@ -485,7 +487,7 @@ class TokenPipeline(BasePipeline):
                     f"{traceback.format_exc()}"
                 )
 
-        # 2. 处理工具调用解析
+        # 2. 处理工具调用解析（vLLM 风格）
         if self.parser.has_tool_parser and tools:
             try:
                 delta_msg = self.parser.extract_tool_calls_streaming(
@@ -495,9 +497,10 @@ class TokenPipeline(BasePipeline):
                     previous_token_ids=previous_token_ids,
                     current_token_ids=current_token_ids,
                     delta_token_ids=delta_token_ids,
-                    tools=tools
+                    request=context.raw_request
                 )
                 if delta_msg:
+                    # parser 返回了 delta_msg
                     if delta_msg.tool_calls:
                         tool_calls_delta = [
                             {
@@ -505,19 +508,35 @@ class TokenPipeline(BasePipeline):
                                 "id": tc.id,
                                 "type": tc.type,
                                 "function": {
-                                    "name": tc.name,
-                                    "arguments": tc.arguments
-                                } if tc.name or tc.arguments else None
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                } if tc.function and (tc.function.name or tc.function.arguments) else None
                             }
                             for tc in delta_msg.tool_calls
                         ]
-                    if delta_msg.content is not None:
-                        content_delta = delta_msg.content
+                    # 使用 parser 返回的 content（可能是 None 或空字符串）
+                    # 注意：这里会覆盖 reasoning_parser 设置的 content_delta
+                    content_delta = delta_msg.content
+
+                    logger.debug(
+                        f"[{context.unique_id}] tool parse result: "
+                        f"content={repr(content_delta)}, tool_calls={len(tool_calls_delta) if tool_calls_delta else 0}"
+                    )
+                else:
+                    # parser 返回 None = "等待更多数据" 或 "不输出"
+                    # 按照 vLLM 的设计：如果 parser 返回 None，不输出任何内容
+                    # 这意味着 content_delta 保持 None（即使 reasoning_parser 之前设置了值）
+                    content_delta = None
+
             except Exception as e:
                 logger.warning(
                     f"[{context.unique_id}] 工具调用流式解析失败: {e}\n"
                     f"{traceback.format_exc()}"
                 )
+        elif content_delta is None and delta_text:
+            # 没有 tool parser 或没有 tools，且 content_delta 还没有被 reasoning_parser 设置
+            # 直接输出原始文本（vLLM 风格）
+            content_delta = delta_text
 
         return content_delta, tool_calls_delta, reasoning_delta
 

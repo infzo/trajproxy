@@ -304,7 +304,7 @@ async def delete_model(request: Request, model_name: str, run_id: str = ""):
 
 
 @model_router.get("")
-async def list_models_admin(request: Request):
+async def list_models(request: Request):
     """
     列出所有已注册模型（管理格式，包含详细信息）
 

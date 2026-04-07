@@ -66,12 +66,22 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         # 2. 如果没有预置 tool_calls，尝试从响应文本解析
         if not tool_calls:
             try:
-                extracted_tool_calls, extracted_content = self.parser.extract_tool_calls(
+                result = self.parser.extract_tool_calls(
                     content, context.raw_request
                 )
-                if extracted_tool_calls:
-                    tool_calls = extracted_tool_calls
-                    final_content = extracted_content
+                if result.tools_called and result.tool_calls:
+                    tool_calls = [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        }
+                        for tc in result.tool_calls
+                    ]
+                    final_content = result.content
                     finish_reason = "tool_calls"
                     logger.debug(f"[{context.unique_id}] 从文本解析到 {len(tool_calls)} 个工具调用")
             except Exception as e:
