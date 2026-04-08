@@ -5,6 +5,7 @@ TokenPipeline - Token 模式管道
 支持前缀匹配缓存优化。
 """
 
+import time
 from typing import AsyncIterator, Dict, Any, Optional, TYPE_CHECKING
 
 from traj_proxy.proxy_core.pipeline.base import BasePipeline
@@ -411,6 +412,21 @@ class TokenPipeline(BasePipeline):
         effective_content = parsed_content
         effective_tool_calls = parsed_tool_calls or tool_calls_delta
 
+        # 累积 logprobs（每个 chunk 的 choice 中可能携带，需合并数组）
+        if "choices" in infer_chunk and infer_chunk["choices"]:
+            choice = infer_chunk["choices"][0]
+            if "logprobs" in choice and choice["logprobs"]:
+                chunk_lp = choice["logprobs"]
+                if context.stream_logprobs is None:
+                    # 首次：直接赋值（深拷贝避免引用问题）
+                    context.stream_logprobs = {k: list(v) if isinstance(v, list) else v
+                                               for k, v in chunk_lp.items()}
+                else:
+                    # 后续：追加数组字段
+                    for key in ("tokens", "text_offset", "top_logprobs", "token_logprobs"):
+                        if key in chunk_lp and isinstance(chunk_lp[key], list):
+                            context.stream_logprobs.setdefault(key, []).extend(chunk_lp[key])
+
         # 检查是否结束
         finish_reason = None
         if InferResponseParser.is_stream_finished(infer_chunk):
@@ -588,6 +604,47 @@ class TokenPipeline(BasePipeline):
         context.total_tokens = (context.prompt_tokens or 0) + context.completion_tokens
 
         self._update_timing(context)
+
+        # 统一构建 token_response，保持流式与非流式语义一致
+        # 非流式 token_response 结构: {"id", "object", "created", "model",
+        #   "choices": [{"index", "text", "token_ids", "logprobs", "prompt_token_ids", ...}],
+        #   "usage": {...}}
+        # 流式场景需要构建相同结构，确保下游代码和轨迹数据行为一致
+        if context.token_response is None:
+            context.token_response = {}
+
+        # 保留 infer 服务返回的 usage（如有），否则自行计算
+        if "usage" not in context.token_response:
+            context.token_response["usage"] = {
+                "prompt_tokens": context.prompt_tokens,
+                "completion_tokens": context.completion_tokens,
+                "total_tokens": context.total_tokens,
+            }
+
+        # 补全 choices 结构，与非流式格式对齐
+        if "choices" not in context.token_response:
+            choice = {
+                "text": context.response_text or "",
+                "index": 0,
+                "finish_reason": "stop",
+            }
+            if context.response_ids is not None:
+                choice["token_ids"] = context.response_ids
+            if context.stream_logprobs:
+                choice["logprobs"] = context.stream_logprobs
+            if context.token_ids:
+                choice["prompt_token_ids"] = context.token_ids
+            context.token_response["choices"] = [choice]
+
+        # 补全顶级元数据字段，与非流式对齐
+        if "id" not in context.token_response:
+            context.token_response["id"] = f"cmpl-{context.unique_id}"
+        if "object" not in context.token_response:
+            context.token_response["object"] = "text_completion"
+        if "created" not in context.token_response:
+            context.token_response["created"] = int(time.time())
+        if "model" not in context.token_response:
+            context.token_response["model"] = self.model
 
         # 构建最终响应
         context.raw_response = self.response_builder.build(
