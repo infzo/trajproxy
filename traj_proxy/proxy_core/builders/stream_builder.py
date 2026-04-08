@@ -140,9 +140,10 @@ class StreamChunkBuilder(BaseResponseBuilder):
         if content:
             delta["content"] = content
 
-        # 添加推理内容
+        # 添加推理内容（支持 reasoning 和 reasoning_content 两种格式）
         if reasoning_delta:
             delta["reasoning"] = reasoning_delta
+            delta["reasoning_content"] = reasoning_delta  # Backwards compatibility
 
         # 添加 tool_calls 增量
         if tool_calls_delta:
