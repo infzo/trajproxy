@@ -1,0 +1,578 @@
+❯ 分析代码，对于openai chat completions接口中，tool参数是如何解析的？最终如何转换为token id list进行推理，给出完整处理流程及案例                                                    
+                                                                                                                                 
+⏺ 我来帮你分析 vLLM 中 OpenAI Chat Completions 接口的 tool 参数解析流程。让我先探索代码库。                                                                                         
+                                                                                                                                                                                    
+⏺ 3 Explore agents finished (ctrl+o to expand)                                                                                                                                      
+   ├─ 探索 tool 参数解析流程 · 0 tool uses
+   │  ⎿  Done                                                                                                                                                                       
+   ├─ 探索 chat template 处理 · 0 tool uses
+   │  ⎿  Done                                                                                                                                                                       
+   └─ 探索 tokenization 流程 · 0 tool uses                                                                                                                                          
+      ⎿  Done                                                                                                                                                                       
+                                                                                                                                                                                    
+⏺ 让我直接使用搜索工具来探索代码库。                                                                                                                                                
+                                     
+  Searched for 4 patterns, read 2 files (ctrl+o to expand)                                                                                                                          
+                                                        
+⏺ 现在让我查看 renderer 和 tokenizer 如何处理 tools。                                                                                                                               
+                                    
+  Read 2 files (ctrl+o to expand)                                                                                                                                                   
+                                                                                                                                                                                    
+⏺ 现在让我查看 tool parser 和相关的测试案例。                                                                                                                                       
+                                                                                                                                                                                    
+  Searched for 1 pattern, read 3 files (ctrl+o to expand)                                                                                                                           
+                                                                                                                                                                                    
+⏺ 让我查看 chat_utils 中的消息解析和 tool 相关处理。                                                                                                                                
+                                                                                                                                                                                    
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)                                                                                                                            
+                                                                                                                                                                                    
+⏺ 让我查看一个具体的 chat template 示例，以了解 tool 如何被渲染到 prompt 中。                                                                                                       
+                                                                                                                                                                                    
+  Read 2 files (ctrl+o to expand)                                                                                                                                                   
+                                                                                                                                                                                    
+⏺ 现在让我查看 _preprocess_chat 方法以理解完整的处理流程。                                                                                                                          
+                                                                                                                                                                                    
+  Searched for 3 patterns (ctrl+o to expand)                                                                                                                                        
+                                                                                                                                                                                    
+⏺ 现在我已经收集了足够的信息，可以创建详细的分析文档。让我创建计划文件。                                                                                                            
+                                                                                                                                                                                    
+⏺ Updated plan                                                                                                                                                                      
+  ⎿  /plan to preview                                                                                                                                                               
+                                                                                                                                                                                    
+⏺ 我已经完成了详细的分析文档。让我总结一下核心发现，然后退出计划模式。                                                                                                              
+                                                                                                                                                                                    
+  分析总结                                                                                                                                                                          
+                                                                                                                                                                                    
+  vLLM 中 OpenAI Chat Completions 的 tools 参数处理流程如下：                                                                                                                       
+                                                                                                                                                                                    
+  核心流程                                                                                                                                                                          
+                                                                                                                                                                                    
+  1. 请求解析 (protocol.py):                                                                                                                                                        
+    - ChatCompletionRequest 解析 tools 和 tool_choice 参数
+    - tools 被解析为 list[ChatCompletionToolsParam]                                                                                                                                 
+  2. 预处理 (serving.py):                                                                                                                                                           
+    - render_chat_request 将 tools 转换为 dict 格式                                                                                                                                 
+    - _preprocess_chat 将 tools 合并到 chat_template_kwargs                                                                                                                         
+  3. Prompt 渲染 (hf.py):                                                                                                                                                           
+    - HfRenderer.render_messages 调用 safe_apply_chat_template                                                                                                                      
+    - tools 通过 tokenizer.apply_chat_template 传递给 Jinja2 模板                                                                                                                   
+  4. Template 渲染 (.jinja 文件):                                                                                                                                                   
+    - Jinja2 模板将 tools 渲染为模型可理解的 prompt 格式                                                                                                                            
+    - 不同模型有不同的模板格式（Hermes、Llama、Mistral 等）                                                                                                                         
+  5. Tokenization:                                                                                                                                                                  
+    - 渲染后的 prompt 文本被 tokenizer 编码为 token ids                                                                                                                             
+    - token ids 作为模型输入进行推理                                                                                                                                                
+  6. 输出解析 (tool_parsers/):                                                                                                                                                      
+    - ToolParser 从模型输出中提取 tool calls                                                                                                                                        
+    - 支持 extract_tool_calls (非流式) 和 extract_tool_calls_streaming (流式)                                                                                                       
+                                                                                                                                                                                    
+  关键代码路径                                                                                                                                                                      
+                                                                                                                                                                                    
+  ChatCompletionRequest → render_chat_request → _preprocess_chat                                                                                                                    
+      → ChatParams(tools=...) → HfRenderer.render_messages                                                                                                                          
+      → safe_apply_chat_template → tokenizer.apply_chat_template                                                                                                                    
+      → Jinja2 template 渲染 → tokenizer.encode → token ids                                                                                                                         
+      → EngineClient.generate → 模型输出                                                                                                                                            
+      → ToolParser.extract_tool_calls → OpenAI 响应格式                                                                                                                             
+                                                                                                                                                                                    
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ready to code?                                                                                                                                                                     
+                                                                                                                                                                                    
+ Here is Claude's plan:                                                                                                                                                             
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ vLLM OpenAI Chat Completions Tool 参数解析流程分析                                                                                                                                 
+                                     
+ Context                             
+
+ 本文档分析 vLLM 中 OpenAI Chat Completions API 的 tools 参数完整处理流程，从 API 请求到最终转换为 token id list 进行推理的全过程。
+
+ 一、整体流程概览
+
+ HTTP Request (tools 参数)
+     ↓
+ ChatCompletionRequest 解析
+     ↓
+ render_chat_request 预处理
+     ↓
+ _preprocess_chat 构建 ChatParams
+     ↓
+ HfRenderer.render_messages
+     ↓
+ safe_apply_chat_template (Jinja2 渲染)
+     ↓
+ tokenizer.apply_chat_template (转换为 prompt 文本)
+     ↓
+ tokenizer.encode (生成 token ids)
+     ↓
+ EngineClient.generate (推理)
+
+ 二、核心代码路径
+
+ 1. API 请求入口
+
+ 文件: vllm/entrypoints/openai/chat_completion/protocol.py
+
+ class ChatCompletionToolsParam(OpenAIBaseModel):
+     type: Literal["function"] = "function"
+     function: FunctionDefinition
+
+ class ChatCompletionRequest(OpenAIBaseModel):
+     # ...
+     tools: list[ChatCompletionToolsParam] | None = None
+     tool_choice: Literal["none"] | Literal["auto"] | Literal["required"] | ChatCompletionNamedToolChoiceParam | None = "none"
+     parallel_tool_calls: bool | None = True
+
+ tools 参数结构示例：
+ {
+     "type": "function",
+     "function": {
+         "name": "get_current_weather",
+         "description": "Get the current weather in a given location",
+         "parameters": {
+             "type": "object",
+             "properties": {
+                 "city": {"type": "string", "description": "The city name"},
+                 "state": {"type": "string", "description": "State abbreviation"}
+             }
+         }
+     }
+ }
+
+ 2. 请求预处理
+
+ 文件: vllm/entrypoints/openai/chat_completion/serving.py
+
+ async def render_chat_request(self, request: ChatCompletionRequest):
+     # 1. 将 tools 转换为 dict 格式
+     if request.tools is None or (request.tool_choice == "none" and self.exclude_tools_when_tool_choice_none):
+         tool_dicts = None
+     else:
+         tool_dicts = [tool.model_dump() for tool in request.tools]
+
+     # 2. 调用 _preprocess_chat 进行预处理
+     conversation, engine_prompts = await self._preprocess_chat(
+         request,
+         request.messages,
+         default_template=self.chat_template,
+         default_template_content_format=self.chat_template_content_format,
+         default_template_kwargs=self.default_chat_template_kwargs,
+         tool_dicts=tool_dicts,
+         tool_parser=tool_parser,
+     )
+
+ 3. Chat 参数构建
+
+ 文件: vllm/entrypoints/openai/engine/serving.py
+
+ async def _preprocess_chat(
+     self,
+     request: RendererChatRequest,
+     messages: list[ChatCompletionMessageParam],
+     ...
+     tool_dicts: list[dict[str, Any]] | None = None,
+     tool_parser: Callable[[TokenizerLike], ToolParser] | None = None,
+ ):
+     # 1. 合并 template kwargs，关键：tools 被加入 kwargs
+     default_template_kwargs = merge_kwargs(
+         default_template_kwargs,
+         dict(
+             tools=tool_dicts,  # tools 传递给 chat template
+             tokenize=isinstance(renderer.tokenizer, MistralTokenizer),
+         ),
+     )
+
+     # 2. 构建 ChatParams
+     chat_params = request.build_chat_params(
+         default_template, default_template_content_format
+     ).with_defaults(default_template_kwargs)
+
+     # 3. 渲染消息
+     (conversation,), (engine_prompt,) = await renderer.render_chat_async(
+         [messages],
+         chat_params,
+         tok_params,
+     )
+
+     # 4. Tool parser 调整请求（如设置 structured outputs）
+     if tool_parser is not None:
+         tool_choice = getattr(request, "tool_choice", "none")
+         if tool_choice != "none":
+             request = tool_parser(tokenizer).adjust_request(request=request)
+
+ 4. Renderer 消息渲染
+
+ 文件: vllm/renderers/hf.py
+
+ class HfRenderer(BaseRenderer):
+     def render_messages(
+         self,
+         messages: list[ChatCompletionMessageParam],
+         params: ChatParams,
+     ) -> tuple[list[ConversationMessage], DictPrompt]:
+         # 1. 解析 chat messages
+         conversation, mm_data, mm_uuids = parse_chat_messages(
+             messages,
+             model_config,
+             content_format=resolve_chat_template_content_format(
+                 chat_template=params.chat_template,
+                 tools=params.chat_template_kwargs.get("tools"),  # tools 用于检测格式
+                 ...
+             ),
+         )
+
+         # 2. 应用 chat template（关键步骤）
+         prompt_raw = safe_apply_chat_template(
+             model_config,
+             tokenizer,
+             conversation,
+             **params.get_apply_chat_template_kwargs(),  # 包含 tools
+         )
+
+ 5. Chat Template 应用
+
+ 文件: vllm/renderers/hf.py
+
+ def safe_apply_chat_template(
+     model_config: "ModelConfig",
+     tokenizer: HfTokenizer,
+     conversation: list[ConversationMessage],
+     *,
+     tools: list[dict[str, Any]] | None = None,  # tools 参数
+     chat_template: str | None = None,
+     tokenize: bool = True,
+     **kwargs,
+ ) -> str | list[int]:
+     # 1. 解析 chat template
+     chat_template = resolve_chat_template(
+         tokenizer,
+         chat_template=chat_template,
+         tools=tools,  # tools 影响 template 选择
+         model_config=model_config,
+     )
+
+     # 2. 调用 HuggingFace tokenizer 的 apply_chat_template
+     return tokenizer.apply_chat_template(
+         conversation=conversation,
+         tools=tools,  # 传递给 HF tokenizer
+         chat_template=chat_template,
+         tokenize=tokenize,
+         **resolved_kwargs,
+     )
+
+ 6. Jinja2 Template 渲染 (以 Hermes 为例)
+
+ 文件: examples/tool_chat_template_hermes.jinja
+
+ {#- System message with tools definition #}
+ {{- "<|im_start|>system\nYou are a function calling AI model..." }}
+ {%- if tools is iterable and tools | length > 0 %}
+     {%- for tool in tools %}
+         {%- if tool.function is defined %}
+             {%- set tool = tool.function %}
+         {%- endif %}
+         {{- '{"type": "function", "function": ' }}
+         {{- '{"name": "' + tool.name + '", ' }}
+         {{- '"description": "' + tool.description + '"' }}
+         {{- ', "parameters": ' + tool.parameters|tojson }}
+         {{- "}" }}
+     {%- endfor %}
+ {%- endif %}
+ {{- " </tools>" }}
+
+ {#- Messages rendering #}
+ {%- for message in messages %}
+     {%- if message.role == "assistant" and message.tool_calls is defined %}
+         {#- 渲染 assistant 的 tool_calls #}
+         {%- for tool_call in message.tool_calls %}
+             {{- '\n<tool_call\n' }}
+             {{- '{"name": "' + tool_call.name + '"' }}
+             {{- ', "arguments": ' + tool_call.arguments|tojson }}
+             {{- '}\n</tool_call' }}
+         {%- endfor %}
+     {%- elif message.role == "tool" %}
+         {#- 渲染 tool response #}
+         {{- '<tool_response>\n' + message.content + '\n</tool_response>' }}
+     {%- endif %}
+ {%- endfor %}
+
+ 7. Tokenization
+
+ 文件: transformers/tokenization_utils_base.py (HuggingFace)
+
+ 当 tokenize=True 时，apply_chat_template 内部调用：
+ def apply_chat_template(self, conversation, tools=None, ...):
+     # 1. 渲染 Jinja2 template 得到 prompt 文本
+     rendered_prompt = self.render_template(chat_template, {
+         "messages": conversation,
+         "tools": tools,
+         ...
+     })
+
+     # 2. tokenize 得到 token ids
+     if tokenize:
+         return self.encode(rendered_prompt, add_special_tokens=False)
+
+     return rendered_prompt
+
+ 8. Tool Parser (输出解析)
+
+ 文件: vllm/tool_parsers/abstract_tool_parser.py
+
+ class ToolParser:
+     def adjust_request(self, request: ChatCompletionRequest) -> ChatCompletionRequest:
+         """为 tool calling 设置 structured outputs"""
+         if not request.tools:
+             return request
+
+         json_schema_from_tool = get_json_schema_from_tools(
+             tool_choice=request.tool_choice,
+             tools=request.tools
+         )
+
+         if json_schema_from_tool is not None:
+             # 设置 JSON schema 约束输出格式
+             request.structured_outputs = StructuredOutputsParams(
+                 json=json_schema_from_tool
+             )
+         return request
+
+     def extract_tool_calls(self, model_output: str, request: ChatCompletionRequest):
+         """从模型输出中提取 tool calls"""
+         raise NotImplementedError
+
+     def extract_tool_calls_streaming(self, ...):
+         """流式输出中提取 tool calls"""
+         raise NotImplementedError
+
+ 文件: vllm/tool_parsers/hermes_tool_parser.py
+
+ class Hermes2ProToolParser(ToolParser):
+     def __init__(self, tokenizer: TokenizerLike):
+         self.tool_call_start_token = "<tool_call"
+         self.tool_call_end_token = "</tool_call"
+         # 编码特殊 token
+         self.tool_call_start_token_ids = self.model_tokenizer.encode(
+             self.tool_call_start_token, add_special_tokens=False
+         )
+
+     def extract_tool_calls(self, model_output: str, request):
+         """解析 <tool_call... 格式的输出"""
+         if self.tool_call_start_token not in model_output:
+             return ExtractedToolCallInformation(
+                 tools_called=False, tool_calls=[], content=model_output
+             )
+
+         # 正则匹配 tool call
+         function_call_tuples = self.tool_call_regex.findall(model_output)
+
+         # 解析 JSON 并构建 ToolCall 对象
+         raw_function_calls = [json.loads(match[0] if match[0] else match[1])
+                              for match in function_call_tuples]
+
+         tool_calls = [
+             ToolCall(
+                 type="function",
+                 function=FunctionCall(
+                     name=function_call["name"],
+                     arguments=json.dumps(function_call["arguments"]),
+                 ),
+             )
+             for function_call in raw_function_calls
+         ]
+         return ExtractedToolCallInformation(
+             tools_called=True,
+             tool_calls=tool_calls,
+             content=content,
+         )
+
+ 三、完整案例演示
+
+ 输入请求
+
+ {
+     "model": "meta-llama/Llama-3.1-8B-Instruct",
+     "messages": [
+         {"role": "user", "content": "What is the weather in Dallas, Texas?"}
+     ],
+     "tools": [{
+         "type": "function",
+         "function": {
+             "name": "get_current_weather",
+             "description": "Get the current weather in a given location",
+             "parameters": {
+                 "type": "object",
+                 "properties": {
+                     "city": {"type": "string", "description": "The city name"},
+                     "state": {"type": "string", "description": "State abbreviation, e.g. 'CA'"}
+                 }
+             }
+         }
+     }],
+     "tool_choice": "auto"
+ }
+
+ 处理流程
+
+ Step 1: 解析为 ChatCompletionRequest
+
+ request.tools = [ChatCompletionToolsParam(...)]
+ request.tool_choice = "auto"
+
+ Step 2: 转换为 dict
+
+ tool_dicts = [{
+     "type": "function",
+     "function": {
+         "name": "get_current_weather",
+         "description": "...",
+         "parameters": {...}
+     }
+ }]
+
+ Step 3: 构建 ChatParams
+
+ chat_params = ChatParams(
+     chat_template=chat_template,
+     chat_template_kwargs={
+         "tools": tool_dicts,
+         "add_generation_prompt": True,
+     }
+ )
+
+ Step 4: Jinja2 渲染后的 Prompt 文本
+
+ <|start_header_id|>system<|end_header_id|>
+
+ Environment: ipython
+ Cutting Knowledge Date: December 2023
+ Today Date: 26 Jul 2024
+
+ You have access to the following functions. To call a function, please respond with JSON for a function call. Respond in the format {"name": function name, "parameters":
+ dictionary of argument name and its value}. Do not use variables.
+
+ {
+     "type": "function",
+     "function": {
+         "name": "get_current_weather",
+         "description": "Get the current weather in a given location",
+         "parameters": {
+             "type": "object",
+             "properties": {
+                 "city": {"type": "string", "description": "The city name"},
+                 "state": {"type": "string", "description": "State abbreviation, e.g. 'CA'"}
+             }
+         }
+     }
+ }
+
+ <|eot_id|><|start_header_id|>user<|end_header_id|>
+
+ What is the weather in Dallas, Texas?<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ Step 5: Tokenization
+
+ prompt_token_ids = tokenizer.encode(prompt_text, add_special_tokens=False)
+ # 例如: [128000, 128006, 9125, ...]
+
+ Step 6: 模型推理生成
+
+ # 模型输出可能是:
+ # {"name": "get_current_weather", "parameters": {"city": "Dallas", "state": "TX"}}
+
+ Step 7: Tool Parser 解析输出
+
+ # Hermes parser 识别 <tool_call... 格式
+ # Llama parser 识别 {"name": ..., "parameters": ...} JSON 格式
+
+ tool_calls = [
+     ToolCall(
+         id="chatcmpl-tool-xxx",
+         type="function",
+         function=FunctionCall(
+             name="get_current_weather",
+             arguments='{"city": "Dallas", "state": "TX"}'
+         )
+     )
+ ]
+
+ 返回给客户端的响应
+
+ {
+     "id": "chatcmpl-xxx",
+     "object": "chat.completion",
+     "choices": [{
+         "index": 0,
+         "message": {
+             "role": "assistant",
+             "content": null,
+             "tool_calls": [{
+                 "id": "chatcmpl-tool-xxx",
+                 "type": "function",
+                 "function": {
+                     "name": "get_current_weather",
+                     "arguments": "{\"city\": \"Dallas\", \"state\": \"TX\"}"
+                 }
+             }]
+         },
+         "finish_reason": "tool_calls"
+     }]
+ }
+
+ 四、关键文件清单
+
+ ┌─────────────────────────────────────────────────────┬────────────────────────────────────────────┐
+ │                      文件路径                       │                    功能                    │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ vllm/entrypoints/openai/chat_completion/protocol.py │ ChatCompletionRequest 定义，tools 参数解析 │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ vllm/entrypoints/openai/chat_completion/serving.py  │ 请求处理入口，render_chat_request          │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ vllm/entrypoints/openai/engine/serving.py           │ _preprocess_chat 预处理                    │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ vllm/renderers/hf.py                                │ HfRenderer，apply_chat_template            │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ vllm/renderers/params.py                            │ ChatParams 定义                            │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ vllm/tool_parsers/abstract_tool_parser.py           │ ToolParser 基类                            │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ vllm/tool_parsers/hermes_tool_parser.py             │ Hermes 格式 tool parser                    │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ examples/tool_chat_template_hermes.jinja            │ Hermes chat template                       │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ examples/tool_chat_template_llama3.1_json.jinja     │ Llama3.1 chat template                     │
+ ├─────────────────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ tests/tool_use/utils.py                             │ 测试用 tool 定义                           │
+ └─────────────────────────────────────────────────────┴────────────────────────────────────────────┘
+
+ 五、不同模型的 Tool 格式差异
+
+ 1. Hermes 格式
+
+ <tool_call
+ {"name": "func_name", "arguments": {...}}
+ </tool_call
+
+ 2. Llama 3.1 格式
+
+ {"name": "func_name", "parameters": {...}}
+
+ 3. Mistral 格式
+
+ [TOOL_CALLS: [{"name": "func_name", "arguments": {...}}]]
+
+ 4. Pythonic 格式 (ToolACE)
+
+ func_name(arg1=value1, arg2=value2)
+
+ 六、验证方式
+
+ 1. 运行现有测试:
+ pytest tests/tool_use/test_chat_completions.py -v
+ pytest tests/entrypoints/openai/tool_parsers/ -v
+ 2. 手动测试:
+ python -m vllm.entrypoints.openai.api_server \
+     --model meta-llama/Llama-3.1-8B-Instruct \
+     --enable-auto-tool-choice \
+     --tool-call-parser llama3_json \
+     --chat-template examples/tool_chat_template_llama3.1_json.jinja
+ 3. 发送请求验证完整流程。
