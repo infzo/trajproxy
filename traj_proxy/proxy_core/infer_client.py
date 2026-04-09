@@ -1,6 +1,7 @@
 import json
 import asyncio
 import traceback
+import time
 import requests
 import logging
 from typing import Dict, Any, AsyncIterator, List, Union, Optional
@@ -98,6 +99,7 @@ class InferClient:
         loop = asyncio.get_event_loop()
 
         try:
+            t0 = time.monotonic()
             logger.info(f"handle_request: {url=}, {request_body=}.")
             response = await loop.run_in_executor(
                 self._executor,
@@ -110,7 +112,10 @@ class InferClient:
                 )
             )
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            logger.info(f"handle_request_done: elapsed={elapsed_ms:.2f}ms")
+            return result
 
         except requests.exceptions.RequestException as e:
             status_code = getattr(e.response, 'status_code', 'N/A')
@@ -125,6 +130,7 @@ class InferClient:
         loop = asyncio.get_event_loop()
 
         try:
+            t0 = time.monotonic()
             logger.info(f"handle_stream_request: {url=}, {request_body=}.")
             response = await loop.run_in_executor(
                 self._executor,
@@ -137,6 +143,8 @@ class InferClient:
                 )
             )
             response.raise_for_status()
+            connect_ms = (time.monotonic() - t0) * 1000
+            logger.info(f"stream_connected: connect_ms={connect_ms:.2f}ms")
 
             # 直接 yield from 异步生成器
             async for chunk in self._async_stream_gen(response):

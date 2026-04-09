@@ -57,12 +57,23 @@ class PrefixMatchCache(BaseCacheStrategy):
 
         # 如果没有 session_id 或 request_repository，直接编码
         if not context.session_id or not self.request_repository:
+            logger.debug(
+                f"[{context.unique_id}] 缓存跳过: "
+                f"session_id={'有' if context.session_id else '无'}, "
+                f"repo={'有' if self.request_repository else '无'}"
+            )
             token_ids = tokenizer.encode(text, add_special_tokens=False)
             context.uncached_token_ids = token_ids
             return token_ids
 
         # 查询该 session 的所有历史请求
         history = await self.request_repository.get_by_session(context.session_id)
+        logger.debug(
+            f"[{context.unique_id}] 缓存查找: "
+            f"session_id={context.session_id}, "
+            f"history_count={len(history)}, "
+            f"current_text_length={len(text)}"
+        )
 
         # 找到最长前缀匹配（匹配完整对话文本）
         matched_trajectory = self._find_longest_prefix_match(text, history)
@@ -71,6 +82,12 @@ class PrefixMatchCache(BaseCacheStrategy):
             # 使用缓存的完整对话 token_ids
             cached_tokens = matched_trajectory.get("full_conversation_token_ids")
             cached_text = matched_trajectory.get("full_conversation_text", "")
+
+            logger.info(
+                f"[{context.unique_id}] 缓存命中: "
+                f"cached_text_length={len(cached_text) if cached_text else 0}, "
+                f"cached_tokens={len(cached_tokens) if cached_tokens else 0}"
+            )
 
             # 缓存命中的 token 数量
             context.cache_hit_tokens = len(cached_tokens) if cached_tokens else 0
@@ -90,6 +107,16 @@ class PrefixMatchCache(BaseCacheStrategy):
                 return cached_tokens or []
         else:
             # 没有匹配，直接编码
+            if history:
+                # 调试：输出为什么没匹配
+                for i, t in enumerate(history):
+                    ct = t.get("full_conversation_text", "")
+                    logger.debug(
+                        f"[{context.unique_id}] 缓存未命中 history[{i}]: "
+                        f"conv_text_len={len(ct) if ct else 0}, "
+                        f"has_token_ids={'full_conversation_token_ids' in t}, "
+                        f"match={'prefix_match' if ct and text.startswith(ct) else 'no_match'}"
+                    )
             token_ids = tokenizer.encode(text, add_special_tokens=False)
             context.uncached_token_ids = token_ids
             return token_ids

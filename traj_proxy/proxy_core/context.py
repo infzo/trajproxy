@@ -6,8 +6,11 @@ ProcessContext - 请求处理上下文数据类
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, TYPE_CHECKING
 from datetime import datetime
+
+if TYPE_CHECKING:
+    from traj_proxy.proxy_core.timing import StageTimer
 
 
 @dataclass
@@ -94,3 +97,6 @@ class ProcessContext:
     stream_logprobs: Optional[Dict[str, Any]] = None            # logprobs
     stream_stop_reason: Optional[Any] = None   # vLLM 扩展字段
     stream_token_ids: Optional[List[int]] = None                # vLLM 扩展字段
+
+    # ========== 耗时追踪 ==========
+    timer: Optional["StageTimer"] = None                        # 阶段计时器

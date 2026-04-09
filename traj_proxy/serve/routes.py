@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any
 import json
+import time
 import traceback
 import uuid
 
@@ -89,6 +90,7 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
     """
     try:
         # 获取请求体
+        route_t0 = time.monotonic()
         body = await request.json()
         logger.info(f"chat_completions: {request.headers=}, {body=}.")
 
@@ -145,6 +147,7 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
 
             async def generate_stream():
                 """流式生成器"""
+                chunk_count = 0
                 async for chunk in processor.process_stream(
                     messages=messages,
                     request_id=request_id,
@@ -157,8 +160,13 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                     else:
                         yield chunk
+                    chunk_count += 1
                 # SSE 流结束标记
                 yield "data: [DONE]\n\n"
+                total_ms = (time.monotonic() - route_t0) * 1000
+                logger.info(
+                    f"[{request_id}] 路由层总耗时: {total_ms:.2f}ms, chunks={chunk_count}"
+                )
 
             # 注意：存储已在 processor._finalize_stream() 中完成，无需后台任务
 
@@ -181,6 +189,10 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
             )
 
             # 返回 OpenAI 格式响应
+            route_total_ms = (time.monotonic() - route_t0) * 1000
+            logger.info(
+                f"[{request_id}] 路由层总耗时(非流式): {route_total_ms:.2f}ms"
+            )
             return context.raw_response
 
     except HTTPException:

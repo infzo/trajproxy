@@ -65,7 +65,8 @@ class TokenConverter(BaseConverter):
             token ID 列表
         """
         if self.cache_strategy:
-            return await self.cache_strategy.encode_with_cache(text, context, self.tokenizer)
+            with context.timer.measure("cache_lookup"):
+                return await self.cache_strategy.encode_with_cache(text, context, self.tokenizer)
 
         # 无缓存策略，直接编码
         context.uncached_text = text

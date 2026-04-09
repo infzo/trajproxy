@@ -96,38 +96,50 @@ class TokenPipeline(BasePipeline):
         )
 
         try:
+            timer = context.timer
+
             # 阶段 1: Message → PromptText
-            context = await self._transform_messages(messages, context)
+            with timer.measure("message_convert"):
+                context = await self._transform_messages(messages, context)
 
             # 阶段 2: PromptText → TokenIds (带缓存)
-            context = await self._encode_text(context)
+            with timer.measure("token_encode"):
+                context = await self._encode_text(context)
 
             # 阶段 3: 推理
-            context = await self._inference(context)
+            with timer.measure("inference"):
+                context = await self._inference(context)
 
             # 阶段 4: TokenIds → ResponseText
-            context = await self._decode_response(context)
+            with timer.measure("token_decode"):
+                context = await self._decode_response(context)
 
             # 阶段 5: 构建响应
-            context = self._build_response(context)
+            with timer.measure("response_build"):
+                context = self._build_response(context)
 
             # 更新统计信息
             self._update_stats(context)
 
             self._update_timing(context)
+
+            timer.log_report(context.unique_id)
+
             logger.info(
                 f"[{context.unique_id}] 请求处理完成: "
                 f"duration_ms={context.processing_duration_ms:.2f}"
             )
 
             # 存储到数据库
-            await self._store_trajectory(context, self.tokenizer_path)
+            with timer.measure("db_store"):
+                await self._store_trajectory(context, self.tokenizer_path)
 
             return context
 
         except Exception as e:
             self._handle_error(context, e)
-            await self._store_trajectory(context, self.tokenizer_path)
+            with timer.measure("db_store_error"):
+                await self._store_trajectory(context, self.tokenizer_path)
             raise
 
     async def process_stream(
@@ -146,6 +158,7 @@ class TokenPipeline(BasePipeline):
         Yields:
             OpenAI 格式的流式响应块
         """
+        timer = context.timer
         logger.info(
             f"[{context.unique_id}] 开始流式处理请求（Token 模式）: "
             f"model={self.model}, messages_count={len(messages)}"
@@ -153,31 +166,72 @@ class TokenPipeline(BasePipeline):
 
         try:
             # 阶段 1: Message → PromptText
-            context = await self._transform_messages(messages, context)
+            with timer.measure("message_convert"):
+                context = await self._transform_messages(messages, context)
 
             # 阶段 2: PromptText → TokenIds (带缓存)
-            context = await self._encode_text(context)
+            with timer.measure("token_encode"):
+                context = await self._encode_text(context)
             prompt_input = context.token_ids
 
+            mc_ms = timer.get_duration('message_convert')
+            te_ms = timer.get_duration('token_encode')
             logger.info(
                 f"[{context.unique_id}] TokenIds 转换完成: "
                 f"prompt_tokens={context.prompt_tokens}, "
-                f"cache_hit_tokens={context.cache_hit_tokens}"
+                f"cache_hit_tokens={context.cache_hit_tokens}, "
+                f"message_convert={mc_ms:.2f if mc_ms is not None else 'N/A'}ms, "
+                f"token_encode={te_ms:.2f if te_ms is not None else 'N/A'}ms"
             )
 
             # 流式状态
             previous_text = ""
             previous_token_ids = []
+            first_token_received = False
 
             # 使用上下文管理器自动管理流式状态
             with self.parser:
                 # 阶段 3-5: 流式推理和响应
-                async for infer_chunk in self.infer_client.send_completion_stream(
+                timer.start("infer_connect")
+                stream_iter = self.infer_client.send_completion_stream(
                     prompt=prompt_input,
                     model=self.model,
                     **context.request_params
-                ):
-                    # 处理单个响应块
+                )
+                # 预取第一个 chunk，记录连接建立时间
+                first_chunk = await stream_iter.__anext__()
+                infer_connect_ms = timer.end("infer_connect")
+                if infer_connect_ms is not None:
+                    logger.info(
+                        f"[{context.unique_id}] Infer 连接建立: {infer_connect_ms:.2f}ms"
+                    )
+
+                # 处理第一个 chunk
+                chunk = await self._process_stream_chunk(
+                    first_chunk, context, previous_text, previous_token_ids
+                )
+                if chunk:
+                    previous_text = context.stream_buffer_text
+                    previous_token_ids = context.stream_buffer_ids.copy()
+                    context.stream_chunk_count += 1
+                    first_token_received = True
+                    # 记录首 token 耗时 = 从 message_convert 阶段开始到现在
+                    first_token_ms = timer.get_elapsed_since("message_convert")
+                    if first_token_ms is not None:
+                        logger.info(
+                            f"[{context.unique_id}] 首 token 时间(TTFB): {first_token_ms:.2f}ms"
+                        )
+                    yield chunk
+
+                    if context.stream_finished:
+                        timer.start("finalize_stream")
+                        await self._finalize_stream(context)
+                        timer.end("finalize_stream")
+                        timer.log_report(context.unique_id)
+                        return
+
+                # 处理后续 chunks
+                async for infer_chunk in stream_iter:
                     chunk = await self._process_stream_chunk(
                         infer_chunk,
                         context,
@@ -198,7 +252,12 @@ class TokenPipeline(BasePipeline):
                             break
 
             # 流式结束后完成处理
+            timer.start("finalize_stream")
             await self._finalize_stream(context)
+            timer.end("finalize_stream")
+
+            # 输出耗时报告
+            timer.log_report(context.unique_id)
 
         except Exception as e:
             self._handle_error(context, e)
@@ -370,6 +429,9 @@ class TokenPipeline(BasePipeline):
         Returns:
             OpenAI 格式的 chunk 字典，或 None
         """
+        timer = context.timer
+        chunk_idx = context.stream_chunk_count
+
         # 解析 Infer 响应块
         chunk_content, chunk_token_ids, tool_calls_delta = \
             InferResponseParser.parse_stream_chunk(infer_chunk, is_token_mode=True)
@@ -384,10 +446,12 @@ class TokenPipeline(BasePipeline):
             )
 
         # Token-in-Token-out 模式：增量解码 token IDs
+        decode_start = time.monotonic()
         if chunk_token_ids:
             chunk_content = self.token_converter.decode_streaming(
                 chunk_token_ids, context
             )
+        decode_ms = (time.monotonic() - decode_start) * 1000
 
         # 注意：decode_streaming() 已经更新了 stream_buffer_ids 和 stream_buffer_text
         # 这里不能重复追加，否则会导致数据翻倍、工具解析失败
@@ -397,6 +461,7 @@ class TokenPipeline(BasePipeline):
         delta_token_ids = chunk_token_ids or []
 
         # 使用 Parser 进行流式解析
+        parse_start = time.monotonic()
         parsed_content, parsed_tool_calls, reasoning_delta = \
             self._process_streaming_parse(
                 delta_text=chunk_content or "",
@@ -407,6 +472,7 @@ class TokenPipeline(BasePipeline):
                 current_token_ids=current_token_ids,
                 delta_token_ids=delta_token_ids
             )
+        parse_ms = (time.monotonic() - parse_start) * 1000
 
         # 使用解析结果覆盖原始内容
         effective_content = parsed_content
@@ -448,12 +514,19 @@ class TokenPipeline(BasePipeline):
             return None
 
         # 构建并发送 OpenAI 流式响应块
+        build_start = time.monotonic()
         openai_chunk = self.stream_builder.build_chunk(
             content=effective_content,
             context=context,
             finish_reason=finish_reason,
             tool_calls_delta=effective_tool_calls,
             reasoning_delta=reasoning_delta
+        )
+        build_ms = (time.monotonic() - build_start) * 1000
+
+        # 抽样输出 chunk 级别耗时
+        timer.log_stream_chunk_timing(
+            context.unique_id, chunk_idx, decode_ms, parse_ms, build_ms
         )
 
         return openai_chunk
@@ -664,6 +737,11 @@ class TokenPipeline(BasePipeline):
             context.response_text, context
         )
 
+        # 记录 response_build 耗时（在 finalize_stream 计时内）
+        if context.timer:
+            context.timer.start("response_build")
+            context.timer.end("response_build")
+
         logger.info(
             f"[{context.unique_id}] 流式处理完成: "
             f"chunks={context.stream_chunk_count}, "
@@ -671,4 +749,5 @@ class TokenPipeline(BasePipeline):
         )
 
         # 存储到数据库
-        await self._store_trajectory(context, self.tokenizer_path)
+        with context.timer.measure("db_store"):
+            await self._store_trajectory(context, self.tokenizer_path)

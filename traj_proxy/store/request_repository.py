@@ -7,11 +7,15 @@ RequestRepository - 请求轨迹记录操作
 
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
+import time
 import traceback
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
 from traj_proxy.exceptions import DatabaseError
+from traj_proxy.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 延迟导入以避免循环导入
 if TYPE_CHECKING:
@@ -46,6 +50,7 @@ class RequestRepository:
         Raises:
             DatabaseError: 当插入失败时抛出
         """
+        t0 = time.monotonic()
         try:
             async with self.pool.connection() as conn:
                 async with conn.transaction():
@@ -102,7 +107,11 @@ class RequestRepository:
                         context.full_conversation_token_ids,
                         context.error_traceback
                     ))
+            db_ms = (time.monotonic() - t0) * 1000
+            logger.info(f"[{context.unique_id}] DB存储耗时: {db_ms:.2f}ms")
         except Exception as e:
+            db_ms = (time.monotonic() - t0) * 1000
+            logger.error(f"[{context.unique_id}] DB存储失败, 耗时: {db_ms:.2f}ms")
             raise DatabaseError(f"插入轨迹记录失败: {str(e)}\n{traceback.format_exc()}")
 
     async def get_by_session(

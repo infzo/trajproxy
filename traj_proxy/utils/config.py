@@ -149,6 +149,26 @@ def get_models_dir() -> str:
     return os.path.abspath(models_dir)
 
 
+def get_timing_config() -> Dict:
+    """
+    获取耗时追踪配置
+
+    返回:
+        timing 配置字典，包含 enabled
+    """
+    return get_config().get("timing", {"enabled": True})
+
+
+def is_timing_enabled() -> bool:
+    """
+    耗时追踪是否启用
+
+    返回:
+        是否启用，默认 True
+    """
+    return get_timing_config().get("enabled", True)
+
+
 def get_archive_config() -> Dict:
     """
     获取归档配置

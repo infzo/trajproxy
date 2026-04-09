@@ -42,6 +42,10 @@ processor_manager:
   listen_reconnect_delay: 5     # LISTEN 连接重连初始延迟（秒）
   listen_max_reconnect_delay: 60  # LISTEN 连接重连最大延迟（秒）
 
+# 耗时追踪配置
+timing:
+  enabled: true                 # 启用阶段耗时追踪（设为 false 关闭）
+
 # 归档配置（元数据表 + 详情表架构）
 archive:
   enabled: false                 # 启用自动归档

@@ -10,6 +10,7 @@ from datetime import datetime
 import traceback
 
 from traj_proxy.proxy_core.context import ProcessContext
+from traj_proxy.proxy_core.timing import create_timer
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
 
@@ -112,6 +113,7 @@ class BasePipeline(ABC):
             is_stream=is_stream
         )
         context.start_time = datetime.now()
+        context.timer = create_timer()
 
         # 构建原始请求
         context.raw_request = {
