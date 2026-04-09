@@ -8,6 +8,7 @@ Processor - 统一请求处理器
 from typing import Optional, Dict, Any, AsyncIterator
 from datetime import datetime
 import traceback
+from pathlib import Path
 
 from transformers import AutoTokenizer
 
@@ -100,6 +101,9 @@ class Processor:
             raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
         tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_path)
 
+        # 推断 TITO 模板路径
+        tito_template_path = self._get_tito_template_path()
+
         # 创建 Parser
         parser = ParserManager.create_parser(
             tool_parser_name=self.tool_parser_name,
@@ -110,8 +114,8 @@ class Processor:
         # 创建缓存策略
         cache_strategy = PrefixMatchCache(self.request_repository)
 
-        # 创建转换器
-        message_converter = MessageConverter(tokenizer)
+        # 创建转换器（传入 TITO 模板路径）
+        message_converter = MessageConverter(tokenizer, tito_template_path)
         token_converter = TokenConverter(tokenizer, cache_strategy)
 
         # 创建响应构建器
@@ -129,6 +133,31 @@ class Processor:
             parser=parser,
             tokenizer_path=self.tokenizer_path
         )
+
+    def _get_tito_template_path(self) -> Optional[str]:
+        """获取 TITO 模板路径
+
+        自动推断 tokenizer 目录下的 chat_template_tito.jinja 文件。
+        该模板确保多轮对话一致性，使前缀匹配缓存正常工作。
+
+        Returns:
+            TITO 模板路径，如果不存在则返回 None
+        """
+        if not self.tokenizer_path:
+            return None
+
+        tokenizer_dir = Path(self.tokenizer_path)
+        tito_template = tokenizer_dir / "chat_template_tito.jinja"
+
+        if tito_template.exists():
+            logger.info(f"找到 TITO 模板: {tito_template}")
+            return str(tito_template)
+
+        logger.warning(
+            f"TITO 模板不存在: {tito_template}，将使用默认模板。"
+            f"前缀匹配缓存可能无法正常工作。"
+        )
+        return None
 
     # ==================== 非流式处理接口 ====================
 
