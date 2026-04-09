@@ -1,0 +1,23 @@
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"role":"assistant","content":""},"logprobs":null,"finish_reason":null}],"prompt_token_ids":null}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-d43ce9ec83a54f8c8376a4002ae8de14","type":"function","index":0,"function":{"name":"test_tool","arguments":"{\""}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"test"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"_input"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":" \""}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"fixed"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"_format"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"_value"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"}"}}]},"logprobs":null,"finish_reason":null,"token_ids":null}]}
+
+data: {"id":"chatcmpl-67de0b21a5cd4dc3a45464dd8bbfb97b","object":"chat.completion.chunk","created":1775707463,"model":"/Temp/bucket-siye-green-guiyang-code/MindForge-Coder/models/Qwen3-Coder-30B-A3B-Instruct","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":""}}]},"logprobs":null,"finish_reason":"stop","stop_reason":null,"token_ids":null}]}
+
+data: [DONE]
