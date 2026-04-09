@@ -438,6 +438,15 @@ class TokenPipeline(BasePipeline):
             if "usage" in infer_chunk:
                 context.token_response = {"usage": infer_chunk["usage"]}
 
+        # 跳过空 delta chunk（与 vLLM 行为对齐：parser 返回 None 时不发送）
+        # 例外：第一个 chunk 需要包含 role，始终发送
+        if (not effective_content
+            and effective_tool_calls is None
+            and reasoning_delta is None
+            and finish_reason is None
+            and context.stream_chunk_count > 0):
+            return None
+
         # 构建并发送 OpenAI 流式响应块
         openai_chunk = self.stream_builder.build_chunk(
             content=effective_content,
@@ -512,18 +521,22 @@ class TokenPipeline(BasePipeline):
                 if delta_msg:
                     # parser 返回了 delta_msg
                     if delta_msg.tool_calls:
-                        tool_calls_delta = [
-                            {
-                                "index": tc.index,
-                                "id": tc.id,
-                                "type": tc.type,
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": tc.function.arguments
-                                } if tc.function and (tc.function.name or tc.function.arguments) else None
-                            }
-                            for tc in delta_msg.tool_calls
-                        ]
+                        tool_calls_delta = []
+                        for tc in delta_msg.tool_calls:
+                            tc_dict = {"index": tc.index}
+                            if tc.id is not None:
+                                tc_dict["id"] = tc.id
+                            if tc.type is not None:
+                                tc_dict["type"] = tc.type
+                            if tc.function:
+                                func_dict = {}
+                                if tc.function.name is not None:
+                                    func_dict["name"] = tc.function.name
+                                if tc.function.arguments is not None:
+                                    func_dict["arguments"] = tc.function.arguments
+                                if func_dict:
+                                    tc_dict["function"] = func_dict
+                            tool_calls_delta.append(tc_dict)
                     # 使用 parser 返回的 content（可能是 None 或空字符串）
                     # 注意：这里会覆盖 reasoning_parser 设置的 content_delta
                     content_delta = delta_msg.content
