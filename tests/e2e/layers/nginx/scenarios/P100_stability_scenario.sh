@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 P001: 长稳场景
+# 场景 P100: 长稳场景（Nginx 层）
 # 测试流程：注册模型 -> 持续发送100个请求 -> 统计响应时间和失败次数 -> 删除模型
 
 # 获取脚本目录
@@ -7,16 +7,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 P001: 长稳场景"
+echo "场景 P100: 长稳场景（Nginx 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-STABILITY_TEST_PORT=12345
-STABILITY_TEST_BASE_URL="http://127.0.0.1:${STABILITY_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+STABILITY_TEST_BASE_URL="${BASE_URL}"
 STABILITY_TEST_MODEL_NAME="stability-test-model"
-STABILITY_TEST_RUN_ID="stability-run-p001"
-STABILITY_TEST_SESSION_ID="${STABILITY_TEST_RUN_ID},sample001,task001"
+STABILITY_TEST_RUN_ID="run-${SCENARIO_ID}"
+STABILITY_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 STABILITY_TEST_REQUEST_COUNT=100
 
 # 性能统计变量
@@ -62,6 +62,8 @@ assert_http_status "200" "$REGISTER_STATUS" "HTTP 状态码应为 200"
 REGISTER_RESULT=$(json_get "$REGISTER_BODY" "status")
 assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 
+sleep 1
+
 echo ""
 
 # 步骤 2: 持续发送请求
@@ -74,7 +76,7 @@ for ((i=1; i<=STABILITY_TEST_REQUEST_COUNT; i++)); do
     START_TIME=$(python3 -c "import time; print(int(time.time() * 1000))")
 
     # 发送请求
-    CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${STABILITY_TEST_BASE_URL}/s/${STABILITY_TEST_SESSION_ID}/v1/chat/completions" \
+    CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${STABILITY_TEST_BASE_URL}/s/${STABILITY_TEST_RUN_ID}/${STABILITY_TEST_SESSION_ID}/v1/chat/completions" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${CHAT_API_KEY}" \
         -d "{

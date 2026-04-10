@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 017: PANGU集成+轨迹抓取场景
+# 场景 F208: PANGU集成+轨迹抓取场景（Proxy 层）
 # 测试流程：
 #   1. 注册带run_id的模型
 #   2. 通过 /s/{session_id}/ 路径传入UUID格式的session_id，发送非流式请求
@@ -13,14 +13,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 017: PANGU集成+轨迹抓取场景"
+echo "场景 F208: PANGU集成+轨迹抓取场景（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-PANGU_TEST_PORT=12300
-PANGU_TEST_REGISTER_URL="http://127.0.0.1:${PANGU_TEST_PORT}"
-PANGU_TEST_CHAT_URL="http://127.0.0.1:${PANGU_TEST_PORT}"
+PANGU_TEST_REGISTER_URL="${BASE_URL}"
+PANGU_TEST_CHAT_URL="${BASE_URL}"
 PANGU_TEST_MODEL_NAME="pangu-model-017"
 PANGU_TEST_RUN_ID="pangu-run-017"
 PANGU_TEST_MODEL_PARAM="${PANGU_TEST_MODEL_NAME},${PANGU_TEST_RUN_ID}"
@@ -68,6 +67,8 @@ assert_http_status "200" "$REGISTER_STATUS" "注册模型 HTTP 状态码应为 2
 REGISTER_RESULT=$(json_get "$REGISTER_BODY" "status")
 assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 
+sleep 1
+
 echo ""
 
 # ========================================
@@ -76,7 +77,7 @@ echo ""
 log_step "步骤 2: 通过路径 /s/{session_id}/ 传入session_id，发送非流式请求"
 log_info "session_id: ${TRAJ_SESSION_ID}"
 log_curl_cmd "curl -s -w '\n%{http_code}' \
-    -X POST '${PANGU_TEST_CHAT_URL}/s/${TRAJ_SESSION_ID}/v1/chat/completions' \
+    -X POST '${PANGU_TEST_CHAT_URL}/s/${PANGU_TEST_RUN_ID}/${TRAJ_SESSION_ID}/v1/chat/completions' \
     -H 'Content-Type: application/json' \
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \
     -d '{
@@ -86,7 +87,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \
     }'"
 log_separator
 
-CHAT_RESPONSE_A=$(curl -s -w "\n%{http_code}" -X POST "${PANGU_TEST_CHAT_URL}/s/${TRAJ_SESSION_ID}/v1/chat/completions" \
+CHAT_RESPONSE_A=$(curl -s -w "\n%{http_code}" -X POST "${PANGU_TEST_CHAT_URL}/s/${PANGU_TEST_RUN_ID}/${TRAJ_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

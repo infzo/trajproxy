@@ -61,6 +61,6 @@ class RegisterModelResponse(BaseModel):
 class DeleteModelResponse(BaseModel):
     """删除模型响应"""
     status: str
-    run_id: str
+    run_id: Optional[str]
     model_name: str
     deleted: bool

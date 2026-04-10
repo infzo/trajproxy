@@ -21,8 +21,10 @@ class RouteRegistrar:
 
         # /v1/chat/completions - 无session-id的聊天
         self.app.include_router(chat_router, prefix="/v1", tags=["OpenAI Chat"])
-        # /s/{session_id}/v1/chat/completions - 带session_id的聊天
-        self.app.include_router(chat_router, prefix="/s/{session_id}/v1", tags=["OpenAI Chat (Path-based)"])
+        # /s/{run_id}/{session_id}/v1/chat/completions - 带run_id和session_id的聊天
+        self.app.include_router(chat_router, prefix="/s/{run_id}/{session_id}/v1", tags=["OpenAI Chat (Path-based)"])
+        # /s/{session_id}/v1/chat/completions - 仅带session_id的聊天（无run_id）
+        self.app.include_router(chat_router, prefix="/s/{session_id}/v1", tags=["OpenAI Chat (Path-based, no run_id)"])
         # /models/* - 模型管理 API
         self.app.include_router(model_router, prefix="/models", tags=["Admin"])
 

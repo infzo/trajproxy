@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 016: 前缀缓存匹配场景
+# 场景 F106: 前缀缓存匹配场景（Nginx 层）
 # 测试流程：注册模型（token_in_token_out=true）-> 三轮多轮对话 -> 查询轨迹验证缓存命中 -> 删除模型
 
 # 获取脚本目录
@@ -7,16 +7,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 016: 前缀缓存匹配场景"
+echo "场景 F106: 前缀缓存匹配场景（Nginx 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-CACHE_TEST_PORT=12345
-CACHE_TEST_BASE_URL="http://127.0.0.1:${CACHE_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+CACHE_TEST_BASE_URL="${BASE_URL}"
 CACHE_TEST_MODEL_NAME="prefix-cache-test-model"
-CACHE_TEST_RUN_ID="cache-run-016"
-CACHE_TEST_SESSION_ID="${CACHE_TEST_RUN_ID},sample016,task016"
+CACHE_TEST_RUN_ID="run-${SCENARIO_ID}"
+CACHE_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 CACHE_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
 
 # ========== 步骤 1: 注册模型 ==========
@@ -70,7 +70,7 @@ echo ""
 log_step "步骤 2: 第1轮对话（无历史，cache_hit_tokens 应为 0）"
 ROUND1_MESSAGES='[{"role": "user", "content": "你好"}]'
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_SESSION_ID}/v1/chat/completions' \\
+    -X POST '${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_RUN_ID}/${CACHE_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -80,7 +80,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     }'"
 log_separator
 
-ROUND1_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_SESSION_ID}/v1/chat/completions" \
+ROUND1_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_RUN_ID}/${CACHE_TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -137,7 +137,7 @@ if [ -z "$ROUND2_MESSAGES" ]; then
 fi
 
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_SESSION_ID}/v1/chat/completions' \\
+    -X POST '${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_RUN_ID}/${CACHE_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -148,7 +148,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
 log_separator
 
 # shellcheck disable=SC2086
-ROUND2_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_SESSION_ID}/v1/chat/completions" \
+ROUND2_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_RUN_ID}/${CACHE_TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -208,7 +208,7 @@ if [ -z "$ROUND3_MESSAGES" ]; then
 fi
 
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_SESSION_ID}/v1/chat/completions' \\
+    -X POST '${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_RUN_ID}/${CACHE_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -219,7 +219,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
 log_separator
 
 # shellcheck disable=SC2086
-ROUND3_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_SESSION_ID}/v1/chat/completions" \
+ROUND3_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CACHE_TEST_BASE_URL}/s/${CACHE_TEST_RUN_ID}/${CACHE_TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

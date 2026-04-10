@@ -1,6 +1,6 @@
 #!/bin/bash
-# 场景 004: CLAUDE场景
-# 测试流程：12345端口注册带run-id模型 -> 发送Claude格式非流式推理请求 -> 删除模型
+# 场景 F101: CLAUDE场景（Nginx 层）
+# 测试流程：注册带run-id模型 -> 发送Claude格式非流式推理请求 -> 删除模型
 # 特点：使用 /v1/messages 端点（Claude API格式）
 
 # 获取脚本目录
@@ -8,16 +8,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 004: CLAUDE场景"
+echo "场景 F101: CLAUDE场景（Nginx 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-CLAUDE_TEST_PORT=12345
-CLAUDE_TEST_BASE_URL="http://127.0.0.1:${CLAUDE_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+CLAUDE_TEST_BASE_URL="${BASE_URL}"
 CLAUDE_TEST_MODEL_NAME="claude-test-model"
-CLAUDE_TEST_RUN_ID="claude-run-004"
-CLAUDE_TEST_SESSION_ID="${CLAUDE_TEST_RUN_ID},sample001,task001"
+CLAUDE_TEST_RUN_ID="run-${SCENARIO_ID}"
+CLAUDE_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 
 # 步骤 1: 注册模型（带 run_id）
 log_step "步骤 1: 注册模型（run_id: ${CLAUDE_TEST_RUN_ID}）"
@@ -58,12 +58,14 @@ assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 REGISTER_RUN_ID=$(json_get "$REGISTER_BODY" "run_id")
 assert_eq "$CLAUDE_TEST_RUN_ID" "$REGISTER_RUN_ID" "run_id 应为 ${CLAUDE_TEST_RUN_ID}"
 
+sleep 1
+
 echo ""
 
 # 步骤 2: 发送Claude格式非流式推理请求
-log_step "步骤 2: 发送Claude格式非流式推理请求（session_id: ${CLAUDE_TEST_SESSION_ID}）"
+log_step "步骤 2: 发送Claude格式非流式推理请求（run_id: ${CLAUDE_TEST_RUN_ID}, session_id: ${CLAUDE_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${CLAUDE_TEST_BASE_URL}/s/${CLAUDE_TEST_SESSION_ID}/v1/messages' \\
+    -X POST '${CLAUDE_TEST_BASE_URL}/s/${CLAUDE_TEST_RUN_ID}/${CLAUDE_TEST_SESSION_ID}/v1/messages' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -73,7 +75,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     }'"
 log_separator
 
-CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CLAUDE_TEST_BASE_URL}/s/${CLAUDE_TEST_SESSION_ID}/v1/messages" \
+CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CLAUDE_TEST_BASE_URL}/s/${CLAUDE_TEST_RUN_ID}/${CLAUDE_TEST_SESSION_ID}/v1/messages" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

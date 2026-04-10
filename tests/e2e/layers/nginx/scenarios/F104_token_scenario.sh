@@ -1,22 +1,22 @@
 #!/bin/bash
-# 场景 008: Token场景
-# 测试流程：12345端口注册带run-id模型（token_in_token_out=true）-> 发送非流式推理请求 -> 查询轨迹验证response_ids -> 删除模型
+# 场景 F104: Token场景（Nginx 层）
+# 测试流程：注册带run-id模型（token_in_token_out=true）-> 发送非流式推理请求 -> 查询轨迹验证response_ids -> 删除模型
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 008: Token场景"
+echo "场景 F104: Token场景（Nginx 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-TOKEN_TEST_PORT=12345
-TOKEN_TEST_BASE_URL="http://127.0.0.1:${TOKEN_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+TOKEN_TEST_BASE_URL="${BASE_URL}"
 TOKEN_TEST_MODEL_NAME="token-test-model"
-TOKEN_TEST_RUN_ID="token-run-008"
-TOKEN_TEST_SESSION_ID="${TOKEN_TEST_RUN_ID},sample008,task008"
+TOKEN_TEST_RUN_ID="run-${SCENARIO_ID}"
+TOKEN_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 TOKEN_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
 
 # 步骤 1: 注册模型（带 run_id，开启 token_in_token_out）
@@ -68,9 +68,9 @@ sleep 1
 echo ""
 
 # 步骤 2: 发送非流式推理请求
-log_step "步骤 2: 发送非流式推理请求（session_id: ${TOKEN_TEST_SESSION_ID}）"
+log_step "步骤 2: 发送非流式推理请求（run_id: ${TOKEN_TEST_RUN_ID}, session_id: ${TOKEN_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${TOKEN_TEST_BASE_URL}/s/${TOKEN_TEST_SESSION_ID}/v1/chat/completions' \\
+    -X POST '${TOKEN_TEST_BASE_URL}/s/${TOKEN_TEST_RUN_ID}/${TOKEN_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -80,7 +80,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     }'"
 log_separator
 
-CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOKEN_TEST_BASE_URL}/s/${TOKEN_TEST_SESSION_ID}/v1/chat/completions" \
+CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOKEN_TEST_BASE_URL}/s/${TOKEN_TEST_RUN_ID}/${TOKEN_TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

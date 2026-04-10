@@ -27,7 +27,8 @@ class ProcessContext:
     # ========== 基础标识 ==========
     request_id: str
     model: str
-    session_id: Optional[str] = None  # 格式: app_id,sample_id,task_id
+    session_id: Optional[str] = None  # 原始会话ID，不再自动补充前缀
+    run_id: Optional[str] = None      # 运行ID，独立存储
     unique_id: Optional[str] = None   # 格式: {session_id},{req_id}
 
     # ========== 阶段1: OpenAI Chat 格式 ==========

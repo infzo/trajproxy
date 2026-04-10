@@ -47,13 +47,15 @@ TrajProxy 中存在多个标识字段（`run_id`、`session_id`、`model`、`req
 ### 路径格式设计
 
 ```
-/s/{session_id}/v1/chat/completions          # 格式1：仅 session_id
-/s/{run_id},{session_id}/v1/chat/completions # 格式2：run_id + session_id
+/s/{session_id}/v1/chat/completions          # 格式1：仅 session_id（run_id 从 header/model 获取）
+/s/{run_id}/{session_id}/v1/chat/completions # 格式2：run_id + session_id
 ```
 
 **解析规则**：
-- 路径段包含逗号 → 逗号前为 `run_id`，逗号后为 `session_id`
-- 路径段无逗号 → 整体为 `session_id`，`run_id` 从 model 参数提取或默认 DEFAULT
+- 路径有两个段 → 第一个为 `run_id`，第二个为 `session_id`
+- 路径只有一个段 → 整体为 `session_id`，`run_id` 从 header 或 model 参数提取
+
+**重要**：session_id 必须全局唯一，不可重复使用。
 
 ### 兼容性矩阵
 
@@ -61,30 +63,8 @@ TrajProxy 中存在多个标识字段（`run_id`、`session_id`、`model`、`req
 |------|----------|--------|------------|----------|
 | Pangu 原版 | `POST /v1/chat/completions`<br>model: `gpt-4,app_001`<br>header: `x-session-id: uuid` | app_001 (model) | uuid (header) | ✅ 无影响 |
 | Pangu 路径式 | `POST /s/uuid/v1/chat/completions`<br>model: `gpt-4,app_001` | app_001 (model) | uuid (路径) | ✅ 无影响 |
-| **三段格式旧版** | `POST /s/app_001,sample_001,task_001/v1/chat/completions`<br>model: `gpt-4` | **app_001** (路径) | **sample_001,task_001** (路径) | ✅ **自动兼容** |
-| 新版明确指定 | `POST /s/run_001,uuid/v1/chat/completions`<br>model: `gpt-4` | run_001 (路径) | uuid (路径) | ✅ 新功能 |
-| 仅 session | `POST /s/uuid/v1/chat/completions`<br>model: `gpt-4` | DEFAULT | uuid (路径) | ✅ 兼容 |
-
-### 三段格式自动兼容原理
-
-```
-旧版请求：
-POST /s/app_001,sample_001,task_001/v1/chat/completions
-model: gpt-4
-
-解析过程：
-路径段: "app_001,sample_001,task_001"
-  ↓ 包含逗号，按逗号拆分
-run_id_from_path = "app_001"
-session_id = "sample_001,task_001"  ← session_id 保留完整值
-
-最终：
-run_id = "app_001" (路径优先级最高)
-session_id = "sample_001,task_001" (完整保留)
-model_name = "gpt-4"
-
-结果：与旧版行为完全一致 ✅
-```
+| 新版明确指定 | `POST /s/run_001/uuid/v1/chat/completions`<br>model: `gpt-4` | run_001 (路径) | uuid (路径) | ✅ 新功能 |
+| 仅 session | `POST /s/uuid/v1/chat/completions`<br>model: `gpt-4` | 无 (None) | uuid (路径) | ✅ 兼容 |
 
 ---
 
@@ -229,8 +209,8 @@ def validate_session_id(session_id: Optional[str]) -> Tuple[bool, str]:
 
 ## 相关文档
 
-- [Run ID 和 Model Name 组合定义规则](../reference/run_id_model_name_rules.md)
-- [API 参考文档](../reference/api_reference.md)
+- [ID 设计规范](../design/identifier_design.md)
+- [API 参考文档](../develop/api_reference.md)
 
 ---
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 001: 模型注册-列表-删除
+# 场景 F200: 模型注册-列表-删除（Proxy 层）
 # 测试流程：注册2个模型 -> 列表 -> 删除 -> 列表验证
 
 # 获取脚本目录
@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 001: 模型注册-列表-删除"
+echo "场景 F200: 模型注册-列表-删除（Proxy 层）"
 echo "========================================"
 echo ""
 
@@ -51,6 +51,8 @@ assert_eq "success" "$REGISTER_A_RESULT" "注册模型 A 应返回 success"
 REGISTER_A_RUN_ID=$(json_get "$REGISTER_A_BODY" "run_id")
 assert_eq "DEFAULT" "$REGISTER_A_RUN_ID" "run_id 应为 DEFAULT"
 
+sleep 1
+
 echo ""
 
 # 步骤 2: 注册模型 B（带 run_id）
@@ -91,6 +93,8 @@ assert_eq "success" "$REGISTER_B_RESULT" "注册模型 B 应返回 success"
 
 REGISTER_B_RUN_ID=$(json_get "$REGISTER_B_BODY" "run_id")
 assert_eq "$TEST_MODEL_B_RUN_ID" "$REGISTER_B_RUN_ID" "run_id 应为 ${TEST_MODEL_B_RUN_ID}"
+
+sleep 1
 
 echo ""
 

@@ -86,16 +86,18 @@ class BasePipeline(ABC):
         session_id: Optional[str],
         messages: list,
         request_params: dict,
-        is_stream: bool = False
+        is_stream: bool = False,
+        run_id: Optional[str] = None
     ) -> ProcessContext:
         """创建处理上下文
 
         Args:
             request_id: 请求 ID
-            session_id: 会话 ID
+            session_id: 原始会话 ID（不再自动补充前缀）
             messages: 消息列表
             request_params: 请求参数
             is_stream: 是否流式请求
+            run_id: 运行 ID（可选）
 
         Returns:
             初始化后的上下文
@@ -108,6 +110,7 @@ class BasePipeline(ABC):
             messages=messages,
             request_params=request_params,
             session_id=session_id,
+            run_id=run_id,
             unique_id=unique_id,
             is_stream=is_stream
         )
@@ -125,19 +128,21 @@ class BasePipeline(ABC):
     async def _store_trajectory(
         self,
         context: ProcessContext,
-        tokenizer_path: str = ""
+        tokenizer_path: str = "",
+        run_id: Optional[str] = None
     ):
         """存储轨迹到数据库
 
         Args:
             context: 处理上下文
             tokenizer_path: tokenizer 路径
+            run_id: 运行 ID（可选）
         """
         if not self.request_repository:
             return
 
         try:
-            await self.request_repository.insert(context, tokenizer_path)
+            await self.request_repository.insert(context, tokenizer_path, run_id)
             logger.info(f"[{context.unique_id}] 轨迹存储成功")
         except DatabaseError as e:
             context.error = f"存储轨迹失败: {str(e)}"

@@ -1,22 +1,22 @@
 #!/bin/bash
-# 场景 010: Token流式场景
-# 测试流程：12345端口注册带run-id模型（token_in_token_out=true）-> 发送流式推理请求 -> 查询轨迹验证response_ids -> 删除模型
+# 场景 F105: Token流式场景（Nginx 层）
+# 测试流程：注册带run-id模型（token_in_token_out=true）-> 发送流式推理请求 -> 查询轨迹验证response_ids -> 删除模型
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 010: Token流式场景"
+echo "场景 F105: Token流式场景（Nginx 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-TOKEN_STREAM_TEST_PORT=12345
-TOKEN_STREAM_TEST_BASE_URL="http://127.0.0.1:${TOKEN_STREAM_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+TOKEN_STREAM_TEST_BASE_URL="${BASE_URL}"
 TOKEN_STREAM_TEST_MODEL_NAME="token-stream-test-model"
-TOKEN_STREAM_TEST_RUN_ID="token-stream-run-010"
-TOKEN_STREAM_TEST_SESSION_ID="${TOKEN_STREAM_TEST_RUN_ID},sample010,task010"
+TOKEN_STREAM_TEST_RUN_ID="run-${SCENARIO_ID}"
+TOKEN_STREAM_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 TOKEN_STREAM_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
 
 # 步骤 1: 注册模型（带 run_id，开启 token_in_token_out）
@@ -64,12 +64,14 @@ assert_eq "$TOKEN_STREAM_TEST_RUN_ID" "$REGISTER_RUN_ID" "run_id 应为 ${TOKEN_
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
 assert_eq "true" "$REGISTER_TITO" "token_in_token_out 应为 true"
 
+sleep 1
+
 echo ""
 
 # 步骤 2: 发送流式推理请求
 log_step "步骤 2: 发送流式推理请求（session_id: ${TOKEN_STREAM_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s --no-buffer \\
-    -X POST '${TOKEN_STREAM_TEST_BASE_URL}/s/${TOKEN_STREAM_TEST_SESSION_ID}/v1/chat/completions' \\
+    -X POST '${TOKEN_STREAM_TEST_BASE_URL}/s/${TOKEN_STREAM_TEST_RUN_ID}/${TOKEN_STREAM_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -80,7 +82,7 @@ log_curl_cmd "curl -s --no-buffer \\
 log_separator
 
 # 发送流式请求并收集完整响应
-STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${TOKEN_STREAM_TEST_BASE_URL}/s/${TOKEN_STREAM_TEST_SESSION_ID}/v1/chat/completions" \
+STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${TOKEN_STREAM_TEST_BASE_URL}/s/${TOKEN_STREAM_TEST_RUN_ID}/${TOKEN_STREAM_TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

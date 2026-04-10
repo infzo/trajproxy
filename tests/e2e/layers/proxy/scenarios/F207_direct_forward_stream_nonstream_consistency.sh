@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 015: 直接转发模式下流式与非流式轨迹一致性验证
+# 场景 F207: 直接转发模式下流式与非流式轨迹一致性验证（Proxy 层）
 # 测试流程：注册模型（直接转发模式） -> 分别发送相同请求（流式和非流式） -> 查询两条轨迹 -> 比较关键字段一致性 -> 删除模型
 # 与 F014 区别：F014 测试 token_in_token_out=true，本场景测试 token_in_token_out=false（直接转发模式）
 
@@ -8,17 +8,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 015: 直接转发模式下流式与非流式轨迹一致性验证"
+echo "场景 F207: 直接转发模式下流式与非流式轨迹一致性验证（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-DIRECT_TEST_PORT=12300
-DIRECT_TEST_BASE_URL="http://127.0.0.1:${DIRECT_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+DIRECT_TEST_BASE_URL="${BASE_URL}"
 DIRECT_TEST_MODEL_NAME="direct-forward-test-model"
-DIRECT_TEST_RUN_ID="direct-forward-run-015"
-DIRECT_TEST_SESSION_ID_STREAM="${DIRECT_TEST_RUN_ID},sample015,task-stream"
-DIRECT_TEST_SESSION_ID_NONSTREAM="${DIRECT_TEST_RUN_ID},sample015,task-nonstream"
+DIRECT_TEST_RUN_ID="run-${SCENARIO_ID}"
+DIRECT_TEST_SESSION_ID_STREAM="session-${SCENARIO_ID}-stream-$(date +%s%N | md5sum | head -c 8)"
+DIRECT_TEST_SESSION_ID_NONSTREAM="session-${SCENARIO_ID}-nonstream-$(date +%s%N | md5sum | head -c 8)"
 DIRECT_TEST_PROMPT="What is 3+3? Answer briefly."
 
 # ========================================
@@ -68,7 +68,7 @@ echo ""
 # ========================================
 log_step "步骤 2: 发送非流式请求（session_id: ${DIRECT_TEST_SESSION_ID_NONSTREAM}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${DIRECT_TEST_BASE_URL}/s/${DIRECT_TEST_SESSION_ID_NONSTREAM}/v1/chat/completions' \\
+    -X POST '${DIRECT_TEST_BASE_URL}/s/${DIRECT_TEST_RUN_ID}/${DIRECT_TEST_SESSION_ID_NONSTREAM}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -78,7 +78,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     }'"
 log_separator
 
-NONSTREAM_CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${DIRECT_TEST_BASE_URL}/s/${DIRECT_TEST_SESSION_ID_NONSTREAM}/v1/chat/completions" \
+NONSTREAM_CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${DIRECT_TEST_BASE_URL}/s/${DIRECT_TEST_RUN_ID}/${DIRECT_TEST_SESSION_ID_NONSTREAM}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -104,7 +104,7 @@ echo ""
 # ========================================
 log_step "步骤 3: 发送流式请求（session_id: ${DIRECT_TEST_SESSION_ID_STREAM}）"
 log_curl_cmd "curl -s --no-buffer \\
-    -X POST '${DIRECT_TEST_BASE_URL}/s/${DIRECT_TEST_SESSION_ID_STREAM}/v1/chat/completions' \\
+    -X POST '${DIRECT_TEST_BASE_URL}/s/${DIRECT_TEST_RUN_ID}/${DIRECT_TEST_SESSION_ID_STREAM}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -114,7 +114,7 @@ log_curl_cmd "curl -s --no-buffer \\
     }'"
 log_separator
 
-STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${DIRECT_TEST_BASE_URL}/s/${DIRECT_TEST_SESSION_ID_STREAM}/v1/chat/completions" \
+STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${DIRECT_TEST_BASE_URL}/s/${DIRECT_TEST_RUN_ID}/${DIRECT_TEST_SESSION_ID_STREAM}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

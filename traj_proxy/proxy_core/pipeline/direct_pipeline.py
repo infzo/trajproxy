@@ -134,14 +134,14 @@ class DirectPipeline(BasePipeline):
             )
 
             # 存储到数据库
-            await self._store_trajectory(context)
+            await self._store_trajectory(context, run_id=context.run_id)
 
             return context
 
         except Exception as e:
             self._handle_error(context, e)
             # 即使出错也尝试存储
-            await self._store_trajectory(context)
+            await self._store_trajectory(context, run_id=context.run_id)
             raise
 
     async def process_stream(
@@ -328,4 +328,4 @@ class DirectPipeline(BasePipeline):
         )
 
         # 存储到数据库
-        await self._store_trajectory(context)
+        await self._store_trajectory(context, run_id=context.run_id)

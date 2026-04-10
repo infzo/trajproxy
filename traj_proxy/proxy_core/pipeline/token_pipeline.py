@@ -121,13 +121,13 @@ class TokenPipeline(BasePipeline):
             )
 
             # 存储到数据库
-            await self._store_trajectory(context, self.tokenizer_path)
+            await self._store_trajectory(context, self.tokenizer_path, run_id=context.run_id)
 
             return context
 
         except Exception as e:
             self._handle_error(context, e)
-            await self._store_trajectory(context, self.tokenizer_path)
+            await self._store_trajectory(context, self.tokenizer_path, run_id=context.run_id)
             raise
 
     async def process_stream(
@@ -671,4 +671,4 @@ class TokenPipeline(BasePipeline):
         )
 
         # 存储到数据库
-        await self._store_trajectory(context, self.tokenizer_path)
+        await self._store_trajectory(context, self.tokenizer_path, run_id=context.run_id)

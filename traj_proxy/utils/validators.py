@@ -11,9 +11,6 @@ from typing import Optional, Tuple
 # 默认 run_id 常量
 DEFAULT_RUN_ID = "DEFAULT"
 
-# session_id 正则: 三段逗号分隔，每段非空
-SESSION_ID_PATTERN = re.compile(r'^[^,]+,[^,]+,[^,]+$')
-
 
 def normalize_run_id(run_id: Optional[str]) -> str:
     """
@@ -32,9 +29,8 @@ def validate_session_id(session_id: Optional[str]) -> Tuple[bool, str]:
     """
     校验 session_id 格式
 
-    支持两种格式：
-    - 三段逗号格式：{run_id},{sample_id},{task_id}
-    - 简单字符串/UUID（不含逗号的非空字符串）
+    session_id 为任意非空字符串，用于轨迹分组查询。
+    不定义分割格式，完全由客户端自定义。
 
     Args:
         session_id: 会话ID
@@ -43,17 +39,10 @@ def validate_session_id(session_id: Optional[str]) -> Tuple[bool, str]:
         (是否有效, 错误信息)
     """
     if session_id is None or session_id == "":
-        return True, ""
+        return True, ""  # 允许为空
 
-    # 简单字符串/UUID格式（不含逗号）
-    if ',' not in session_id:
-        return True, ""
-
-    # 三段逗号格式
-    if SESSION_ID_PATTERN.match(session_id):
-        return True, ""
-
-    return False, f"session_id 格式无效: '{session_id}'，期望格式为 {{run_id}},{{sample_id}},{{task_id}} 或简单字符串"
+    # 任意非空字符串都合法
+    return True, ""
 
 
 def validate_run_id(run_id: str) -> Tuple[bool, str]:

@@ -1,6 +1,6 @@
 # TrajProxy vs vLLM OpenAI Chat Completions 接口对比分析
 
-> **导航**: [文档中心](../README.md) | [API 参考](../develop/api_reference.md) | [Parser 设计](../design/parser.md)
+> **导航**: [文档中心](../README.md) | [API 参考](api_reference.md) | [Parser 设计](../design/parser.md)
 
 > 对比版本: TrajProxy (当前) vs vLLM 0.16.0
 

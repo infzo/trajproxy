@@ -7,13 +7,19 @@ FROM python:3.11-bookworm
 # ========================================
 # 系统依赖安装
 # ========================================
+# 添加 PostgreSQL 官方 APT 源（Debian bookworm 默认只有 PG 15）
+RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg && \
+    install -d /usr/share/postgresql-common/pgdg && \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg && \
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] http://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    gnupg \
-    lsb-release \
     supervisor \
     nginx \
-    su-exec \
+    gosu \
     postgresql-16 \
     postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
@@ -29,7 +35,10 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.tuna.tsing
 
 # litellm 依赖（使用独立虚拟环境，避免依赖冲突）
 RUN python -m venv /opt/litellm-venv && \
-    /opt/litellm-venv/bin/pip install --no-cache-dir 'litellm[proxy]' -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+    /opt/litellm-venv/bin/pip install --no-cache-dir 'litellm[proxy]' 'prisma' -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple && \
+    export PATH="/opt/litellm-venv/bin:$PATH" && \
+    cd /opt/litellm-venv/lib/python3.11/site-packages/litellm/proxy && \
+    prisma generate
 
 # ========================================
 # 应用代码复制
@@ -75,7 +84,7 @@ RUN rm -f /etc/nginx/sites-enabled/default
 EXPOSE 12345
 
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app:$PYTHONPATH
+ENV PYTHONPATH=/app
 ENV PGDATA=/data/postgres
 ENV TRAJ_PROXY_CONFIG=/app/configs/config_allinone.yaml
 

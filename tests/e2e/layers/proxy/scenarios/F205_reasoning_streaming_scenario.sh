@@ -1,22 +1,22 @@
 #!/bin/bash
-# 场景 013: Reasoning流式场景
-# 测试流程：12300端口注册模型（带reasoning_parser） -> 发送带推理内容的流式请求 -> 验证流式响应中reasoning解析 -> 删除模型
+# 场景 F205: Reasoning流式场景（Proxy 层）
+# 测试流程：注册模型（带reasoning_parser） -> 发送带推理内容的流式请求 -> 验证流式响应中reasoning解析 -> 删除模型
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 013: Reasoning流式场景"
+echo "场景 F205: Reasoning流式场景（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-REASONING_STREAM_TEST_PORT=12300
-REASONING_STREAM_TEST_BASE_URL="http://127.0.0.1:${REASONING_STREAM_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+REASONING_STREAM_TEST_BASE_URL="${BASE_URL}"
 REASONING_STREAM_TEST_MODEL_NAME="reasoning-stream-test-model"
-REASONING_STREAM_TEST_RUN_ID="reasoning-stream-run-013"
-REASONING_STREAM_TEST_SESSION_ID="${REASONING_STREAM_TEST_RUN_ID},sample013,task013"
+REASONING_STREAM_TEST_RUN_ID="run-${SCENARIO_ID}"
+REASONING_STREAM_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 REASONING_STREAM_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
 REASONING_STREAM_TEST_REASONING_PARSER="qwen3"
 
@@ -80,7 +80,7 @@ echo ""
 # 使用特定提示词引导模型输出推理格式
 log_step "步骤 2: 发送带推理内容的流式请求（session_id: ${REASONING_STREAM_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s --no-buffer \\
-    -X POST '${REASONING_STREAM_TEST_BASE_URL}/s/${REASONING_STREAM_TEST_SESSION_ID}/v1/chat/completions' \\
+    -X POST '${REASONING_STREAM_TEST_BASE_URL}/s/${REASONING_STREAM_TEST_RUN_ID}/${REASONING_STREAM_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -91,7 +91,7 @@ log_curl_cmd "curl -s --no-buffer \\
 log_separator
 
 # 发送流式请求并收集完整响应
-STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${REASONING_STREAM_TEST_BASE_URL}/s/${REASONING_STREAM_TEST_SESSION_ID}/v1/chat/completions" \
+STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${REASONING_STREAM_TEST_BASE_URL}/s/${REASONING_STREAM_TEST_RUN_ID}/${REASONING_STREAM_TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

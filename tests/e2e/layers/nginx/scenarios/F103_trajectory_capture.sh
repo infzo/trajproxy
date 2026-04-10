@@ -1,22 +1,22 @@
 #!/bin/bash
-# 场景 007: 轨迹抓取用例
-# 测试流程：12345端口注册带run-id模型 -> 发送非流式推理请求 -> 查询轨迹确认存在 -> 删除模型
+# 场景 F103: 轨迹抓取用例（Nginx 层）
+# 测试流程：注册带run-id模型 -> 发送非流式推理请求 -> 查询轨迹确认存在 -> 删除模型
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 007: 轨迹抓取用例"
+echo "场景 F103: 轨迹抓取用例（Nginx 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-TRAJ_TEST_PORT=12345
-TRAJ_TEST_BASE_URL="http://127.0.0.1:${TRAJ_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+TRAJ_TEST_BASE_URL="${BASE_URL}"
 TRAJ_TEST_MODEL_NAME="traj-test-model"
-TRAJ_TEST_RUN_ID="traj-run-007"
-TRAJ_TEST_SESSION_ID="${TRAJ_TEST_RUN_ID},sample007,task007"
+TRAJ_TEST_RUN_ID="run-${SCENARIO_ID}"
+TRAJ_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 
 # 步骤 1: 注册模型（带 run_id）
 log_step "步骤 1: 注册模型（run_id: ${TRAJ_TEST_RUN_ID}）"
@@ -57,12 +57,14 @@ assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 REGISTER_RUN_ID=$(json_get "$REGISTER_BODY" "run_id")
 assert_eq "$TRAJ_TEST_RUN_ID" "$REGISTER_RUN_ID" "run_id 应为 ${TRAJ_TEST_RUN_ID}"
 
+sleep 1
+
 echo ""
 
 # 步骤 2: 发送非流式推理请求
-log_step "步骤 2: 发送非流式推理请求（session_id: ${TRAJ_TEST_SESSION_ID}）"
+log_step "步骤 2: 发送非流式推理请求（run_id: ${TRAJ_TEST_RUN_ID}, session_id: ${TRAJ_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${TRAJ_TEST_BASE_URL}/s/${TRAJ_TEST_SESSION_ID}/v1/chat/completions' \\
+    -X POST '${TRAJ_TEST_BASE_URL}/s/${TRAJ_TEST_RUN_ID}/${TRAJ_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -72,7 +74,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     }'"
 log_separator
 
-CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TRAJ_TEST_BASE_URL}/s/${TRAJ_TEST_SESSION_ID}/v1/chat/completions" \
+CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TRAJ_TEST_BASE_URL}/s/${TRAJ_TEST_RUN_ID}/${TRAJ_TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

@@ -80,6 +80,7 @@ def init_database():
                     unique_id TEXT NOT NULL UNIQUE,
                     request_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
+                    run_id TEXT,
                     model TEXT NOT NULL,
 
                     -- 统计信息（长期保留）
@@ -104,9 +105,23 @@ def init_database():
             """)
             print("  request_metadata 表创建完成")
 
+            # 兼容性：为 request_metadata 添加 run_id 列
+            print("  检查 request_metadata 表列兼容性...")
+            has_run_id = conn.execute("""
+                SELECT EXISTS(SELECT 1 FROM information_schema.columns
+                              WHERE table_schema='public'
+                              AND table_name='request_metadata'
+                              AND column_name='run_id')
+            """).fetchone()[0]
+
+            if not has_run_id:
+                conn.execute("ALTER TABLE public.request_metadata ADD COLUMN run_id TEXT")
+                print("  run_id 列添加完成")
+
             # request_metadata 索引
             print("  创建 request_metadata 索引...")
             conn.execute("CREATE INDEX IF NOT EXISTS request_metadata_session_id_idx ON public.request_metadata (session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS request_metadata_run_id_idx ON public.request_metadata (run_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS request_metadata_start_time_idx ON public.request_metadata (start_time DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS request_metadata_archive_location_idx ON public.request_metadata (archive_location) WHERE archive_location IS NOT NULL")
 
@@ -186,7 +201,7 @@ def init_database():
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS public.model_registry (
                     id SERIAL PRIMARY KEY,
-                    run_id TEXT NOT NULL DEFAULT '',
+                    run_id TEXT,
                     model_name TEXT NOT NULL,
                     url TEXT NOT NULL,
                     api_key TEXT NOT NULL,

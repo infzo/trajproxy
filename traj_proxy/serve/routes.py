@@ -9,7 +9,7 @@ FastAPI 路由定义
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
 import traceback
 import uuid
@@ -23,9 +23,9 @@ from traj_proxy.serve.schemas import (
 from traj_proxy.serve.dependencies import get_processor_manager
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.validators import (
+    normalize_run_id,
     validate_model_for_inference,
     validate_session_id,
-    normalize_run_id,
 )
 
 # 路由定义
@@ -36,53 +36,70 @@ transcript_router = APIRouter()
 logger = get_logger(__name__)
 
 
-def _parse_model_and_run_id(model: str, session_id: str = None) -> tuple:
+def _extract_run_id(model: str, x_run_id: Optional[str], path_run_id: Optional[str]) -> Optional[str]:
     """
-    解析 model 和 session_id，返回 (实际model, run_id)
+    从多个来源提取 run_id
 
     优先级：
-    1. model 中包含逗号 -> 从 model 解析 run_id（格式：model_name,run_id）
-    2. session_id 中包含逗号 -> 从 session_id 解析 run_id（格式：run_id,sample_id,task_id）
-    3. 默认 -> run_id = DEFAULT
+    1. 路径参数（path_run_id）
+    2. x-run-id Header
+    3. model 参数逗号后（model_name,run_id）
 
     Args:
-        model: 模型参数，支持两种格式：
-               - model_name (无逗号)
-               - model_name,run_id (有逗号)
-        session_id: 会话ID，格式为 run_id,sample_id,task_id
+        model: 模型参数，支持格式：model_name 或 model_name,run_id
+        x_run_id: x-run-id header 值
+        path_run_id: FastAPI 路径参数中的 run_id
 
     Returns:
-        (实际model_name, run_id)
+        run_id 或 None
     """
-    actual_model = model
+    # 优先级1：路径参数（最高）
+    if path_run_id:
+        return path_run_id.strip() if path_run_id.strip() else None
 
-    # 场景二：model 中有逗号，格式为 {model_name},{run_id}
+    # 优先级2：x-run-id header
+    if x_run_id:
+        return x_run_id.strip() if x_run_id.strip() else None
+
+    # 优先级3：model 参数逗号后
     if ',' in model:
-        parts = model.split(',', 1)
-        actual_model = parts[0].strip()
-        run_id = parts[1].strip()
-        return actual_model, run_id
+        return model.split(',', 1)[1].strip() or None
 
-    # 场景一：model 中无逗号
-    # 1.3: session_id 有逗号，提取 run_id
-    if session_id and ',' in session_id:
-        run_id = session_id.split(',')[0].strip()
-        return actual_model, run_id
+    return None
 
-    # 1.1, 1.2: 默认 run_id
-    return actual_model, normalize_run_id(None)
+
+def _extract_actual_model(model: str) -> str:
+    """
+    从 model 参数中提取实际的 model_name
+
+    Args:
+        model: 模型参数，支持格式：model_name 或 model_name,run_id
+
+    Returns:
+        实际的 model_name
+    """
+    if ',' in model:
+        return model.split(',', 1)[0].strip()
+    return model.strip()
 
 
 # ========== 聊天补全接口 ==========
 
 @chat_router.post("/chat/completions")
-async def chat_completions(request: Request, background_tasks: BackgroundTasks):
+async def chat_completions(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    run_id: Optional[str] = None,
+    session_id: Optional[str] = None
+):
     """
     处理聊天补全请求（支持流式和非流式）
 
     参数:
         request: FastAPI请求对象
         background_tasks: 后台任务
+        run_id: 路径参数中的运行ID（可选）
+        session_id: 路径参数中的会话ID（可选）
 
     返回:
         处理后的响应（JSON 或 SSE 流）
@@ -95,22 +112,31 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
         # 提取请求参数
         messages = body.get("messages", [])
         model = body.get("model")
+
+        # 从 header 获取 run_id 和 session_id
+        x_run_id = request.headers.get("x-run-id")
         x_session_id = request.headers.get("x-session-id")
         x_sandbox_traj_id = request.headers.get("x-sandbox-traj-id")
-        session_id = x_sandbox_traj_id or x_session_id  # 优先使用 x-sandbox-traj-id
-        stream = body.get("stream", False)  # 检查 stream 参数
 
-        # 如果 header 中没有，尝试从 request.state 获取（由中间件从路径中提取）
-        if not session_id and hasattr(request.state, "session_id_from_path"):
-            session_id = request.state.session_id_from_path
+        # session_id 优先级：路径参数 > x-session-id > x-sandbox-traj-id
+        final_session_id = session_id or x_session_id or x_sandbox_traj_id
+
+        # 如果 session_id 为空字符串，设为 None
+        if final_session_id == "":
+            final_session_id = None
+
+        stream = body.get("stream", False)  # 检查 stream 参数
 
         # 校验 model 参数格式
         valid, msg, _ = validate_model_for_inference(model or "")
         if not valid:
             raise HTTPException(status_code=422, detail=msg)
 
-        # 解析 model 和 run_id（使用原始 model 参数）
-        actual_model, run_id = _parse_model_and_run_id(model, session_id)
+        # 提取 run_id（优先级：路径参数 > x-run-id header > model 参数）
+        final_run_id = _extract_run_id(model, x_run_id, run_id)
+
+        # 提取实际的 model_name
+        actual_model = _extract_actual_model(model)
 
         # 其他请求参数
         request_params = {}
@@ -122,19 +148,19 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
         # 生成 request_id
         request_id = str(uuid.uuid4())
 
-        logger.info(f"[{request_id}] 处理聊天补全请求: model={actual_model}, run_id={run_id}, stream={stream}, messages={len(messages)}")
+        logger.info(f"[{request_id}] 处理聊天补全请求: model={actual_model}, run_id={final_run_id}, session_id={final_session_id}, stream={stream}, messages={len(messages)}")
 
         # 获取 ProcessorManager 实例（从请求上下文）
         processor_manager = get_processor_manager(request)
 
         # 根据 run_id 和 model_name 获取对应的 processor
-        processor = processor_manager.get_processor(run_id, actual_model)
+        processor = processor_manager.get_processor(final_run_id, actual_model)
 
         if processor is None:
-            logger.warning(f"[{request_id}] 模型未注册: model={actual_model}, run_id={run_id}")
+            logger.warning(f"[{request_id}] 模型未注册: model={actual_model}, run_id={final_run_id}")
             raise HTTPException(
                 status_code=404,
-                detail=f"模型 '{actual_model}' 未注册 (run_id={run_id})"
+                detail=f"模型 '{actual_model}' 未注册 (run_id={final_run_id})"
             )
 
         # 根据是否流式选择处理方式
@@ -148,7 +174,8 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
                 async for chunk in processor.process_stream(
                     messages=messages,
                     request_id=request_id,
-                    session_id=session_id,
+                    session_id=final_session_id,
+                    run_id=final_run_id,
                     context_holder=context_holder,
                     **request_params
                 ):
@@ -176,7 +203,8 @@ async def chat_completions(request: Request, background_tasks: BackgroundTasks):
             context = await processor.process_request(
                 messages=messages,
                 request_id=request_id,
-                session_id=session_id,
+                session_id=final_session_id,
+                run_id=final_run_id,
                 **request_params
             )
 
@@ -208,9 +236,8 @@ async def register_model(request: Request, req: RegisterModelRequest):
     try:
         processor_manager = get_processor_manager(request)
 
-        # 场景一：run_id 为空，赋默认值 DEFAULT
-        # 场景二：run_id 不为空，直接使用
-        run_id = normalize_run_id(req.run_id)
+        # run_id 可以为空，直接使用
+        run_id = req.run_id.strip() if req.run_id and req.run_id.strip() else None
 
         # 注册模型（会同步持久化到数据库）
         processor = await processor_manager.register_dynamic_processor(
@@ -229,7 +256,7 @@ async def register_model(request: Request, req: RegisterModelRequest):
 
         return RegisterModelResponse(
             status="success",
-            run_id=run_id,
+            run_id=normalize_run_id(run_id),
             model_name=req.model_name,
             detail={
                 "run_id": processor.run_id,
@@ -270,9 +297,8 @@ async def delete_model(request: Request, model_name: str, run_id: str = ""):
     try:
         processor_manager = get_processor_manager(request)
 
-        # 场景一：run_id 为空，赋默认值 DEFAULT
-        # 场景二：run_id 不为空，直接使用
-        actual_run_id = normalize_run_id(run_id)
+        # run_id 可以为空，直接使用
+        actual_run_id = run_id.strip() if run_id and run_id.strip() else None
 
         deleted = await processor_manager.unregister_dynamic_processor(
             model_name, persist_to_db=True, run_id=actual_run_id

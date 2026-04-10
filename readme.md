@@ -212,12 +212,12 @@ TrajProxy/
 | 文档 | 说明 |
 |------|------|
 | [架构设计](docs/architecture.md) | Pipeline 架构、核心组件、处理流程 |
-| [API 参考](docs/api_reference.md) | 完整的 API 接口文档 |
-| [配置详解](docs/configuration.md) | 配置文件说明、环境变量 |
+| [API 参考](docs/develop/api_reference.md) | 完整的 API 接口文档 |
+| [配置详解](docs/develop/configuration.md) | 配置文件说明、环境变量 |
 | [数据库设计](docs/database.md) | 表结构、数据模型、同步机制 |
 | [Parser 文档](docs/parser.md) | 工具调用和推理内容解析 |
-| [部署指南](docs/deployment.md) | 本地开发、Docker 部署 |
-| [开发指南](docs/development.md) | 开发环境、测试运行 |
+| [部署指南](docs/develop/deployment.md) | 本地开发、Docker 部署 |
+| [开发指南](docs/develop/development.md) | 开发环境、测试运行 |
 
 ## 端口说明
 

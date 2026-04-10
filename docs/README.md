@@ -9,29 +9,29 @@
 ```
 docs/
 ├── README.md                    # 文档索引（本文件）
-├── release.md                   # 变更日志
 │
 ├── design/                      # 架构设计文档
 │   ├── architecture.md          # 系统架构设计
 │   ├── database.md              # 数据库设计
+│   ├── identifier_design.md     # ID 设计规范
 │   ├── next_db.md               # 数据库优化方案
 │   ├── parser.md                # Parser 模块设计
-│   ├── tito.md                  # TITO 前缀匹配方案
+│   ├── tito-v1.md               # TITO 前缀匹配方案
 │   ├── tito-v2.md               # TITO 模式集成方案
-│   ├── template_consistency.md  # 多轮一致性模板
 │   └── jinja-process.md         # Jinja 模板转换工作流
 │
-├── experience/                  # 经验总结（项目历程）
-│   └── README.md                # 经验索引
+├── develop/                     # 开发与运维文档
+│   ├── development.md           # 开发环境搭建
+│   ├── deployment.md            # 部署指南
+│   ├── configuration.md         # 配置说明
+│   ├── api_reference.md         # API 参考手册
+│   ├── store.md                 # Store 模块文档
+│   ├── release.md               # 变更日志
+│   ├── core_cases.md            # 核心用例测试
+│   └── compare_vllm.md          # 与 vLLM 接口对比
 │
-├── development.md               # 开发环境搭建
-├── deployment.md                # 部署指南
-├── core_cases.md                # 核心用例测试
-├── api_reference.md             # API 参考手册
-├── configuration.md             # 配置说明
-├── store.md                     # Store 模块文档
-├── compare_vllm.md              # 与 vLLM 接口对比
-└── run_id_model_name_rules.md   # Run ID 规则定义
+└── experience/                  # 经验总结（项目历程）
+    └── README.md                # 经验索引
 ```
 
 ---
@@ -54,8 +54,7 @@ docs/
 
 ### 核心概念
 
-- [Run ID 和 Model Name 规则](others/run_id_model_name_rules.md)
-- [多轮一致性模板](design/template_consistency.md)
+- [ID 设计规范](design/identifier_design.md) - run_id、session_id、model 语义定义
 - [Jinja 模板转换](design/jinja-process.md)
 
 ### 项目历程
@@ -70,5 +69,5 @@ docs/
 | 类型 | 位置 | 说明 |
 |------|------|------|
 | 架构/模块设计 | `design/` | 系统架构、模块设计、技术方案 |
-| 使用/运维文档 | `docs/` 根目录 | 开发指南、API 参考、配置说明 |
+| 开发/运维文档 | `develop/` | 开发指南、API 参考、配置说明、测试用例 |
 | 经验沉淀 | `experience/` | 问题解决、踩坑记录、架构演进 |

@@ -1,51 +1,51 @@
 #!/bin/bash
-# 场景 012: Tool流式场景
-# 测试流程：12300端口注册模型（带tool_parser） -> 发送带tools的流式推理请求 -> 验证流式响应中tool_calls解析 -> 删除模型
+# 场景 F202: Tool场景（Proxy 层）
+# 测试流程：注册模型（带tool_parser） -> 发送带tools的非流式推理请求 -> 验证响应中tool_calls字段非空 -> 删除模型
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 012: Tool流式场景"
+echo "场景 F202: Tool场景（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-TOOL_STREAM_TEST_PORT=12300
-TOOL_STREAM_TEST_BASE_URL="http://127.0.0.1:${TOOL_STREAM_TEST_PORT}"
-TOOL_STREAM_TEST_MODEL_NAME="tool-stream-test-model"
-TOOL_STREAM_TEST_RUN_ID="tool-stream-run-012"
-TOOL_STREAM_TEST_SESSION_ID="${TOOL_STREAM_TEST_RUN_ID},sample012,task012"
-TOOL_STREAM_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
-TOOL_STREAM_TEST_TOOL_PARSER="qwen3_coder"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+TOOL_TEST_BASE_URL="${BASE_URL}"
+TOOL_TEST_MODEL_NAME="tool-test-model"
+TOOL_TEST_RUN_ID="run-${SCENARIO_ID}"
+TOOL_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
+TOOL_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
+TOOL_TEST_TOOL_PARSER="qwen3_coder"
 
 # 步骤 1: 注册模型（带 run_id、tool_parser 和 token_in_token_out）
 # 注意：tool_parser 只在 token_in_token_out=true 模式下生效
-log_step "步骤 1: 注册模型（run_id: ${TOOL_STREAM_TEST_RUN_ID}, tool_parser: ${TOOL_STREAM_TEST_TOOL_PARSER}, token_in_token_out: true）"
+log_step "步骤 1: 注册模型（run_id: ${TOOL_TEST_RUN_ID}, tool_parser: ${TOOL_TEST_TOOL_PARSER}, token_in_token_out: true）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${TOOL_STREAM_TEST_BASE_URL}/models/register' \\
+    -X POST '${TOOL_TEST_BASE_URL}/models/register' \\
     -H 'Content-Type: application/json' \\
     -d '{
-        \"run_id\": \"${TOOL_STREAM_TEST_RUN_ID}\",
-        \"model_name\": \"${TOOL_STREAM_TEST_MODEL_NAME}\",
+        \"run_id\": \"${TOOL_TEST_RUN_ID}\",
+        \"model_name\": \"${TOOL_TEST_MODEL_NAME}\",
         \"url\": \"${BACKEND_MODEL_URL}\",
         \"api_key\": \"${TEST_MODEL_API_KEY}\",
-        \"tokenizer_path\": \"${TOOL_STREAM_TEST_TOKENIZER_PATH}\",
-        \"tool_parser\": \"${TOOL_STREAM_TEST_TOOL_PARSER}\",
+        \"tokenizer_path\": \"${TOOL_TEST_TOKENIZER_PATH}\",
+        \"tool_parser\": \"${TOOL_TEST_TOOL_PARSER}\",
         \"token_in_token_out\": true
     }'"
 log_separator
 
-REGISTER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_STREAM_TEST_BASE_URL}/models/register" \
+REGISTER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/models/register" \
     -H "Content-Type: application/json" \
     -d "{
-        \"run_id\": \"${TOOL_STREAM_TEST_RUN_ID}\",
-        \"model_name\": \"${TOOL_STREAM_TEST_MODEL_NAME}\",
+        \"run_id\": \"${TOOL_TEST_RUN_ID}\",
+        \"model_name\": \"${TOOL_TEST_MODEL_NAME}\",
         \"url\": \"${BACKEND_MODEL_URL}\",
         \"api_key\": \"${TEST_MODEL_API_KEY}\",
-        \"tokenizer_path\": \"${TOOL_STREAM_TEST_TOKENIZER_PATH}\",
-        \"tool_parser\": \"${TOOL_STREAM_TEST_TOOL_PARSER}\",
+        \"tokenizer_path\": \"${TOOL_TEST_TOKENIZER_PATH}\",
+        \"tool_parser\": \"${TOOL_TEST_TOOL_PARSER}\",
         \"token_in_token_out\": true
     }")
 
@@ -62,11 +62,11 @@ REGISTER_RESULT=$(json_get "$REGISTER_BODY" "status")
 assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 
 REGISTER_RUN_ID=$(json_get "$REGISTER_BODY" "run_id")
-assert_eq "$TOOL_STREAM_TEST_RUN_ID" "$REGISTER_RUN_ID" "run_id 应为 ${TOOL_STREAM_TEST_RUN_ID}"
+assert_eq "$TOOL_TEST_RUN_ID" "$REGISTER_RUN_ID" "run_id 应为 ${TOOL_TEST_RUN_ID}"
 
 # 验证 tool_parser 配置
 REGISTER_TOOL_PARSER=$(json_get "$REGISTER_BODY" "tool_parser")
-assert_eq "$TOOL_STREAM_TEST_TOOL_PARSER" "$REGISTER_TOOL_PARSER" "tool_parser 应为 ${TOOL_STREAM_TEST_TOOL_PARSER}"
+assert_eq "$TOOL_TEST_TOOL_PARSER" "$REGISTER_TOOL_PARSER" "tool_parser 应为 ${TOOL_TEST_TOOL_PARSER}"
 
 # 验证 token_in_token_out 配置
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
@@ -75,15 +75,15 @@ sleep 3
 
 echo ""
 
-# 步骤 2: 发送带 tools 的流式推理请求
+# 步骤 2: 发送带 tools 的非流式推理请求（使用特定提示词引导模型输出工具调用格式）
 # qwen3_coder parser 期望格式: toral<function=func_name>\n<parameter=param_name>value</parameter>\n</function> Ranchi
-log_step "步骤 2: 发送带 tools 的流式推理请求（session_id: ${TOOL_STREAM_TEST_SESSION_ID}）"
-log_curl_cmd "curl -s --no-buffer \\
-    -X POST '${TOOL_STREAM_TEST_BASE_URL}/s/${TOOL_STREAM_TEST_SESSION_ID}/v1/chat/completions' \\
+log_step "步骤 2: 发送带 tools 的非流式推理请求（run_id: ${TOOL_TEST_RUN_ID}, session_id: ${TOOL_TEST_SESSION_ID}）"
+log_curl_cmd "curl -s -w '\n%{http_code}' \\
+    -X POST '${TOOL_TEST_BASE_URL}/s/${TOOL_TEST_RUN_ID}/${TOOL_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
-        \"model\": \"${TOOL_STREAM_TEST_MODEL_NAME}\",
+        \"model\": \"${TOOL_TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly: toral<function=get_weather>\\n<parameter=location>Beijing</parameter>\\n</function> Ranchi\"}],
         \"tools\": [
             {
@@ -104,16 +104,15 @@ log_curl_cmd "curl -s --no-buffer \\
                 }
             }
         ],
-        \"stream\": true
+        \"stream\": false
     }'"
 log_separator
 
-# 发送流式请求并收集完整响应
-STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${TOOL_STREAM_TEST_BASE_URL}/s/${TOOL_STREAM_TEST_SESSION_ID}/v1/chat/completions" \
+CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/${TOOL_TEST_RUN_ID}/${TOOL_TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
-        \"model\": \"${TOOL_STREAM_TEST_MODEL_NAME}\",
+        \"model\": \"${TOOL_TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly: toral<function=get_weather>\\n<parameter=location>Beijing</parameter>\\n</function> Ranchi\"}],
         \"tools\": [
             {
@@ -134,52 +133,54 @@ STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${TOOL_STREAM_TEST_BASE_URL}/s/${
                 }
             }
         ],
-        \"stream\": true
+        \"stream\": false
     }")
 
-log_response "流式响应内容:"
-echo "$STREAM_RESPONSE"
+CHAT_BODY=$(echo "$CHAT_RESPONSE" | sed '$d')
+CHAT_STATUS=$(echo "$CHAT_RESPONSE" | sed -n '$p')
+
+log_response "HTTP Status: ${CHAT_STATUS}"
+log_response "${CHAT_BODY}"
 log_separator
 
-# 验证流式响应格式
-assert_contains "$STREAM_RESPONSE" "data:" "流式响应应包含 data: 前缀"
-assert_contains "$STREAM_RESPONSE" "choices" "流式响应应包含 choices 字段"
-assert_contains "$STREAM_RESPONSE" "[DONE]" "流式响应应以 [DONE] 结束"
+assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
 
-# 统计 chunk 数量（排除空行和 [DONE] 行）
-CHUNK_COUNT=$(echo "$STREAM_RESPONSE" | grep -c "^data: {" || true)
-log_info "收到 ${CHUNK_COUNT} 个数据块"
+# 验证响应格式
+assert_contains "$CHAT_BODY" "id" "响应应包含 id 字段"
+assert_contains "$CHAT_BODY" "choices" "响应应包含 choices 字段"
 
-if [ "$CHUNK_COUNT" -gt 0 ]; then
-    log_success "流式响应包含多个数据块"
-else
-    log_error "流式响应未包含有效数据块"
-fi
-
-# 验证流式响应中 tool_calls 字段（Tool流式场景关键字段）
-# 在流式响应中，tool_calls 可能在某个chunk中出现
-if echo "$STREAM_RESPONSE" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\['; then
+# 验证 tool_calls 字段非空（Tool场景关键字段）
+if echo "$CHAT_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*null'; then
+    log_error "tool_calls 字段为 null，Tool场景应有工具调用"
+    TEST_FAILED=1
+elif echo "$CHAT_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\[\]'; then
+    log_error "tool_calls 字段为空数组，Tool场景应有工具调用"
+    TEST_FAILED=1
+elif echo "$CHAT_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\['; then
     # 检查 tool_calls 数组中是否有内容（包含 function 字段表示有工具调用）
-    if echo "$STREAM_RESPONSE" | grep -q '"function"'; then
-        log_success "流式响应中检测到 tool_calls 解析，验证通过"
+    if echo "$CHAT_BODY" | grep -q '"function"'; then
+        log_success "tool_calls 字段非空，检测到工具调用，验证通过"
     else
         log_error "tool_calls 数组存在但未检测到 function 字段"
         TEST_FAILED=1
     fi
+elif ! echo "$CHAT_BODY" | grep -q '"tool_calls"'; then
+    log_error "响应中无 tool_calls 字段，Tool场景应有工具调用"
+    TEST_FAILED=1
 else
-    log_error "流式响应中未检测到 tool_calls 字段，Tool流式场景应有工具调用解析"
+    log_error "tool_calls 字段格式异常"
     TEST_FAILED=1
 fi
 
 echo ""
 
 # 步骤 3: 查询轨迹确认存在
-log_step "步骤 3: 查询轨迹（session_id: ${TOOL_STREAM_TEST_SESSION_ID}）"
+log_step "步骤 3: 查询轨迹（run_id: ${TOOL_TEST_RUN_ID}, session_id: ${TOOL_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X GET '${TOOL_STREAM_TEST_BASE_URL}/trajectory?session_id=${TOOL_STREAM_TEST_SESSION_ID}&limit=100'"
+    -X GET '${TOOL_TEST_BASE_URL}/trajectory?session_id=${TOOL_TEST_SESSION_ID}&limit=100'"
 log_separator
 
-TRAJ_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TOOL_STREAM_TEST_BASE_URL}/trajectory?session_id=${TOOL_STREAM_TEST_SESSION_ID}&limit=100")
+TRAJ_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TOOL_TEST_BASE_URL}/trajectory?session_id=${TOOL_TEST_SESSION_ID}&limit=100")
 
 TRAJ_BODY=$(echo "$TRAJ_RESPONSE" | sed '$d')
 TRAJ_STATUS=$(echo "$TRAJ_RESPONSE" | sed -n '$p')
@@ -197,7 +198,7 @@ assert_contains "$TRAJ_BODY" "records" "响应应包含 records 字段"
 
 # 验证 session_id 匹配
 TRAJ_SESSION_ID=$(json_get "$TRAJ_BODY" "session_id")
-assert_eq "$TOOL_STREAM_TEST_SESSION_ID" "$TRAJ_SESSION_ID" "session_id 应为 ${TOOL_STREAM_TEST_SESSION_ID}"
+assert_eq "$TOOL_TEST_SESSION_ID" "$TRAJ_SESSION_ID" "session_id 应为 ${TOOL_TEST_SESSION_ID}"
 
 # 验证记录数大于0
 TRAJ_COUNT=$(json_get_number "$TRAJ_BODY" "count")
@@ -211,12 +212,12 @@ fi
 echo ""
 
 # 步骤 4: 删除模型
-log_step "步骤 4: 删除模型（run_id: ${TOOL_STREAM_TEST_RUN_ID}）"
+log_step "步骤 4: 删除模型（run_id: ${TOOL_TEST_RUN_ID}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X DELETE '${TOOL_STREAM_TEST_BASE_URL}/models?model_name=${TOOL_STREAM_TEST_MODEL_NAME}&run_id=${TOOL_STREAM_TEST_RUN_ID}'"
+    -X DELETE '${TOOL_TEST_BASE_URL}/models?model_name=${TOOL_TEST_MODEL_NAME}&run_id=${TOOL_TEST_RUN_ID}'"
 log_separator
 
-DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${TOOL_STREAM_TEST_BASE_URL}/models?model_name=${TOOL_STREAM_TEST_MODEL_NAME}&run_id=${TOOL_STREAM_TEST_RUN_ID}")
+DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${TOOL_TEST_BASE_URL}/models?model_name=${TOOL_TEST_MODEL_NAME}&run_id=${TOOL_TEST_RUN_ID}")
 
 DELETE_BODY=$(echo "$DELETE_RESPONSE" | sed '$d')
 DELETE_STATUS=$(echo "$DELETE_RESPONSE" | sed -n '$p')

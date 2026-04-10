@@ -92,6 +92,7 @@ services:
     ports:
       - "12300-12320:12300-12320"
     volumes:
+      - ../scripts:/app/scripts
       - ../models:/app/models
       - ../traj_proxy:/app/traj_proxy
       - ../configs/config.yaml:/app/configs/config.yaml

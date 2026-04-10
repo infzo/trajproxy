@@ -34,7 +34,7 @@ class RequestRepository:
         """
         self.pool = pool
 
-    async def insert(self, context: "ProcessContext", tokenizer_path: Optional[str] = None):
+    async def insert(self, context: "ProcessContext", tokenizer_path: Optional[str] = None, run_id: Optional[str] = None):
         """插入轨迹记录（事务双写）
 
         在同一事务中写入 request_metadata 和 request_details_active。
@@ -42,6 +42,7 @@ class RequestRepository:
         Args:
             context: 处理上下文
             tokenizer_path: Tokenizer 路径（可选，直接转发模式下不需要）
+            run_id: 运行ID（可选，独立存储）
 
         Raises:
             DatabaseError: 当插入失败时抛出
@@ -52,15 +53,16 @@ class RequestRepository:
                     # 1. 写入元数据表（统计字段，长期保留）
                     await conn.execute("""
                         INSERT INTO public.request_metadata (
-                            unique_id, request_id, session_id, model,
+                            unique_id, request_id, session_id, run_id, model,
                             prompt_tokens, completion_tokens, total_tokens,
                             cache_hit_tokens, processing_duration_ms,
                             start_time, end_time, error
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         context.unique_id,
                         context.request_id,
                         context.session_id or "",
+                        run_id,
                         context.model,
                         context.prompt_tokens,
                         context.completion_tokens,
@@ -130,7 +132,7 @@ class RequestRepository:
                 async with conn.cursor(row_factory=dict_row) as cur:
                     await cur.execute("""
                         SELECT
-                            m.id, m.unique_id, m.request_id, m.session_id, m.model,
+                            m.id, m.unique_id, m.request_id, m.session_id, m.run_id, m.model,
                             m.prompt_tokens, m.completion_tokens, m.total_tokens,
                             m.cache_hit_tokens, m.processing_duration_ms,
                             m.start_time, m.end_time, m.created_at, m.error,
@@ -176,7 +178,7 @@ class RequestRepository:
                 async with conn.cursor(row_factory=dict_row) as cur:
                     await cur.execute("""
                         SELECT
-                            id, unique_id, request_id, session_id, model,
+                            id, unique_id, request_id, session_id, run_id, model,
                             prompt_tokens, completion_tokens, total_tokens,
                             cache_hit_tokens, processing_duration_ms,
                             start_time, end_time, created_at, error,

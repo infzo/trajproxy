@@ -1,6 +1,6 @@
 # Parser 行为逻辑文档
 
-> **导航**: [文档中心](../README.md) | [架构文档](architecture.md) | [vLLM 对比](../others/compare_vllm.md)
+> **导航**: [文档中心](../README.md) | [架构文档](architecture.md) | [vLLM 对比](../develop/compare_vllm.md)
 
 ## 概述
 

@@ -61,7 +61,7 @@ if [ ! -f "${PGDATA}/PG_VERSION" ]; then
     chown postgres:postgres "${PGDATA}"
 
     # 初始化数据库集群
-    su-exec postgres /usr/lib/postgresql/16/bin/initdb \
+    gosu postgres /usr/lib/postgresql/16/bin/initdb \
         -D "${PGDATA}" \
         -E UTF8 \
         --locale=C \
@@ -81,13 +81,13 @@ else
 fi
 
 # 确保目录权限正确
-chown -R postgres:postgres "${PGDATA}" /run/postgresql
+chown -R postgres:postgres "${PGDATA}" /run/postgresql /var/log/supervisor
 
 # ========================================
 # 第二阶段：临时启动 PostgreSQL，创建用户和数据库
 # ========================================
 echo "--- 启动 PostgreSQL 进行初始化 ---"
-su-exec postgres /usr/lib/postgresql/16/bin/pg_ctl \
+gosu postgres /usr/lib/postgresql/16/bin/pg_ctl \
     -D "${PGDATA}" \
     -o "-c unix_socket_directories=/run/postgresql" \
     -l /var/log/supervisor/postgresql_init.log \
@@ -96,7 +96,7 @@ su-exec postgres /usr/lib/postgresql/16/bin/pg_ctl \
 # 等待 PostgreSQL 接受连接
 echo "--- 等待 PostgreSQL 就绪 ---"
 for i in $(seq 1 30); do
-    if su-exec postgres psql -U postgres -c '\q' 2>/dev/null; then
+    if gosu postgres psql -U postgres -c '\q' 2>/dev/null; then
         echo "PostgreSQL 已就绪"
         break
     fi
@@ -105,7 +105,7 @@ done
 
 # 创建用户（如果不存在）
 echo "--- 创建数据库用户 ---"
-su-exec postgres psql -c \
+gosu postgres psql -c \
     "DO \$\$ BEGIN
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${POSTGRES_USER}') THEN
             CREATE USER ${POSTGRES_USER} WITH PASSWORD '${POSTGRES_PASSWORD}' LOGIN;
@@ -114,16 +114,16 @@ su-exec postgres psql -c \
 
 # 创建数据库（如果不存在）
 echo "--- 创建数据库 ---"
-su-exec postgres psql -c \
+gosu postgres psql -c \
     "SELECT 'CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER}'
      WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${POSTGRES_DB}')\gexec" 2>/dev/null || \
-    su-exec postgres createdb -O "${POSTGRES_USER}" "${POSTGRES_DB}" 2>/dev/null || \
+    gosu postgres createdb -O "${POSTGRES_USER}" "${POSTGRES_DB}" 2>/dev/null || \
     echo "数据库 ${POSTGRES_DB} 已存在"
 
-su-exec postgres psql -c \
+gosu postgres psql -c \
     "SELECT 'CREATE DATABASE ${TRAJ_PROXY_DB} OWNER ${POSTGRES_USER}'
      WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${TRAJ_PROXY_DB}')\gexec" 2>/dev/null || \
-    su-exec postgres createdb -O "${POSTGRES_USER}" "${TRAJ_PROXY_DB}" 2>/dev/null || \
+    gosu postgres createdb -O "${POSTGRES_USER}" "${TRAJ_PROXY_DB}" 2>/dev/null || \
     echo "数据库 ${TRAJ_PROXY_DB} 已存在"
 
 # ========================================
@@ -170,6 +170,7 @@ def init_database():
                     unique_id TEXT NOT NULL UNIQUE,
                     request_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
+                    run_id TEXT,
                     model TEXT NOT NULL,
                     prompt_tokens INTEGER,
                     completion_tokens INTEGER,
@@ -185,8 +186,22 @@ def init_database():
                 )
             """)
 
+            # 兼容性：为 request_metadata 添加 run_id 列
+            print("  检查 request_metadata 表列兼容性...")
+            has_run_id = conn.execute("""
+                SELECT EXISTS(SELECT 1 FROM information_schema.columns
+                              WHERE table_schema='public'
+                              AND table_name='request_metadata'
+                              AND column_name='run_id')
+            """).fetchone()[0]
+
+            if not has_run_id:
+                conn.execute("ALTER TABLE public.request_metadata ADD COLUMN run_id TEXT")
+                print("  run_id 列添加完成")
+
             # request_metadata 索引
             conn.execute("CREATE INDEX IF NOT EXISTS request_metadata_session_id_idx ON public.request_metadata (session_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS request_metadata_run_id_idx ON public.request_metadata (run_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS request_metadata_start_time_idx ON public.request_metadata (start_time DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS request_metadata_archive_location_idx ON public.request_metadata (archive_location) WHERE archive_location IS NOT NULL")
 
@@ -246,7 +261,7 @@ def init_database():
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS public.model_registry (
                     id SERIAL PRIMARY KEY,
-                    run_id TEXT NOT NULL DEFAULT '',
+                    run_id TEXT,
                     model_name TEXT NOT NULL,
                     url TEXT NOT NULL,
                     api_key TEXT NOT NULL,
@@ -306,7 +321,7 @@ PYTHON_SCRIPT
 
 if [ $? -ne 0 ]; then
     echo "错误: 数据表初始化失败"
-    su-exec postgres /usr/lib/postgresql/16/bin/pg_ctl -D "${PGDATA}" stop -m fast 2>/dev/null || true
+    gosu postgres /usr/lib/postgresql/16/bin/pg_ctl -D "${PGDATA}" stop -m fast 2>/dev/null || true
     exit 1
 fi
 
@@ -316,7 +331,7 @@ echo "--- 数据表初始化完成 ---"
 # 第四阶段：停止临时 PostgreSQL（supervisord 将接管）
 # ========================================
 echo "--- 停止临时 PostgreSQL ---"
-su-exec postgres /usr/lib/postgresql/16/bin/pg_ctl -D "${PGDATA}" stop -m fast
+gosu postgres /usr/lib/postgresql/16/bin/pg_ctl -D "${PGDATA}" stop -m fast
 
 # ========================================
 # 第五阶段：更新配置文件中的数据库连接（运行时覆盖）

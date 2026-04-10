@@ -166,6 +166,7 @@ class Processor:
         messages: list,
         request_id: str,
         session_id: Optional[str] = None,
+        run_id: Optional[str] = None,
         **request_params
     ) -> ProcessContext:
         """处理完整的非流式 LLM 请求
@@ -173,7 +174,8 @@ class Processor:
         Args:
             messages: OpenAI 格式的消息列表
             request_id: 请求 ID
-            session_id: 会话 ID（格式: app_id,sample_id,task_id）
+            session_id: 原始会话 ID（不再自动补充前缀）
+            run_id: 运行 ID（可选）
             **request_params: 请求参数（如 max_tokens, temperature 等）
 
         Returns:
@@ -186,6 +188,7 @@ class Processor:
         context = self._pipeline._create_context(
             request_id=request_id,
             session_id=session_id,
+            run_id=run_id,
             messages=messages,
             request_params=request_params,
             is_stream=False
@@ -216,6 +219,7 @@ class Processor:
         messages: list,
         request_id: str,
         session_id: Optional[str] = None,
+        run_id: Optional[str] = None,
         context_holder: Optional[dict] = None,
         **request_params
     ) -> AsyncIterator[Dict[str, Any]]:
@@ -224,7 +228,8 @@ class Processor:
         Args:
             messages: OpenAI 格式的消息列表
             request_id: 请求 ID
-            session_id: 会话 ID（格式: app_id,sample_id,task_id）
+            session_id: 原始会话 ID（不再自动补充前缀）
+            run_id: 运行 ID（可选）
             context_holder: 可选容器，流式完成后存储上下文
             **request_params: 请求参数
 
@@ -238,6 +243,7 @@ class Processor:
         context = self._pipeline._create_context(
             request_id=request_id,
             session_id=session_id,
+            run_id=run_id,
             messages=messages,
             request_params=request_params,
             is_stream=True

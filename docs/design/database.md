@@ -118,6 +118,8 @@ class ModelConfig:
 
 存储请求轨迹的元数据（统计信息），长期保留，不随归档删除。
 
+> **设计规范**：参见 [ID 设计规范](identifier_design.md)
+
 ### 表结构
 
 ```sql
@@ -126,6 +128,7 @@ CREATE TABLE request_metadata (
     unique_id TEXT NOT NULL UNIQUE,
     request_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
+    run_id TEXT,                      -- 运行ID，独立存储
     model TEXT NOT NULL,
 
     -- 统计信息（长期保留）
@@ -155,7 +158,8 @@ CREATE TABLE request_metadata (
 |------|------|------|
 | `unique_id` | TEXT UNIQUE | 全局唯一标识，格式: `{session_id},{request_id}` |
 | `request_id` | TEXT | 请求 ID |
-| `session_id` | TEXT | 会话 ID，格式: `run_id,sample_id,task_id` |
+| `session_id` | TEXT | 会话 ID，存储原始值 |
+| `run_id` | TEXT | 运行 ID，独立存储，可选 |
 | `model` | TEXT | 使用的模型名称 |
 | `prompt_tokens` | INTEGER | 输入 Token 数 |
 | `completion_tokens` | INTEGER | 输出 Token 数 |
@@ -166,11 +170,33 @@ CREATE TABLE request_metadata (
 | `archive_location` | TEXT | NULL=活跃详情表, 非空=已归档到外部文件 |
 | `archived_at` | TIMESTAMPTZ | 归档时间 |
 
+### session_id 和 run_id 说明
+
+> **变更说明**：`session_id` 存储原始值，不再自动补充 `run_id` 前缀；`run_id` 独立存储。
+
+| 字段 | 存储 | 示例 |
+|------|------|------|
+| `session_id` | 原始值 | `task-123` |
+| `run_id` | 独立存储 | `run_001` |
+
+**查询示例**：
+```sql
+-- 查询特定 run_id 的所有轨迹
+SELECT * FROM request_metadata WHERE run_id = 'run_001';
+
+-- 查询特定会话的轨迹
+SELECT * FROM request_metadata WHERE session_id = 'task-123';
+
+-- 查询特定 run_id 和会话的轨迹
+SELECT * FROM request_metadata WHERE run_id = 'run_001' AND session_id = 'task-123';
+```
+
 ### 索引
 
 | 索引名 | 字段 | 说明 |
 |--------|------|------|
 | `request_metadata_session_id_idx` | `session_id` | 按会话查询 |
+| `request_metadata_run_id_idx` | `run_id` | 按 run_id 查询 |
 | `request_metadata_start_time_idx` | `start_time DESC` | 按时间倒序查询 |
 | `request_metadata_archive_location_idx` | `archive_location` | 部分索引（WHERE NOT NULL），查找已归档记录 |
 
@@ -273,6 +299,7 @@ class RequestRecord:
     unique_id: str
     request_id: str
     session_id: str
+    run_id: Optional[str] = None  # 运行ID，独立存储
     model: str
     messages: List[Any]
     tokenizer_path: Optional[str] = None
@@ -330,6 +357,8 @@ class RequestRecord:
 
 ProcessContext 贯穿整个请求处理流程，包含输入数据、中间处理数据和输出结果。
 
+> **详细设计**：参见 [ID 设计规范](identifier_design.md)
+
 ```python
 @dataclass
 class ProcessContext:
@@ -338,7 +367,8 @@ class ProcessContext:
     # ========== 基础标识 ==========
     request_id: str
     model: str
-    session_id: Optional[str] = None  # 格式: run_id,sample_id,task_id
+    session_id: Optional[str] = None  # 原始会话ID，不再自动补充前缀
+    run_id: Optional[str] = None      # 运行ID，独立存储
     unique_id: Optional[str] = None   # 格式: {session_id},{request_id}
 
     # ========== 阶段1: OpenAI Chat 格式 ==========
@@ -390,6 +420,16 @@ class ProcessContext:
     stream_buffer_ids: List[int] = field(default_factory=list)
     stream_chunk_count: int = 0
     stream_finished: bool = False
+
+    # 流式累积字段
+    stream_role: Optional[str] = None          # delta.role
+    stream_reasoning: str = ""                 # 累积推理内容（vLLM 扩展）
+    stream_tool_calls: Optional[List[Dict]] = None    # 累积工具调用
+    stream_function_call: Optional[Dict] = None       # 旧版函数调用
+    stream_finish_reason: Optional[str] = None        # 结束原因
+    stream_logprobs: Optional[Dict] = None            # logprobs
+    stream_stop_reason: Optional[Any] = None          # vLLM 扩展
+    stream_token_ids: Optional[List[int]] = None      # vLLM 扩展
 ```
 
 ### 数据流向说明
@@ -497,10 +537,19 @@ SELECT m.unique_id, m.model, m.start_time, m.total_tokens,
        d.prompt_text, d.response_text
 FROM request_metadata m
 JOIN request_details_active d ON m.unique_id = d.unique_id
-WHERE m.session_id = 'app_001,sample_001,task_001'
+WHERE m.session_id = 'task_001'
   AND m.archive_location IS NULL
 ORDER BY m.start_time DESC
 LIMIT 100;
+```
+
+### 查询特定 run_id 的所有轨迹
+
+```sql
+SELECT unique_id, session_id, model, start_time, total_tokens
+FROM request_metadata
+WHERE run_id = 'run_001'
+ORDER BY start_time DESC;
 ```
 
 ### 查询会话元数据（含活跃+已归档）
@@ -508,7 +557,7 @@ LIMIT 100;
 ```sql
 SELECT unique_id, model, start_time, total_tokens, archive_location
 FROM request_metadata
-WHERE session_id = 'app_001,sample_001,task_001'
+WHERE session_id = 'task_001'
 ORDER BY start_time DESC;
 ```
 
@@ -523,6 +572,17 @@ SELECT
 FROM request_metadata
 GROUP BY model
 ORDER BY total_requests DESC;
+```
+
+### 按 run_id 统计
+
+```sql
+SELECT
+    run_id,
+    COUNT(*) as request_count,
+    SUM(total_tokens) as total_tokens
+FROM request_metadata
+GROUP BY run_id;
 ```
 
 ### 查询缓存命中率

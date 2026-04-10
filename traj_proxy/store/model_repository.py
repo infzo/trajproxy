@@ -41,7 +41,7 @@ class ModelRepository:
         api_key: str,
         tokenizer_path: Optional[str] = None,
         token_in_token_out: bool = False,
-        run_id: str = "",
+        run_id: Optional[str] = None,
         tool_parser: str = "",
         reasoning_parser: str = ""
     ) -> ModelConfig:
@@ -53,7 +53,7 @@ class ModelRepository:
             api_key: API 密钥
             tokenizer_path: Tokenizer 路径（可选，直接转发模式下不需要）
             token_in_token_out: 是否使用 Token-in-Token-out 模式
-            run_id: 运行ID，空字符串表示全局模型
+            run_id: 运行ID，None表示全局模型
             tool_parser: 工具解析器名称
             reasoning_parser: 推理解析器名称
 
@@ -114,12 +114,12 @@ class ModelRepository:
         except Exception as e:
             raise DatabaseError(f"注册模型到数据库失败: {str(e)}\n{traceback.format_exc()}")
 
-    async def unregister(self, model_name: str, run_id: str = "") -> bool:
+    async def unregister(self, model_name: str, run_id: Optional[str] = None) -> bool:
         """从数据库删除模型
 
         Args:
             model_name: 模型名称
-            run_id: 运行ID，空字符串表示全局模型
+            run_id: 运行ID，None表示全局模型
 
         Returns:
             是否成功删除

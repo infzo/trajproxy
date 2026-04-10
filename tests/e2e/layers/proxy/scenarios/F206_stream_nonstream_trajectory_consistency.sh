@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 014: 流式与非流式轨迹一致性验证
+# 场景 F206: 流式与非流式轨迹一致性验证（Proxy 层）
 # 测试流程：注册模型 -> 分别发送相同请求（流式和非流式） -> 查询两条轨迹 -> 比较关键字段一致性 -> 删除模型
 
 # 获取脚本目录
@@ -7,17 +7,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 014: 流式与非流式轨迹一致性验证"
+echo "场景 F206: 流式与非流式轨迹一致性验证（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-CONSISTENCY_TEST_PORT=12300
-CONSISTENCY_TEST_BASE_URL="http://127.0.0.1:${CONSISTENCY_TEST_PORT}"
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+CONSISTENCY_TEST_BASE_URL="${BASE_URL}"
 CONSISTENCY_TEST_MODEL_NAME="consistency-test-model"
-CONSISTENCY_TEST_RUN_ID="consistency-run-014"
-CONSISTENCY_TEST_SESSION_ID_STREAM="${CONSISTENCY_TEST_RUN_ID},sample014,task-stream"
-CONSISTENCY_TEST_SESSION_ID_NONSTREAM="${CONSISTENCY_TEST_RUN_ID},sample014,task-nonstream"
+CONSISTENCY_TEST_RUN_ID="run-${SCENARIO_ID}"
+CONSISTENCY_TEST_SESSION_ID_STREAM="session-${SCENARIO_ID}-stream-$(date +%s%N | md5sum | head -c 8)"
+CONSISTENCY_TEST_SESSION_ID_NONSTREAM="session-${SCENARIO_ID}-nonstream-$(date +%s%N | md5sum | head -c 8)"
 CONSISTENCY_TEST_PROMPT="What is 2+2? Answer briefly."
 CONSISTENCY_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
 
@@ -70,7 +70,7 @@ echo ""
 # ========================================
 log_step "步骤 2: 发送非流式请求（session_id: ${CONSISTENCY_TEST_SESSION_ID_NONSTREAM}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${CONSISTENCY_TEST_BASE_URL}/s/${CONSISTENCY_TEST_SESSION_ID_NONSTREAM}/v1/chat/completions' \\
+    -X POST '${CONSISTENCY_TEST_BASE_URL}/s/${CONSISTENCY_TEST_RUN_ID}/${CONSISTENCY_TEST_SESSION_ID_NONSTREAM}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -80,7 +80,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     }'"
 log_separator
 
-NONSTREAM_CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CONSISTENCY_TEST_BASE_URL}/s/${CONSISTENCY_TEST_SESSION_ID_NONSTREAM}/v1/chat/completions" \
+NONSTREAM_CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CONSISTENCY_TEST_BASE_URL}/s/${CONSISTENCY_TEST_RUN_ID}/${CONSISTENCY_TEST_SESSION_ID_NONSTREAM}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -106,7 +106,7 @@ echo ""
 # ========================================
 log_step "步骤 3: 发送流式请求（session_id: ${CONSISTENCY_TEST_SESSION_ID_STREAM}）"
 log_curl_cmd "curl -s --no-buffer \\
-    -X POST '${CONSISTENCY_TEST_BASE_URL}/s/${CONSISTENCY_TEST_SESSION_ID_STREAM}/v1/chat/completions' \\
+    -X POST '${CONSISTENCY_TEST_BASE_URL}/s/${CONSISTENCY_TEST_RUN_ID}/${CONSISTENCY_TEST_SESSION_ID_STREAM}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
@@ -116,7 +116,7 @@ log_curl_cmd "curl -s --no-buffer \\
     }'"
 log_separator
 
-STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${CONSISTENCY_TEST_BASE_URL}/s/${CONSISTENCY_TEST_SESSION_ID_STREAM}/v1/chat/completions" \
+STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${CONSISTENCY_TEST_BASE_URL}/s/${CONSISTENCY_TEST_RUN_ID}/${CONSISTENCY_TEST_SESSION_ID_STREAM}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

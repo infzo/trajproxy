@@ -385,42 +385,78 @@ def decode_streaming(token_ids, context) -> str  # 流式增量解码
 
 **文件：** `traj_proxy/proxy_core/context.py`
 
-ProcessContext 贯穿整个请求处理流程，包含：
+ProcessContext 贯穿整个请求处理流程，包含输入数据、中间处理数据和输出结果。
+
+> **详细设计**：参见 [ID 设计规范](identifier_design.md)
 
 ```python
 @dataclass
 class ProcessContext:
-    # 基础标识
+    # ========== 基础标识 ==========
     request_id: str
     model: str
-    session_id: Optional[str]    # 格式: run_id,sample_id,task_id
-    unique_id: Optional[str]     # 格式: {session_id},{request_id}
-    
-    # 请求/响应
-    raw_request: Dict[str, Any]  # 完整 OpenAI 请求
-    raw_response: Dict[str, Any] # 完整 OpenAI 响应
-    
-    # Token 模式字段
-    prompt_text: Optional[str]
-    token_ids: Optional[List[int]]
-    response_text: Optional[str]
-    response_ids: Optional[List[int]]
-    
-    # 缓存信息
-    cache_hit_tokens: Optional[int]
-    cached_token_ids: Optional[List[int]]
-    uncached_token_ids: Optional[List[int]]
-    
-    # 流式状态
-    is_stream: bool
-    stream_buffer_text: str
-    stream_buffer_ids: List[int]
-    stream_chunk_count: int
-    
-    # 统计信息
-    prompt_tokens: Optional[int]
-    completion_tokens: Optional[int]
-    total_tokens: Optional[int]
+    session_id: Optional[str] = None  # 原始会话ID，不再自动补充前缀
+    run_id: Optional[str] = None      # 运行ID，独立存储
+    unique_id: Optional[str] = None   # 格式: {session_id},{request_id}
+
+    # ========== 阶段1: OpenAI Chat 格式 ==========
+    messages: List[Dict[str, Any]] = field(default_factory=list)
+    request_params: Dict[str, Any] = field(default_factory=dict)
+    raw_request: Optional[Dict[str, Any]] = None   # 完整 OpenAI 请求
+    raw_response: Optional[Dict[str, Any]] = None  # 完整 OpenAI 响应
+
+    # ========== 阶段2: 文本推理格式（Token模式）==========
+    text_request: Optional[Dict[str, Any]] = None
+    text_response: Optional[Dict[str, Any]] = None
+
+    # ========== 阶段3: Token 推理格式（Token模式）==========
+    prompt_text: Optional[str] = None
+    token_ids: Optional[List[int]] = None
+    cached_token_ids: Optional[List[int]] = None
+    uncached_text: Optional[str] = None
+    uncached_token_ids: Optional[List[int]] = None
+    token_request: Optional[Dict[str, Any]] = None
+    token_response: Optional[Dict[str, Any]] = None
+
+    # ========== 输出数据 ==========
+    response_text: Optional[str] = None
+    response_ids: Optional[List[int]] = None
+
+    # ========== 完整对话（用于前缀匹配）==========
+    full_conversation_text: Optional[str] = None
+    full_conversation_token_ids: Optional[List[int]] = None
+
+    # ========== 元数据 ==========
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    processing_duration_ms: Optional[float] = None
+
+    # ========== 统计信息 ==========
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    cache_hit_tokens: Optional[int] = None
+
+    # ========== 错误信息 ==========
+    error: Optional[str] = None
+    error_traceback: Optional[str] = None
+
+    # ========== 流式处理状态 ==========
+    is_stream: bool = False
+    stream_buffer_text: str = ""
+    stream_buffer_ids: List[int] = field(default_factory=list)
+    stream_chunk_count: int = 0
+    stream_finished: bool = False
+
+    # 流式累积字段
+    stream_role: Optional[str] = None          # delta.role
+    stream_reasoning: str = ""                 # 累积推理内容（vLLM 扩展）
+    stream_tool_calls: Optional[List[Dict]] = None    # 累积工具调用
+    stream_function_call: Optional[Dict] = None       # 旧版函数调用
+    stream_finish_reason: Optional[str] = None        # 结束原因
+    stream_logprobs: Optional[Dict] = None            # logprobs
+    stream_stop_reason: Optional[Any] = None          # vLLM 扩展
+    stream_token_ids: Optional[List[int]] = None      # vLLM 扩展
 ```
 
 ---
@@ -447,12 +483,16 @@ class ProcessContext:
 
 请求轨迹采用元数据+详情分离架构：
 
-- **request_metadata**：长期保留统计信息（session_id, model, tokens, duration 等）
+- **request_metadata**：长期保留统计信息（run_id, session_id, model, tokens, duration 等）
 - **request_details_active**：近期详情大字段（messages, raw_request/response 等），按月分区
 - **外部存储**：过期详情归档为 JSONL+GZIP 文件
 
+> **注意**：`session_id` 存储原始值，不再自动补充 run_id 前缀；`run_id` 独立存储。
+
 | 字段 | Token-in-Token-out 模式 | 直接转发模式 | 存储位置 |
 |------|------------------------|--------------|----------|
+| run_id | 填充 | 填充 | metadata |
+| session_id | 原始值 | 原始值 | metadata |
 | tokenizer_path | 必填 | 空 | details |
 | prompt_text | 填充 | 空 | details |
 | token_ids | 填充 | 空 | details |
@@ -504,7 +544,7 @@ class ProcessContext:
 }
 ```
 
-**Header:** `x-session-id: run_id,sample_id,task_id`
+**Header:** `x-session-id: your-session-id`
 
 ---
 
