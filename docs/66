@@ -1,0 +1,6 @@
+(base) liujiang@LiudeMacBook-Air TrajProxy % ll models/Qwen/    
+total 0
+drwxr-xr-x@ 13 liujiang  staff  416 Apr  1 12:09 Qwen2.5-7B
+drwxr-xr-x@ 15 liujiang  staff  480 Apr  1 12:09 Qwen3-Coder-30B-A3B-Instruct
+drwxr-xr-x@ 16 liujiang  staff  512 Apr  9 23:45 Qwen3.5-2B
+drwxr-xr-x@ 16 liujiang  staff  512 Apr  1 12:09 Qwen3.5-35B-A3B
