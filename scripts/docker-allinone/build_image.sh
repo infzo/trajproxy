@@ -12,6 +12,7 @@ echo "项目目录: ${PROJECT_DIR}"
 echo "镜像名称: ${IMAGE_NAME}:${IMAGE_TAG}"
 
 docker build \
+    --no-cache \
     -f "${PROJECT_DIR}/dockers/Dockerfile.allinone" \
     -t "${IMAGE_NAME}:${IMAGE_TAG}" \
     "${PROJECT_DIR}"
@@ -23,6 +24,7 @@ echo ""
 echo "运行方式:"
 echo "  docker run -d --name trajproxy \\"
 echo "    --shm-size=1g \\"
+echo "    --add-host=host.docker.internal:host-gateway \\"
 echo "    -p 12345:12345 \\"
 echo "    -v trajproxy_pgdata:/data/postgres \\"
 echo "    -v trajproxy_logs:/app/logs \\"

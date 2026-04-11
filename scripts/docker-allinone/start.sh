@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME="${1:-trajproxy-allinone}"
 IMAGE_TAG="${2:-latest}"
-CONTAINER_NAME="trajproxy"
+CONTAINER_NAME="traj-proxy"
 
 echo "=== TrajProxy All-in-One 启动脚本 ==="
 echo "项目目录: ${PROJECT_DIR}"
@@ -37,7 +37,9 @@ mkdir -p "${PROJECT_DIR}/logs"
 echo "启动容器..."
 docker run -d --name "${CONTAINER_NAME}" \
     --shm-size=1g \
+    --add-host=host.docker.internal:host-gateway \
     -p 12345:12345 \
+    -p 12300:12300 \
     -v trajproxy_pgdata:/data/postgres \
     -v trajproxy_logs:/app/logs \
     -v "${PROJECT_DIR}/models:/app/models" \

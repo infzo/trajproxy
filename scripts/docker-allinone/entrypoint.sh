@@ -43,7 +43,8 @@ if [ "$1" = "traj_proxy" ]; then
         echo "等待 PostgreSQL 就绪..."
         sleep 2
     done
-    exec python -m traj_proxy.app
+    # 使用绝对路径，确保使用正确的 Python（ray 安装在 /usr/local/bin/python）
+    exec /usr/local/bin/python -m traj_proxy.app
 fi
 
 # ========================================
@@ -326,6 +327,24 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "--- 数据表初始化完成 ---"
+
+# ========================================
+# 第三阶段B：初始化 LiteLLM 数据表（Prisma 迁移）
+# ========================================
+echo "--- 初始化 LiteLLM 数据表 ---"
+LITELLM_PRISMA_DIR="/opt/litellm-venv/lib/python3.11/site-packages/litellm/proxy"
+if [ -f "${LITELLM_PRISMA_DIR}/schema.prisma" ]; then
+    # 添加 litellm-venv/bin 到 PATH，确保 prisma-client-py 生成器可被找到
+    export PATH="/opt/litellm-venv/bin:$PATH"
+    DATABASE_URL="${LITELLM_DATABASE_URL}" \
+    /opt/litellm-venv/bin/prisma db push \
+        --schema "${LITELLM_PRISMA_DIR}/schema.prisma" \
+        --accept-data-loss 2>&1 || \
+    echo "警告: LiteLLM Prisma 迁移失败，LiteLLM 部分功能可能不可用"
+    echo "LiteLLM 数据表初始化完成"
+else
+    echo "警告: 未找到 LiteLLM Prisma schema，跳过迁移"
+fi
 
 # ========================================
 # 第四阶段：停止临时 PostgreSQL（supervisord 将接管）
