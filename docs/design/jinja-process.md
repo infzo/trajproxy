@@ -283,7 +283,7 @@ trigger: 当用户需要转换 Jinja 模板以支持 RL 前缀匹配缓存时
 ## 5. 参考
 
 - 测试定义：`tests/test_template_consistency.py`
-- 校验脚本：`scripts/verify_jinja_consistency.py`
+- 校验脚本：`scripts/tools/verify_jinja_consistency.py`
 - 背景说明：`docs/tito.md`
 - TITO 集成：`docs/tito-v2.md`
 - 模板示例：

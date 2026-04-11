@@ -5,7 +5,7 @@
 set -e
 
 # 项目根目录
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 IMAGES_DIR="${PROJECT_ROOT}/dockers/images"
 DOCKERFILE="${PROJECT_ROOT}/dockers/Dockerfile"
 

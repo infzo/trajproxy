@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from traj_proxy.exceptions import InferServiceError
+from traj_proxy.exceptions import InferServiceError, InferTimeoutError
 from traj_proxy.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -112,6 +112,10 @@ class InferClient:
             response.raise_for_status()
             return response.json()
 
+        except requests.exceptions.ConnectTimeout:
+            raise InferTimeoutError(f"推理服务连接超时: {self.base_url}")
+        except requests.exceptions.ReadTimeout:
+            raise InferTimeoutError(f"推理服务读取超时: {self.base_url}")
         except requests.exceptions.RequestException as e:
             status_code = getattr(e.response, 'status_code', 'N/A')
             error_text = getattr(e.response, 'text', str(e))
@@ -142,6 +146,10 @@ class InferClient:
             async for chunk in self._async_stream_gen(response):
                 yield chunk
 
+        except requests.exceptions.ConnectTimeout:
+            raise InferTimeoutError(f"推理服务连接超时: {self.base_url}")
+        except requests.exceptions.ReadTimeout:
+            raise InferTimeoutError(f"推理服务读取超时: {self.base_url}")
         except requests.exceptions.RequestException as e:
             status_code = getattr(e.response, 'status_code', 'N/A')
             error_text = getattr(e.response, 'text', str(e))

@@ -7,7 +7,7 @@ Jinja 模板多轮一致性校验脚本
 2. 首轮对话一致性：新模板首轮输出与旧模板完全一致
 
 用法：
-    python scripts/verify_jinja_consistency.py \
+    python scripts/tools/verify_jinja_consistency.py \
         --original models/Qwen/Qwen3.5-2B/chat_template.jinja \
         --tito models/Qwen/Qwen3.5-2B/chat_template_tito.jinja
 """
@@ -582,12 +582,12 @@ def main():
         epilog="""
 示例:
   # 基本用法
-  python scripts/verify_jinja_consistency.py \\
+  python scripts/tools/verify_jinja_consistency.py \\
       --original models/Qwen/Qwen3.5-2B/chat_template.jinja \\
       --tito models/Qwen/Qwen3.5-2B/chat_template_tito.jinja
 
   # 显示详细错误信息
-  python scripts/verify_jinja_consistency.py \\
+  python scripts/tools/verify_jinja_consistency.py \\
       --original models/Qwen/Qwen3.5-2B/chat_template.jinja \\
       --tito models/Qwen/Qwen3.5-2B/chat_template_tito.jinja \\
       --verbose

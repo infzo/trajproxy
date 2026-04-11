@@ -27,6 +27,7 @@ from traj_proxy.utils.validators import (
     validate_model_for_inference,
     validate_session_id,
 )
+from traj_proxy.serve.error_handler import build_error_response
 
 # 路由定义
 chat_router = APIRouter()
@@ -104,6 +105,7 @@ async def chat_completions(
     返回:
         处理后的响应（JSON 或 SSE 流）
     """
+    request_id = str(uuid.uuid4())
     try:
         # 获取请求体
         body = await request.json()
@@ -145,8 +147,7 @@ async def chat_completions(
             if key in body:
                 request_params[key] = body[key]
 
-        # 生成 request_id
-        request_id = str(uuid.uuid4())
+        # 生成 request_id（已在 try 外部生成）
 
         logger.info(f"[{request_id}] 处理聊天补全请求: model={actual_model}, run_id={final_run_id}, session_id={final_session_id}, stream={stream}, messages={len(messages)}")
 
@@ -155,6 +156,12 @@ async def chat_completions(
 
         # 根据 run_id 和 model_name 获取对应的 processor
         processor = processor_manager.get_processor(final_run_id, actual_model)
+
+        if processor is None:
+            # 本地未找到模型，尝试从数据库查询（回退机制）
+            # 用于处理 LISTEN/NOTIFY 通知延迟导致的竞态条件
+            logger.info(f"[{request_id}] 本地未找到模型，尝试 DB 回退查询: model={actual_model}, run_id={final_run_id}")
+            processor = await processor_manager.try_get_or_sync_from_db(final_run_id, actual_model)
 
         if processor is None:
             logger.warning(f"[{request_id}] 模型未注册: model={actual_model}, run_id={final_run_id}")
@@ -170,22 +177,28 @@ async def chat_completions(
             context_holder = {}
 
             async def generate_stream():
-                """流式生成器"""
-                async for chunk in processor.process_stream(
-                    messages=messages,
-                    request_id=request_id,
-                    session_id=final_session_id,
-                    run_id=final_run_id,
-                    context_holder=context_holder,
-                    **request_params
-                ):
-                    # chunk 可能是 dict（OpenAI 格式），需要序列化为 SSE 格式
-                    if isinstance(chunk, dict):
-                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-                    else:
-                        yield chunk
-                # SSE 流结束标记
-                yield "data: [DONE]\n\n"
+                """流式生成器，捕获异常并发送错误 SSE 事件"""
+                try:
+                    async for chunk in processor.process_stream(
+                        messages=messages,
+                        request_id=request_id,
+                        session_id=final_session_id,
+                        run_id=final_run_id,
+                        context_holder=context_holder,
+                        **request_params
+                    ):
+                        # chunk 可能是 dict（OpenAI 格式），需要序列化为 SSE 格式
+                        if isinstance(chunk, dict):
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                        else:
+                            yield chunk
+                    # SSE 流结束标记
+                    yield "data: [DONE]\n\n"
+                except Exception as stream_err:
+                    logger.exception(f"[{request_id}] 流式处理异常: {str(stream_err)}")
+                    error_body, _ = build_error_response(request_id, stream_err)
+                    yield f"data: {json.dumps({'error': error_body}, ensure_ascii=False)}\n\n"
+                    yield "data: [DONE]\n\n"
 
             # 注意：存储已在 processor._finalize_stream() 中完成，无需后台任务
 
@@ -214,9 +227,9 @@ async def chat_completions(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"聊天补全请求处理失败: {str(e)}")
-        # 生产环境不返回详细错误信息
-        raise HTTPException(status_code=500, detail="内部服务错误，请查看日志获取详细信息")
+        logger.exception(f"[{request_id}] 聊天补全请求处理失败: {str(e)}")
+        error_detail, status_code = build_error_response(request_id, e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
 
 
 # ========== 模型管理接口 ==========
@@ -272,13 +285,18 @@ async def register_model(request: Request, req: RegisterModelRequest):
     except ValueError as e:
         # 模型已存在
         logger.warning(f"注册模型失败: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail={
+            "type": "model_already_exists",
+            "message": str(e),
+        })
     except DatabaseError as e:
         logger.error(f"数据库错误: {str(e)}")
-        raise HTTPException(status_code=503, detail=f"数据库不可用: {str(e)}")
+        error_detail, status_code = build_error_response("register_model", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
         logger.error(f"注册模型异常: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"注册模型失败: {str(e)}")
+        error_detail, status_code = build_error_response("register_model", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
 
 
 @model_router.delete("", response_model=DeleteModelResponse)
@@ -323,10 +341,12 @@ async def delete_model(request: Request, model_name: str, run_id: str = ""):
         raise
     except DatabaseError as e:
         logger.error(f"数据库错误: {str(e)}")
-        raise HTTPException(status_code=503, detail=f"数据库不可用: {str(e)}")
+        error_detail, status_code = build_error_response("delete_model", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
         logger.error(f"删除模型异常: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"删除模型失败: {str(e)}")
+        error_detail, status_code = build_error_response("delete_model", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
 
 
 @model_router.get("")
@@ -349,7 +369,8 @@ async def list_models(request: Request):
 
     except Exception as e:
         logger.error(f"列出模型异常: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"列出模型失败: {str(e)}")
+        error_detail, status_code = build_error_response("list_models", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
 
 
 # ========== OpenAI 兼容接口 ==========
@@ -385,7 +406,8 @@ async def list_models_openai(request: Request):
 
     except Exception as e:
         logger.error(f"列出模型异常: {str(e)}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"列出模型失败: {str(e)}")
+        error_detail, status_code = build_error_response("list_models_openai", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
 
 
 # ========== 轨迹查询接口 ==========
@@ -422,4 +444,5 @@ async def get_trajectory(
         return await provider.get_trajectory(session_id, limit)
     except Exception as e:
         logger.exception(f"轨迹查询失败: {str(e)}")
-        raise HTTPException(status_code=500, detail="轨迹查询失败，请稍后重试")
+        error_detail, status_code = build_error_response("trajectory_query", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)

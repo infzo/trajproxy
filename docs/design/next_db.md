@@ -292,7 +292,7 @@ with gzip.open(f"/archives/{archive_file}") as f:
 ### 归档脚本示例
 
 ```python
-# scripts/archive_records.py
+# scripts/tools/archive_records.py
 
 import gzip
 import json
@@ -697,7 +697,7 @@ LEFT JOIN request_details_active d ON m.unique_id = d.unique_id;
 ### 归档脚本示例
 
 ```python
-# scripts/archive_records.py
+# scripts/tools/archive_records.py
 
 import gzip
 import json

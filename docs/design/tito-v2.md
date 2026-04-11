@@ -179,7 +179,7 @@ def _get_tito_template_path(self) -> Optional[str]:
 
 ## 验证方案
 
-1. **模板验证**：运行 `scripts/verify_jinja_consistency.py` 确保模板一致性
+1. **模板验证**：运行 `scripts/tools/verify_jinja_consistency.py` 确保模板一致性
 2. **前缀匹配验证**：在 E2E 测试中验证多轮对话的缓存命中率
 3. **输出一致性验证**：对比 TITO 模式和普通模式的单轮输出
 

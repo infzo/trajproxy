@@ -72,10 +72,7 @@ python scripts/init_db.py
 ### 3. 启动服务
 
 ```bash
-# 一键启动（自动设置本地环境变量）
-./scripts/start_local.sh
-
-# 或手动启动
+# 设置本地环境变量并启动
 export RAY_WORKING_DIR="."
 export RAY_PYTHONPATH="."
 python -m traj_proxy.app
@@ -125,7 +122,7 @@ database:
 
 ```bash
 # 一键启动所有容器
-./scripts/start_docker.sh
+./scripts/docker-compose/start.sh
 
 # 或手动启动
 cd dockers && docker-compose up -d --build
@@ -170,7 +167,7 @@ curl http://localhost:12300/health
 Ctrl+C
 
 # 查看日志（输出到终端）
-./scripts/start_local.sh 2>&1 | tee logs/traj_proxy.log
+python -m traj_proxy.app 2>&1 | tee logs/traj_proxy.log
 ```
 
 ### Docker 容器模式

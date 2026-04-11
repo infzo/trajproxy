@@ -13,8 +13,8 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 
 # 复制脚本
-COPY scripts/download_tokenizer.py ./download_tokenizer.py
-COPY scripts/entrypoint.sh ./scripts/entrypoint.sh
+COPY scripts/tools/download_tokenizer.py ./download_tokenizer.py
+COPY scripts/docker-compose/entrypoint.sh ./scripts/entrypoint.sh
 
 # 复制 models 目录（如果存在）
 RUN mkdir -p ./models

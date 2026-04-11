@@ -59,7 +59,10 @@ ollama serve
 ### 6. 启动开发服务
 
 ```bash
-./scripts/start_local.sh
+# 直接启动（需要设置环境变量）
+export RAY_WORKING_DIR="."
+export RAY_PYTHONPATH="."
+python -m traj_proxy.app
 ```
 
 ---
@@ -141,11 +144,17 @@ TrajProxy/
 │       └── utils.sh                # 测试工具函数
 │
 ├── scripts/                        # 脚本目录
-│   ├── start_local.sh              # 本地启动脚本
-│   ├── start_docker.sh             # Docker 启动脚本
-│   ├── init_db.py                  # 数据库初始化
-│   ├── archive_records.py          # 详情数据归档脚本
-│   └── download_tokenizer.py       # Tokenizer 下载
+│   ├── docker-compose/             # Docker Compose 部署
+│   │   ├── start.sh               # 启动脚本
+│   │   ├── build_image.sh         # 构建镜像
+│   │   └── entrypoint.sh          # 容器入口点
+│   ├── docker-allinone/            # 混合容器部署
+│   │   ├── build.sh               # 构建镜像
+│   │   └── entrypoint.sh          # 容器入口点
+│   └── tools/                      # 工具脚本
+│       ├── archive_records.py      # 详情数据归档脚本
+│       ├── download_tokenizer.py   # Tokenizer 下载
+│       └── verify_jinja_consistency.py # Jinja 模板一致性验证
 │
 ├── dockers/                        # Docker 相关
 │   ├── docker-compose.yml          # 容器编排
@@ -314,7 +323,7 @@ tests/e2e/
 日志输出到标准输出，可通过重定向保存：
 
 ```bash
-./scripts/start_local.sh 2>&1 | tee logs/debug.log
+python -m traj_proxy.app 2>&1 | tee logs/debug.log
 ```
 
 ### 修改日志级别

@@ -43,9 +43,9 @@ RUN python -m venv /opt/litellm-venv && \
 # ========================================
 # 应用代码复制
 # ========================================
-COPY scripts/download_tokenizer.py ./download_tokenizer.py
-COPY scripts/entrypoint.sh ./scripts/entrypoint.sh
-COPY scripts/entrypoint_allinone.sh ./scripts/entrypoint_allinone.sh
+COPY scripts/tools/download_tokenizer.py ./download_tokenizer.py
+COPY scripts/docker-compose/entrypoint.sh ./scripts/entrypoint.sh
+COPY scripts/docker-allinone/entrypoint.sh ./scripts/entrypoint_allinone.sh
 
 # models 目录
 RUN mkdir -p ./models

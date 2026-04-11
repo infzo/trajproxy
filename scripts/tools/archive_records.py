@@ -8,8 +8,8 @@
 3. DETACH + DROP 分区（瞬间完成，零 VACUUM 压力）
 
 用法:
-    python scripts/archive_records.py --retention-days 30
-    python scripts/archive_records.py --dry-run --retention-days 30
+    python scripts/tools/archive_records.py --retention-days 30
+    python scripts/tools/archive_records.py --dry-run --retention-days 30
 """
 
 import argparse

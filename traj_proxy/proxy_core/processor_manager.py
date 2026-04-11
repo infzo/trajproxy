@@ -445,6 +445,47 @@ class ProcessorManager:
         # 查找预置模型
         return self.config_processors.get(key)
 
+    async def try_get_or_sync_from_db(
+        self, run_id: str, model_name: str
+    ) -> Optional[Processor]:
+        """从数据库查询并同步模型（用于缓存未命中时的回退）
+
+        在多 Worker 环境下，LISTEN/NOTIFY 通知可能存在延迟，
+        导致请求到达某 Worker 时模型尚未同步到本地内存。
+        此方法在本地未找到模型时，回退查询数据库并同步。
+
+        Args:
+            run_id: 运行ID
+            model_name: 模型名称
+
+        Returns:
+            Processor 实例，如果不存在则返回 None
+        """
+        key = (run_id, model_name)
+
+        # 1. 先检查本地是否已有（可能刚通过 NOTIFY 同步）
+        processor = self.dynamic_processors.get(key)
+        if processor:
+            return processor
+
+        # 2. 查询数据库
+        try:
+            config = await self.model_registry.get_by_key(run_id, model_name)
+            if config is None:
+                logger.debug(f"DB 回退查询: 模型 {model_name} (run_id={run_id}) 不存在于数据库")
+                return None
+
+            # 3. 同步到本地
+            await self.register_from_config(config)
+            logger.info(f"DB 回退同步: 从数据库同步模型 {model_name} (run_id={run_id})")
+
+            # 4. 返回 processor
+            return self.dynamic_processors.get(key)
+
+        except Exception as e:
+            logger.error(f"DB 回退查询失败: {e}")
+            return None
+
     def get_processor_or_raise(self, run_id: str, model_name: str) -> Processor:
         """根据 run_id 和 model_name 获取 Processor，不存在时抛出异常
 

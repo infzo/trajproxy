@@ -156,25 +156,11 @@ flowchart LR
 - PostgreSQL 数据库
 - LLM 推理服务（如 vLLM、Ollama）
 
-### 本地开发
-
-```bash
-# 1. 安装依赖
-pip install -r requirements.txt
-
-# 2. 初始化数据库
-export DATABASE_URL="postgresql://user:pass@host:5432/traj_proxy"
-python scripts/init_db.py
-
-# 3. 启动服务
-./scripts/start_local.sh
-```
-
 ### Docker 部署
 
 ```bash
 # 一键启动所有容器
-./scripts/start_docker.sh
+./scripts/docker-compose/start.sh
 ```
 
 ### 验证服务
@@ -202,6 +188,9 @@ TrajProxy/
 │   └── utils/         # 工具模块
 ├── tests/             # 测试
 ├── scripts/           # 脚本
+│   ├── docker-compose/    # Docker Compose 部署
+│   ├── docker-allinone/   # 混合容器部署
+│   └── tools/         # 工具脚本
 └── dockers/           # Docker 配置
 ```
 

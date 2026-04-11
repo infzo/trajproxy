@@ -3,7 +3,7 @@
 # 使用 docker-compose 拉起所有服务容器（litellm、postgresdb、traj_proxy、prometheus）
 
 # 切换到 dockers 目录
-cd "$(dirname "$0")/../dockers"
+cd "$(dirname "$0")/../../dockers"
 
 # 停止所有服务
 docker-compose down

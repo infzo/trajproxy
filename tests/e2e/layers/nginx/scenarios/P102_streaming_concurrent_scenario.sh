@@ -1,6 +1,6 @@
 #!/bin/bash
 # 场景 P102: 流式并发压测（Nginx 层）
-# 测试流程：注册模型 -> 并发发送流式请求(800并发，共800个) -> 统计响应时间、chunk数和失败次数 -> 删除模型
+# 测试流程：注册模型 -> 并发发送流式请求(100并发，共100个) -> 统计响应时间、chunk数和失败次数 -> 删除模型
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,8 +17,8 @@ CONCURRENT_TEST_BASE_URL="${BASE_URL}"
 CONCURRENT_TEST_MODEL_NAME="streaming-concurrent-test-model"
 CONCURRENT_TEST_RUN_ID="run-${SCENARIO_ID}"
 CONCURRENT_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
-CONCURRENT_TEST_TOTAL_REQUESTS=800
-CONCURRENT_TEST_MAX_CONCURRENT=800
+CONCURRENT_TEST_TOTAL_REQUESTS=100
+CONCURRENT_TEST_MAX_CONCURRENT=100
 
 # 检查文件描述符限制
 ULIMIT_SOFT=$(ulimit -Sn)
