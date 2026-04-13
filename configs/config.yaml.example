@@ -1,0 +1,53 @@
+# TrajProxy 配置模版
+# 复制此文件为 config.yaml 并根据实际环境修改
+
+# models 目录路径（用于 tokenizer 加载）
+# 容器内默认路径为 /app/models，本地开发可改为相对路径
+models_dir: /app/models
+
+# ProxyWorker 配置
+proxy_workers:
+  count: 2                    # Worker 数量
+  base_port: 12300            # 起始端口（12300, 12301）
+  models:                     # 预置模型配置
+    - model_name: qwen3.5-2b
+      url: http://host.docker.internal:8000/v1
+      api_key: YOUR_API_KEY_HERE
+    - model_name: qwen3.5-2b
+      run_id: app-001
+      url: http://host.docker.internal:8000/v1
+      api_key: YOUR_API_KEY_HERE
+      tokenizer_path: Qwen/Qwen3.5-2B
+      token_in_token_out: true  # 启用 Token-in-Token-out 模式，支持前缀匹配缓存
+      tool_parser: "qwen3_coder"
+      reasoning_parser: "qwen3"
+
+# Ray 配置
+ray:
+  num_cpus: 4                 # CPU 核心数
+  working_dir: "/app"         # 默认容器内路径，可通过环境变量 RAY_WORKING_DIR 覆盖
+  pythonpath: "/app"          # 默认容器内 PYTHONPATH，可通过环境变量 RAY_PYTHONPATH 覆盖
+
+# 数据库配置
+database:
+  url: "postgresql://llmproxy:YOUR_DB_PASSWORD_HERE@db:5432/traj_proxy"
+  # 连接池配置
+  pool:
+    min_size: 50               # 最小连接数
+    max_size: 100             # 最大连接数
+    timeout: 60                # 连接超时时间（秒）
+
+# ProcessorManager 配置
+processor_manager:
+  sync_fallback_interval: 300   # 兜底全量同步间隔（秒），默认 5 分钟
+  sync_max_retries: 3           # 同步失败最大重试次数
+  sync_retry_delay: 5           # 同步重试初始延迟（秒），采用指数退避
+  listen_reconnect_delay: 5     # LISTEN 连接重连初始延迟（秒）
+  listen_max_reconnect_delay: 60  # LISTEN 连接重连最大延迟（秒）
+
+# 归档配置（元数据表 + 详情表架构）
+archive:
+  enabled: false                 # 启用自动归档
+  retention_days: 30             # 活跃详情保留天数
+  storage_path: "/data/archives" # JSONL+GZIP 归档文件目录
+  batch_size: 1000               # 每批处理的记录数

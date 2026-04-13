@@ -1,0 +1,25 @@
+# LiteLLM 配置模版
+# 复制此文件为 litellm.yaml 并根据实际环境修改
+
+model_list:
+  # 通用匹配：所有模型请求都路由到 traj_proxy
+  - model_name: "*"
+    litellm_params:
+      model: "openai/*"
+      api_base: http://traj_proxy:12300/v1
+      api_key: "YOUR_API_KEY_HERE"
+  - model_name: "*"
+    litellm_params:
+      model: "openai/*"
+      api_base: http://traj_proxy:12301/v1
+      api_key: "YOUR_API_KEY_HERE"
+
+litellm_settings:
+  drop_params: true
+  disable_request_checking: true
+  # 强制 /v1/messages 端点使用 chat/completions API 而非 Responses API
+  use_chat_completions_url_for_anthropic_messages: true
+
+general_settings:
+  master_key: "YOUR_MASTER_KEY_HERE"
+  forward_client_headers_to_llm_api: true

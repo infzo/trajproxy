@@ -221,6 +221,7 @@ postgres_data/
 # TrajProxy specific
 dockers/images/
 models/
+archives/
 
 # macOS
 .DS_Store
