@@ -14,20 +14,18 @@ echo ""
 # 步骤 1: 检查调度器启动日志
 log_step "步骤 1: 检查归档调度器启动日志"
 
-LOGS=$(get_container_logs 2>&1)
-
-# 调试：显示日志行数
-log_info "获取到 $(echo "$LOGS" | wc -l) 行日志"
-
-# 检查是否包含归档调度器启动信息
-if echo "$LOGS" | grep -q "ArchiveScheduler 已启动"; then
+# 直接在全部日志中搜索启动消息（避免启动日志被挤出）
+if log_contains "ArchiveScheduler 已启动"; then
     log_success "归档调度器已启动"
     TESTS_PASSED=$((TESTS_PASSED + 1))
+elif log_contains "归档调度器未启用"; then
+    log_error "归档调度器未启用（archive.enabled=false）"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 else
     log_error "归档调度器未启动"
     # 调试：显示相关日志行
     log_info "查找 'scheduler' 相关日志:"
-    echo "$LOGS" | grep -i "scheduler" | head -10 || log_info "未找到 scheduler 相关日志"
+    search_container_logs "scheduler" | head -10 || log_info "未找到 scheduler 相关日志"
     echo "提示: 请确保 config.yaml 中 archive.enabled=true"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
@@ -37,8 +35,8 @@ TESTS_TOTAL=$((TESTS_TOTAL + 1))
 log_step "步骤 2: 验证调度器配置"
 
 SCHEDULER_FOUND=false
-if echo "$LOGS" | grep -q "schedule:"; then
-    SCHEDULE=$(echo "$LOGS" | grep "schedule:" | tail -1 | sed 's/.*schedule: //')
+if log_contains "schedule:"; then
+    SCHEDULE=$(search_container_logs "schedule:" | tail -1 | sed 's/.*schedule: //')
     log_success "调度配置: $SCHEDULE"
     TESTS_PASSED=$((TESTS_PASSED + 1))
     SCHEDULER_FOUND=true
@@ -48,13 +46,13 @@ else
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-if echo "$LOGS" | grep -q "retention_days:"; then
-    RETENTION=$(echo "$LOGS" | grep "retention_days:" | tail -1 | sed 's/.*retention_days: //')
+if log_contains "retention_days:"; then
+    RETENTION=$(search_container_logs "retention_days:" | tail -1 | sed 's/.*retention_days: //')
     log_success "保留天数: $RETENTION"
 fi
 
-if echo "$LOGS" | grep -q "storage_path:"; then
-    STORAGE=$(echo "$LOGS" | grep "storage_path:" | tail -1 | sed 's/.*storage_path: //')
+if log_contains "storage_path:"; then
+    STORAGE=$(search_container_logs "storage_path:" | tail -1 | sed 's/.*storage_path: //')
     log_success "存储路径: $STORAGE"
 fi
 

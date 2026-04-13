@@ -201,16 +201,24 @@ run_archive_script() {
         ${dry_run_flag}"
 }
 
-# 获取容器日志
+# 获取容器日志（获取全部日志，避免启动日志被挤出）
 get_container_logs() {
-    docker logs "${CONTAINER_NAME}" --tail 100
+    docker logs "${CONTAINER_NAME}" 2>&1
+}
+
+# 在容器日志中搜索特定模式
+search_container_logs() {
+    local pattern="$1"
+    docker logs "${CONTAINER_NAME}" 2>&1 | grep -E "$pattern"
+}
+
+# 检查日志中是否包含特定模式（支持扩展正则表达式）
+log_contains() {
+    local pattern="$1"
+    docker logs "${CONTAINER_NAME}" 2>&1 | grep -qE "$pattern"
 }
 
 # 检查调度器是否启动
 check_scheduler_started() {
-    local logs=$(get_container_logs)
-    if echo "$logs" | grep -q "ArchiveScheduler 已启动"; then
-        return 0
-    fi
-    return 1
+    log_contains "ArchiveScheduler 已启动"
 }
