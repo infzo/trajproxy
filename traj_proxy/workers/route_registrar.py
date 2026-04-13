@@ -34,6 +34,13 @@ class RouteRegistrar:
 
         # 使用 include_router 保持异常处理一致性
         self.app.include_router(transcript_router, tags=["Transcript"])
+
+    def register_trajectory_routes(self):
+        """注册 TrajectoryProvider 相关路由（新版）"""
+        from traj_proxy.serve.routes import trajectory_router
+
+        # /trajectories/* - 轨迹查询 API（新版）
+        self.app.include_router(trajectory_router, prefix="/trajectories", tags=["Trajectories"])
     def register_health_route(self):
         """注册健康检查路由"""
         @self.app.get("/health", tags=["Health"])
@@ -43,4 +50,5 @@ class RouteRegistrar:
         """注册所有路由"""
         self.register_proxy_routes()
         self.register_transcript_routes()
+        self.register_trajectory_routes()
         self.register_health_route()

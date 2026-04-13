@@ -47,6 +47,7 @@ RUN python -m venv /opt/litellm-venv && \
 # 应用代码复制
 # ========================================
 COPY scripts/download_tokenizer.py ./download_tokenizer.py
+COPY scripts/archive_records.py ./scripts/archive_records.py
 COPY dockers/compose/scripts/entrypoint.sh ./scripts/entrypoint.sh
 COPY dockers/allinone/scripts/entrypoint.sh ./scripts/entrypoint_allinone.sh
 
@@ -92,7 +93,7 @@ ENV PGDATA=/data/postgres
 ENV TRAJ_PROXY_CONFIG=/app/configs/config.yaml
 
 # 数据持久化卷
-VOLUME ["/data/postgres", "/app/logs", "/app/models"]
+VOLUME ["/data/postgres", "/data/archives", "/app/logs", "/app/models"]
 
 # ========================================
 # 入口

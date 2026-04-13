@@ -48,3 +48,5 @@ archive:
   retention_days: 30             # 活跃详情保留天数
   storage_path: "/data/archives" # JSONL+GZIP 归档文件目录
   batch_size: 1000               # 每批处理的记录数
+  schedule: "0 2 * * *"          # cron 表达式：每天凌晨 2 点执行
+  timezone: "Asia/Shanghai"      # 时区配置

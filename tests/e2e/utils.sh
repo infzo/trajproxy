@@ -23,6 +23,10 @@ log_error() {
     echo -e "${RED}[FAIL]${NC} $1"
 }
 
+log_warning() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
 log_step() {
     echo -e "${YELLOW}[STEP]${NC} $1"
 }

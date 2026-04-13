@@ -33,6 +33,7 @@ from traj_proxy.serve.error_handler import build_error_response
 chat_router = APIRouter()
 model_router = APIRouter()
 transcript_router = APIRouter()
+trajectory_router = APIRouter()
 
 logger = get_logger(__name__)
 
@@ -419,7 +420,7 @@ async def get_trajectory(
     limit: int = 10000
 ) -> Dict[str, Any]:
     """
-    根据 session_id 获取所有轨迹记录
+    根据 session_id 获取所有轨迹记录（旧接口，保持向后兼容）
 
     参数:
         request: FastAPI Request 对象
@@ -441,8 +442,75 @@ async def get_trajectory(
 
     try:
         provider = get_provider(request)
-        return await provider.get_trajectory(session_id, limit)
+        # 使用新方法查询，然后转换为旧格式
+        result = await provider.get_trajectories(session_id)
+        records = result["records"][:limit]
+        return {
+            "session_id": session_id,
+            "count": len(records),
+            "records": records
+        }
     except Exception as e:
         logger.exception(f"轨迹查询失败: {str(e)}")
         error_detail, status_code = build_error_response("trajectory_query", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
+
+
+# ========== 轨迹查询接口（新版） ==========
+
+@trajectory_router.get("/sessions")
+async def list_sessions(
+    request: Request,
+    run_id: str
+) -> Dict[str, Any]:
+    """
+    查询 session 分组列表
+
+    参数:
+        request: FastAPI Request 对象
+        run_id: 运行ID（必填）
+
+    返回:
+        包含 run_id 和 session 列表的字典
+
+    Raises:
+        HTTPException: 当查询失败时抛出
+    """
+    from traj_proxy.workers.worker import get_transcript_provider as get_provider
+
+    try:
+        provider = get_provider(request)
+        return await provider.list_sessions(run_id)
+    except Exception as e:
+        logger.exception(f"查询 session 列表失败: {str(e)}")
+        error_detail, status_code = build_error_response("list_sessions", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
+
+
+@trajectory_router.get("/{session_id}/records")
+async def get_trajectory_records(
+    request: Request,
+    session_id: str
+) -> Dict[str, Any]:
+    """
+    查询指定 session 的所有轨迹记录
+
+    参数:
+        request: FastAPI Request 对象
+        session_id: 会话ID
+
+    返回:
+        包含 session_id 和记录列表的字典
+
+    Raises:
+        HTTPException: 当查询失败时抛出
+    """
+    from traj_proxy.workers.worker import get_transcript_provider as get_provider
+
+    try:
+        provider = get_provider(request)
+        return await provider.get_trajectories(session_id)
+    except Exception as e:
+        logger.exception(f"查询轨迹记录失败: {str(e)}")
+        error_detail, status_code = build_error_response("get_trajectory_records", e)
         raise HTTPException(status_code=status_code, detail=error_detail)

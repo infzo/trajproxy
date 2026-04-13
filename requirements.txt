@@ -11,3 +11,6 @@ huggingface-hub>=0.20.0
 
 # Parser dependencies (vllm parser compatibility)
 regex>=2024.0.0
+
+# Archive scheduler dependencies
+croniter>=2.0.0

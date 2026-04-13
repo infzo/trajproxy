@@ -250,3 +250,83 @@ class RequestRepository:
                     return await cur.fetchone()
         except Exception as e:
             raise DatabaseError(f"查询统计信息失败: {str(e)}\n{traceback.format_exc()}")
+
+    async def list_sessions(
+        self,
+        run_id: str
+    ) -> List[Dict[str, Any]]:
+        """查询指定 run_id 下的 session 列表（带统计信息）
+
+        按 session_id 分组统计记录数和时间范围。
+
+        Args:
+            run_id: 运行ID（必填）
+
+        Returns:
+            session 列表，每个包含 session_id、record_count、时间范围
+
+        Raises:
+            DatabaseError: 当查询失败时抛出
+        """
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor(row_factory=dict_row) as cur:
+                    await cur.execute("""
+                        SELECT
+                            session_id,
+                            run_id,
+                            COUNT(*) as record_count,
+                            MIN(start_time) as first_request_time,
+                            MAX(start_time) as last_request_time
+                        FROM public.request_metadata
+                        WHERE run_id = %s
+                        GROUP BY session_id, run_id
+                        ORDER BY session_id
+                    """, (run_id,))
+                    return await cur.fetchall()
+        except Exception as e:
+            raise DatabaseError(f"查询 session 列表失败: {str(e)}\n{traceback.format_exc()}")
+
+    async def get_all_by_session(
+        self,
+        session_id: str
+    ) -> List[Dict[str, Any]]:
+        """查询指定 session 的所有轨迹记录
+
+        与 get_by_session 方法一致，返回完整的 record 数据。
+        只返回未归档的记录（archive_location IS NULL）。
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            轨迹记录列表，按 start_time 倒序
+
+        Raises:
+            DatabaseError: 当查询失败时抛出
+        """
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor(row_factory=dict_row) as cur:
+                    await cur.execute("""
+                        SELECT
+                            m.id, m.unique_id, m.request_id, m.session_id, m.run_id, m.model,
+                            m.prompt_tokens, m.completion_tokens, m.total_tokens,
+                            m.cache_hit_tokens, m.processing_duration_ms,
+                            m.start_time, m.end_time, m.created_at, m.error,
+                            d.tokenizer_path, d.messages,
+                            d.raw_request, d.raw_response,
+                            d.text_request, d.text_response,
+                            d.prompt_text, d.token_ids,
+                            d.token_request, d.token_response,
+                            d.response_text, d.response_ids,
+                            d.full_conversation_text, d.full_conversation_token_ids,
+                            d.error_traceback
+                        FROM public.request_metadata m
+                        JOIN public.request_details_active d ON m.unique_id = d.unique_id
+                        WHERE m.session_id = %s AND m.archive_location IS NULL
+                        ORDER BY m.start_time DESC
+                    """, (session_id,))
+                    return await cur.fetchall()
+        except Exception as e:
+            raise DatabaseError(f"查询轨迹记录失败: {str(e)}\n{traceback.format_exc()}")

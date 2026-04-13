@@ -203,7 +203,7 @@ async def ensure_current_partition(pool: AsyncConnectionPool):
                 WHERE relname = %s AND relnamespace = 'public'::regnamespace
             """, (partition_name,))
             if not await cur.fetchone():
-                conn.execute(f"""
+                await conn.execute(f"""
                     CREATE TABLE IF NOT EXISTS public.{partition_name}
                         PARTITION OF public.request_details_active
                         FOR VALUES FROM ('{month_start.isoformat()}') TO ('{next_month_start.isoformat()}')
@@ -217,7 +217,7 @@ async def ensure_current_partition(pool: AsyncConnectionPool):
                 WHERE relname = %s AND relnamespace = 'public'::regnamespace
             """, (next_partition_name,))
             if not await cur.fetchone():
-                conn.execute(f"""
+                await conn.execute(f"""
                     CREATE TABLE IF NOT EXISTS public.{next_partition_name}
                         PARTITION OF public.request_details_active
                         FOR VALUES FROM ('{next_month_start.isoformat()}') TO ('{next_next_month_start.isoformat()}')

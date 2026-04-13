@@ -45,7 +45,7 @@ processor_manager:
 
 # 归档配置（元数据表 + 详情表架构）
 archive:
-  enabled: false                 # 启用自动归档
+  enabled: true                 # 启用自动归档
   retention_days: 30             # 活跃详情保留天数
   storage_path: "/data/archives" # JSONL+GZIP 归档文件目录
   batch_size: 1000               # 每批处理的记录数

@@ -88,19 +88,20 @@ services:
     build:
       context: ../..
       dockerfile: dockers/compose/Dockerfile
+    pull_policy: build
     image: traj_proxy:latest
     container_name: traj-proxy
     ports:
       - "12300-12320:12300-12320"
     volumes:
-      - ./scripts:/app/scripts
+      - ./configs/config.yaml:/app/configs/config.yaml
       - ../../models:/app/models
       - ../../traj_proxy:/app/traj_proxy
-      - ./configs/config.yaml:/app/configs/config.yaml
+      - ../../archives:/data/archives
       - ../../logs:/app/logs
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=postgresql://pduser:pdpwd123@192.168.65.254:5433/traj_proxy
+      - DATABASE_URL=postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy
       - LOG_LEVEL=DEBUG
       - LOG_DIR=/app/logs
     depends_on:
