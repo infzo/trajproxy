@@ -28,6 +28,7 @@ docs/
 │   ├── deployment.md            # 部署指南
 │   ├── configuration.md         # 配置说明
 │   ├── store.md                 # Store 模块文档
+│   ├── trajectory_viewer.md     # 轨迹查看器使用文档
 │   ├── release.md               # 变更日志
 │   ├── core_cases.md            # 核心用例测试
 │   └── compare_vllm.md          # 与 vLLM 接口对比
@@ -47,6 +48,7 @@ docs/
 2. [部署指南](develop/deployment.md) - 本地/Docker 部署方式
 3. [配置说明](develop/configuration.md) - 配置文件详解
 4. [API 参考](develop/api_reference.md) - API 文档索引
+5. [轨迹查看器](develop/trajectory_viewer.md) - 对话轨迹可视化工具
 
 ### API 文档
 
