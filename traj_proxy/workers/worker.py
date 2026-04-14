@@ -5,6 +5,7 @@ Worker 实现
 """
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import time
 import traceback
@@ -145,7 +146,15 @@ class ProxyWorker:
         self._setup_routes()
 
     def _setup_middleware(self):
-        """设置中间件：为所有请求添加日志记录"""
+        """设置中间件：CORS 支持和请求日志"""
+        # 添加 CORS 中间件，允许本地开发工具访问
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
         @self.app.middleware("http")
         async def request_logging_middleware(request: Request, call_next):
             """请求日志中间件：记录请求详情和响应耗时"""

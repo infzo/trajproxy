@@ -1,0 +1,1174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trajectory Viewer Pro</title>
+<style>
+    /* ==================== CSS Variables & Reset ==================== */
+    :root {
+        --bg-body: #0f172a;       /* Slate 900 */
+        --bg-panel: #1e293b;      /* Slate 800 */
+        --bg-card: #1e293b;       /* Slate 800 */
+        --bg-card-hover: #334155; /* Slate 700 */
+        --bg-input: #0f172a;      /* Slate 900 */
+
+        --border-color: #334155;  /* Slate 700 */
+        --border-focus: #6366f1;  /* Indigo 500 */
+
+        --text-main: #f1f5f9;     /* Slate 100 */
+        --text-muted: #94a3b8;    /* Slate 400 */
+        --text-dim: #64748b;      /* Slate 500 */
+
+        --primary: #6366f1;       /* Indigo 500 */
+        --primary-hover: #4f46e5; /* Indigo 600 */
+        --danger: #ef4444;        /* Red 500 */
+        --success: #10b981;       /* Emerald 500 */
+        --warning: #f59e0b;       /* Amber 500 */
+
+        --radius-sm: 4px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --shadow-glow: 0 0 15px rgba(99, 102, 241, 0.15);
+
+        --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; outline: none; }
+
+    body {
+        font-family: var(--font-sans);
+        background-color: var(--bg-body);
+        color: var(--text-main);
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    /* Scrollbar Styling */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg-body); }
+    ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+    /* ==================== Components ==================== */
+    button {
+        cursor: pointer;
+        border: none;
+        font-family: inherit;
+        transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+        background: var(--primary);
+        color: white;
+        padding: 6px 14px;
+        border-radius: var(--radius-sm);
+        font-weight: 500;
+        font-size: 13px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .btn-primary:hover { background: var(--primary-hover); box-shadow: 0 0 10px rgba(99,102,241,0.3); }
+    .btn-primary:disabled { background: var(--text-dim); cursor: not-allowed; opacity: 0.6; box-shadow: none; }
+
+    .btn-secondary {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+    }
+    .btn-secondary:hover { border-color: var(--text-muted); color: var(--text-main); background: var(--bg-card-hover); }
+    .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary.active { background: rgba(99,102,241,0.15); border-color: var(--primary); color: #818cf8; }
+
+    input {
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-main);
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
+    input::placeholder { color: var(--text-dim); }
+
+    .badge {
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .badge-primary { background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
+    .badge-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+    /* ==================== Layout ==================== */
+    .app-header {
+        height: 60px;
+        background: rgba(30, 41, 59, 0.8);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        justify-content: space-between;
+        z-index: 50;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 20px; }
+    .brand { font-weight: 700; font-size: 16px; color: var(--text-main); letter-spacing: -0.5px; display: flex; align-items: center; gap: 8px; }
+    .brand span { color: var(--primary); }
+
+    .search-group { display: flex; align-items: center; gap: 12px; padding-left: 20px; border-left: 1px solid var(--border-color); }
+    .search-group label { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+
+    .app-body { flex: 1; display: flex; overflow: hidden; }
+
+    /* ==================== Sidebar ==================== */
+    .sidebar {
+        width: 300px;
+        background: var(--bg-panel);
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sidebar-header {
+        padding: 16px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(30, 41, 59, 0.5);
+    }
+    .sidebar-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-dim); letter-spacing: 1px; }
+
+    .session-list { flex: 1; overflow-y: auto; }
+
+    .session-item {
+        padding: 12px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.03);
+        cursor: pointer;
+        transition: background 0.15s;
+        border-left: 3px solid transparent;
+    }
+    .session-item:hover { background: rgba(255,255,255,0.03); }
+    .session-item.active {
+        background: rgba(99, 102, 241, 0.1);
+        border-left-color: var(--primary);
+    }
+    .session-id { font-family: var(--font-mono); font-size: 12px; color: var(--text-main); margin-bottom: 4px; word-break: break-all; }
+    .session-meta { font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; }
+
+    /* ==================== Main Content ==================== */
+    .main-content { flex: 1; display: flex; flex-direction: column; background: var(--bg-body); position: relative; }
+
+    .toolbar {
+        height: 48px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        justify-content: space-between;
+        background: var(--bg-body);
+    }
+
+    .nav-controls { display: flex; align-items: center; gap: 12px; }
+    .nav-info { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 12px; font-weight: 500; }
+
+    /* Content Body: 左侧记录卡片 + 右侧轨迹视图 */
+    .content-body { flex: 1; display: flex; overflow: hidden; }
+
+    .record-area { flex: 1; overflow-y: auto; padding: 24px; scroll-behavior: smooth; }
+
+    /* Empty States */
+    .empty-state {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        height: 100%; color: var(--text-dim); text-align: center;
+    }
+    .empty-icon { font-size: 40px; margin-bottom: 16px; opacity: 0.5; }
+    .empty-text { font-size: 14px; color: var(--text-muted); }
+
+    /* Record Cards */
+    .record-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        margin-bottom: 16px;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+        transition: border-color 0.2s, box-shadow 0.2s;
+        position: relative;
+    }
+    .record-card:hover { border-color: var(--text-dim); }
+    .record-card.active { border-color: var(--primary); box-shadow: var(--shadow-glow); }
+    .record-card.error { border-left: 3px solid var(--danger); }
+
+    .record-header {
+        padding: 12px 16px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255,255,255,0.01);
+        border-bottom: 1px solid transparent;
+    }
+    .record-header:hover { background: rgba(255,255,255,0.03); }
+    .record-card.open .record-header { border-bottom-color: var(--border-color); }
+
+    .rh-left { display: flex; align-items: center; gap: 12px; }
+    .rh-idx { font-family: var(--font-mono); color: var(--primary); font-weight: 700; font-size: 12px; min-width: 24px; }
+    .rh-model { font-weight: 600; font-size: 13px; color: var(--text-main); }
+    .rh-time { color: var(--text-dim); font-size: 12px; }
+
+    .rh-right { display: flex; align-items: center; gap: 10px; color: var(--text-dim); font-size: 12px; }
+    .rh-stats { display: flex; gap: 12px; font-family: var(--font-mono); }
+    .rh-arrow { transition: transform 0.2s; color: var(--text-dim); }
+    .record-card.open .rh-arrow { transform: rotate(90deg); }
+
+    .btn-traj {
+        background: rgba(99, 102, 241, 0.15);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        color: #818cf8;
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+    }
+    .btn-traj:hover { background: rgba(99, 102, 241, 0.25); border-color: rgba(99, 102, 241, 0.5); }
+    .btn-traj.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+    /* JSON Tree Styles */
+    .record-body {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease-in-out;
+        background: #161e2e;
+    }
+    .record-card.open .record-body { max-height: 2000px; overflow: visible; }
+
+    .json-tree { padding: 16px; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; }
+
+    .tree-node { margin-left: 20px; position: relative; }
+    .tree-row { display: flex; align-items: flex-start; }
+
+    .tree-toggle {
+        width: 14px; text-align: left; cursor: pointer; user-select: none;
+        color: var(--text-dim); display: inline-block; margin-right: 4px; line-height: 1.4;
+        flex-shrink: 0;
+    }
+    .tree-toggle:hover { color: var(--text-main); }
+
+    .tree-toggle-spacer {
+        width: 14px; display: inline-block; margin-right: 4px; flex-shrink: 0;
+    }
+
+    .tree-key { color: #93c5fd; }
+    .tree-string { color: #86efac; }
+    .tree-number { color: #fca5a5; }
+    .tree-boolean { color: #fcd34d; }
+    .tree-null { color: #94a3b8; font-style: italic; }
+    .tree-bracket { color: var(--text-dim); margin: 0 2px; }
+    .tree-ellipsis { color: var(--text-dim); font-style: italic; margin-left: 8px; }
+    .tree-array-count { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
+    .tree-array-scroll {
+        max-height: 300px;
+        overflow-y: auto;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 4px;
+    }
+    .tree-string-expandable {
+        color: #86efac;
+        cursor: pointer;
+        border-bottom: 1px dashed rgba(134, 239, 172, 0.4);
+    }
+    .tree-string-expandable:hover { border-bottom-color: #86efac; }
+
+    /* ==================== Trajectory Panel (右侧) ==================== */
+    .traj-panel {
+        width: 0;
+        min-width: 0;
+        overflow: hidden;
+        border-left: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-panel);
+        transition: width 0.3s ease, min-width 0.3s ease;
+    }
+    .traj-panel.open {
+        width: 48%;
+        min-width: 420px;
+    }
+
+    .traj-header {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(30, 41, 59, 0.5);
+        flex-shrink: 0;
+    }
+    .traj-header-info { display: flex; align-items: center; gap: 10px; }
+    .traj-title { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-dim); letter-spacing: 1px; }
+    .traj-record-label { font-family: var(--font-mono); font-size: 12px; color: #818cf8; }
+    .traj-model-label { font-size: 12px; color: var(--text-muted); }
+
+    .traj-close {
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        font-size: 18px;
+        cursor: pointer;
+        padding: 0 4px;
+        line-height: 1;
+    }
+    .traj-close:hover { color: var(--text-main); }
+
+    .chat-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+    }
+
+    /* Chat Messages */
+    .chat-msg {
+        margin-bottom: 12px;
+        padding: 12px 16px;
+        border-radius: var(--radius-md);
+        position: relative;
+    }
+    .chat-msg.system {
+        background: rgba(100, 116, 139, 0.12);
+        border-left: 3px solid #64748b;
+    }
+    .chat-msg.user {
+        background: rgba(59, 130, 246, 0.1);
+        border-left: 3px solid #3b82f6;
+    }
+    .chat-msg.assistant {
+        background: rgba(16, 185, 129, 0.1);
+        border-left: 3px solid #10b981;
+    }
+    .chat-msg.tool {
+        background: rgba(245, 158, 11, 0.08);
+        border-left: 3px solid #f59e0b;
+    }
+
+    .chat-role {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .chat-role-icon { font-size: 14px; }
+    .chat-msg.system .chat-role { color: #94a3b8; }
+    .chat-msg.user .chat-role { color: #60a5fa; }
+    .chat-msg.assistant .chat-role { color: #34d399; }
+    .chat-msg.tool .chat-role { color: #fbbf24; }
+
+    .chat-content {
+        font-size: 13px;
+        line-height: 1.7;
+        color: var(--text-main);
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    .chat-content-collapsed {
+        max-height: 200px;
+        overflow: hidden;
+        position: relative;
+    }
+    .chat-content-collapsed::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 60px;
+        background: linear-gradient(transparent, var(--bg-panel));
+        pointer-events: none;
+    }
+
+    .chat-expand-btn {
+        display: block;
+        margin-top: 6px;
+        background: none;
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
+        padding: 2px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        cursor: pointer;
+    }
+    .chat-expand-btn:hover { border-color: var(--text-muted); color: var(--text-main); }
+
+    .tool-call-block {
+        background: rgba(0,0,0,0.2);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        padding: 8px 12px;
+        margin-top: 8px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+    }
+    .tool-call-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .tool-call-name { color: #fbbf24; font-weight: 600; }
+    .tool-call-id { color: var(--text-dim); font-size: 11px; }
+    .tool-call-args { color: var(--text-muted); white-space: pre-wrap; margin-top: 4px; max-height: 200px; overflow-y: auto; }
+
+    .chat-separator {
+        text-align: center;
+        color: var(--text-dim);
+        font-size: 11px;
+        margin: 16px 0;
+        position: relative;
+    }
+    .chat-separator span {
+        background: var(--bg-panel);
+        padding: 0 12px;
+        position: relative;
+        z-index: 1;
+    }
+    .chat-separator::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: var(--border-color);
+    }
+
+    .traj-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: var(--text-dim);
+        text-align: center;
+    }
+    .traj-empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+
+    /* Utilities */
+    .hidden { display: none !important; }
+    .spinner {
+        border: 3px solid rgba(255,255,255,0.1); border-left-color: var(--primary);
+        border-radius: 50%; width: 24px; height: 24px;
+        animation: spin 0.8s linear infinite; margin: 20px auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Toast */
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+    .toast {
+        background: var(--bg-panel); color: var(--text-main); border: 1px solid var(--border-color);
+        padding: 10px 16px; border-radius: var(--radius-md); font-size: 13px;
+        box-shadow: var(--shadow-md); opacity: 0; transform: translateY(10px);
+        transition: all 0.3s; display: flex; align-items: center; gap: 8px;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast-success { border-left: 3px solid var(--success); }
+    .toast-error { border-left: 3px solid var(--danger); }
+    .toast-info { border-left: 3px solid var(--primary); }
+
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="app-header">
+    <div class="header-left">
+        <div class="brand">
+            <span>&#9670;</span> TrajectoryViewer
+        </div>
+        <div class="search-group">
+            <label>Server</label>
+            <input type="text" id="serverUrl" value="http://localhost:8000" placeholder="API Endpoint" style="width: 220px;">
+
+            <label>Run ID</label>
+            <input type="text" id="runId" placeholder="e.g. run-123" style="width: 160px;">
+
+            <button class="btn-primary" id="btnFetch" onclick="fetchSessions()">
+                <span>&#128269;</span> 查询
+            </button>
+            <button class="btn-secondary" onclick="clearAll()">重置</button>
+        </div>
+    </div>
+</header>
+
+<div class="app-body">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <span class="sidebar-title">Sessions</span>
+            <span class="badge badge-primary" id="sessionCount" style="display:none">0</span>
+        </div>
+        <div class="session-list" id="sessionList">
+            <div class="empty-state">
+                <div class="empty-icon">&#128193;</div>
+                <div class="empty-text">输入 Run ID 开始查询</div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Toolbar -->
+        <div class="toolbar" id="recordNav" style="display:none">
+            <div class="nav-controls">
+                <button class="btn-secondary" id="btnPrev" onclick="navigateRecord(-1)">← 上一条</button>
+                <span class="nav-info" id="navInfo">0 / 0</span>
+                <button class="btn-secondary" id="btnNext" onclick="navigateRecord(1)">下一条 →</button>
+            </div>
+            <div class="nav-controls">
+                <button class="btn-secondary" onclick="toggleAllRecords()" title="折叠/展开所有卡片">全部折叠</button>
+                <button class="btn-secondary" onclick="expandAllFields()">展开字段</button>
+                <button class="btn-secondary" onclick="collapseAllFields()">收起字段</button>
+            </div>
+        </div>
+
+        <!-- Content Body: 记录列表 + 轨迹面板 -->
+        <div class="content-body">
+            <!-- Record List -->
+            <div class="record-area" id="recordList">
+                <div class="empty-state">
+                    <div class="empty-icon">&#128200;</div>
+                    <div class="empty-text">在左侧选择 Session 查看轨迹详情</div>
+                </div>
+            </div>
+
+            <!-- Trajectory Panel -->
+            <div class="traj-panel" id="trajPanel">
+                <div class="traj-header">
+                    <div class="traj-header-info">
+                        <span class="traj-title">轨迹视图</span>
+                        <span class="traj-record-label" id="trajRecordLabel"></span>
+                        <span class="traj-model-label" id="trajModelLabel"></span>
+                    </div>
+                    <button class="traj-close" onclick="closeTrajectory()" title="关闭轨迹视图">&times;</button>
+                </div>
+                <div class="chat-container" id="chatContainer">
+                    <div class="traj-empty">
+                        <div class="traj-empty-icon">&#128172;</div>
+                        <div class="empty-text">点击记录卡片上的「轨迹」按钮查看对话</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ==================== State & Config ====================
+let currentRecords = [];
+let currentRecordIdx = 0;
+let windowAllExpanded = true;
+let serverUrl = '';
+let trajRecordIdx = -1; // 当前轨迹视图显示的 record 索引
+
+const MAX_STRING_LEN = 200;
+const MAX_ARRAY_RENDER = 200; // 大数组最多渲染条目数
+const CHAT_COLLAPSE_LEN = 800; // 聊天消息超过此长度折叠
+
+// ==================== Utils ====================
+function showToast(msg, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    const icon = type === 'success' ? '&#10004;' : type === 'error' ? '&#10006;' : '&#8505;';
+    el.innerHTML = `<span style="font-weight:bold">${icon}</span> <span>${msg}</span>`;
+    container.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('show'));
+    setTimeout(() => {
+        el.classList.remove('show');
+        setTimeout(() => el.remove(), 300);
+    }, 3000);
+}
+
+function formatTime(ts) {
+    if (!ts) return '-';
+    try {
+        const d = new Date(ts);
+        const pad = (n) => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    } catch { return ts; }
+}
+
+function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function truncate(s, len) {
+    if (!s || typeof s !== 'string') return s;
+    return s.length > len ? s.substring(0, len) + '...' : s;
+}
+
+// ==================== API ====================
+async function apiGet(path) {
+    serverUrl = document.getElementById('serverUrl').value.replace(/\/+$/, '');
+    const url = serverUrl + path;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    return resp.json();
+}
+
+// ==================== Logic: Sessions ====================
+async function fetchSessions() {
+    const runId = document.getElementById('runId').value.trim();
+    if (!runId) { showToast('请输入 Run ID', 'error'); return; }
+
+    const listEl = document.getElementById('sessionList');
+    listEl.innerHTML = '<div class="spinner"></div>';
+
+    try {
+        const data = await apiGet(`/trajectories/sessions?run_id=${encodeURIComponent(runId)}`);
+        const sessions = data.sessions || [];
+
+        const badge = document.getElementById('sessionCount');
+        badge.textContent = sessions.length;
+        badge.style.display = sessions.length ? 'inline-block' : 'none';
+
+        if (sessions.length === 0) {
+            listEl.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">&#128196;</div>
+                    <div class="empty-text">未找到 Session 数据</div>
+                </div>`;
+            return;
+        }
+
+        sessions.sort((a, b) => (b.last_request_time || '').localeCompare(a.last_request_time || ''));
+
+        listEl.innerHTML = sessions.map((s, i) => `
+            <div class="session-item" data-idx="${i}" onclick="selectSession(${i})">
+                <div class="session-id">${escapeHtml(s.session_id)}</div>
+                <div class="session-meta">
+                    <span>${s.record_count} 记录</span>
+                    <span>${formatTime(s.last_request_time)}</span>
+                </div>
+            </div>
+        `).join('');
+
+        window._sessions = sessions;
+        showToast(`加载成功: ${sessions.length} 个 Sessions`, 'success');
+    } catch (e) {
+        listEl.innerHTML = `<div style="padding:20px;color:var(--danger);text-align:center">请求失败: ${escapeHtml(e.message)}</div>`;
+        showToast('查询失败', 'error');
+    }
+}
+
+// ==================== Logic: Records ====================
+async function selectSession(idx) {
+    document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
+    document.querySelector(`.session-item[data-idx="${idx}"]`).classList.add('active');
+
+    const session = window._sessions[idx];
+    const recordList = document.getElementById('recordList');
+    recordList.innerHTML = '<div class="spinner"></div>';
+    document.getElementById('recordNav').style.display = 'none';
+    closeTrajectory();
+
+    try {
+        const data = await apiGet(`/trajectories/${encodeURIComponent(session.session_id)}/records`);
+        let records = data.records || [];
+        records.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
+
+        currentRecords = records;
+        currentRecordIdx = 0;
+        windowAllExpanded = true;
+
+        if (records.length === 0) {
+            recordList.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">&#127911;</div>
+                    <div class="empty-text">该 Session 没有轨迹记录</div>
+                </div>`;
+            return;
+        }
+
+        renderRecords();
+        document.getElementById('recordNav').style.display = 'flex';
+        updateNav();
+    } catch (e) {
+        recordList.innerHTML = `<div style="padding:20px;color:var(--danger);text-align:center">加载失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function renderRecords() {
+    const list = document.getElementById('recordList');
+    list.innerHTML = currentRecords.map((r, i) => {
+        const hasError = !!r.error;
+        const errorClass = hasError ? 'error' : '';
+        const errorBadge = hasError ? '<span class="badge badge-danger">Error</span>' : '';
+        const trajActive = trajRecordIdx === i ? ' active' : '';
+
+        return `
+        <div class="record-card ${errorClass} open" data-ridx="${i}" id="card-${i}">
+            <div class="record-header" onclick="toggleRecord(${i})">
+                <div class="rh-left">
+                    <span class="rh-idx">#${i + 1}</span>
+                    <span class="rh-model">${escapeHtml(r.model || 'Unknown')}</span>
+                    ${errorBadge}
+                </div>
+                <div class="rh-right">
+                    <span class="rh-time">${formatTime(r.start_time)}</span>
+                    <div class="rh-stats">
+                        <span title="Prompt Tokens">P:${r.prompt_tokens ?? '-'}</span>
+                        <span title="Completion Tokens">C:${r.completion_tokens ?? '-'}</span>
+                        <span title="Duration">${r.processing_duration_ms ? r.processing_duration_ms + 'ms' : '-'}</span>
+                    </div>
+                    <button class="btn-traj${trajActive}" onclick="event.stopPropagation(); openTrajectory(${i})" title="轨迹视图">轨迹</button>
+                    <span class="rh-arrow">&#9654;</span>
+                </div>
+            </div>
+            <div class="record-body" id="body-${i}">
+                <div class="json-tree">
+                    ${renderJsonTree(r, '', 0)}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ==================== JSON Tree ====================
+function renderJsonTree(obj, path, depth) {
+    if (obj === null || obj === undefined) return '<span class="tree-null">null</span>';
+    if (typeof obj === 'boolean') return `<span class="tree-boolean">${obj}</span>`;
+    if (typeof obj === 'number') return `<span class="tree-number">${obj}</span>`;
+
+    if (typeof obj === 'string') {
+        if (obj.length > MAX_STRING_LEN) {
+            // 存储原文和截断文的 encodeURIComponent 编码，解决展开/收起问题
+            const encodedFull = encodeURIComponent(obj);
+            const encodedShort = encodeURIComponent(truncate(obj, MAX_STRING_LEN));
+            return `<span class="tree-string tree-string-expandable" data-full="${encodedFull}" data-short="${encodedShort}" data-expanded="false" onclick="toggleString(this)">"${escapeHtml(truncate(obj, MAX_STRING_LEN))}"</span>`;
+        }
+        return `<span class="tree-string">"${escapeHtml(obj)}"</span>`;
+    }
+
+    if (Array.isArray(obj)) {
+        if (obj.length === 0) return '<span class="tree-bracket">[]</span>';
+
+        const isOpen = depth < 1;
+        const isLarge = obj.length > MAX_ARRAY_RENDER;
+        const displayItems = isLarge ? obj.slice(0, MAX_ARRAY_RENDER) : obj;
+
+        let childrenHtml = '';
+        displayItems.forEach((item, idx) => {
+            const isPrimitive = item === null || typeof item !== 'object';
+            const childOpen = depth + 1 < 1;
+            childrenHtml += `<div class="tree-row">
+                ${isPrimitive
+                    ? '<span class="tree-toggle-spacer"></span>'
+                    : `<span class="tree-toggle" onclick="toggleNode(this)">${childOpen ? '▼' : '▶'}</span>`}
+                ${renderJsonTree(item, `${path}[${idx}]`, depth + 1)}
+            </div>`;
+        });
+
+        if (isLarge) {
+            const remaining = obj.length - MAX_ARRAY_RENDER;
+            childrenHtml += `<div style="margin-left:18px;color:var(--text-dim);font-style:italic;font-size:11px;padding:4px 0;">... 显示前 ${MAX_ARRAY_RENDER} 条，共 ${obj.length} 条</div>`;
+        }
+
+        const scrollClass = obj.length > 50 ? ' tree-array-scroll' : '';
+
+        return `
+            <div>
+                <span class="tree-bracket">[</span><span class="tree-array-count">${obj.length}</span>
+                <div class="${scrollClass}" style="display:${isOpen?'block':'none'}">
+                    ${childrenHtml}
+                </div>
+                <span class="tree-bracket">]</span>
+            </div>
+        `;
+    }
+
+    // Object
+    const keys = Object.keys(obj);
+    if (keys.length === 0) return '<span class="tree-bracket">{}</span>';
+
+    const isOpen = depth < 1;
+
+    let entriesHtml = '';
+    keys.forEach(k => {
+        const val = obj[k];
+        const isPrimitive = val === null || typeof val !== 'object';
+        const preview = getPreview(val);
+
+        entriesHtml += `
+            <div class="tree-row">
+                ${isPrimitive
+                    ? '<span class="tree-toggle-spacer"></span>'
+                    : `<span class="tree-toggle" onclick="toggleNode(this)">${isOpen ? '▼' : '▶'}</span>`}
+                <span class="tree-key">"${escapeHtml(k)}"</span>:
+                <span class="tree-children" style="display:${isOpen?'inline':'none'}">
+                    ${renderJsonTree(val, `${path}.${k}`, depth + 1)}
+                </span>
+                <span class="tree-ellipsis" style="display:${isOpen?'none':'inline'}">${escapeHtml(preview)}</span>,
+            </div>`;
+    });
+
+    return `<div><span class="tree-bracket">{</span><div style="margin-left:8px">${entriesHtml}</div><span class="tree-bracket">}</span></div>`;
+}
+
+function getPreview(val) {
+    if (val === null || val === undefined) return 'null';
+    if (typeof val === 'string') return truncate(val, 30);
+    if (typeof val === 'number') return val;
+    if (typeof val === 'boolean') return val;
+    if (Array.isArray(val)) return `Array(${val.length})`;
+    return `Object{${Object.keys(val).length}}`;
+}
+
+function toggleNode(el) {
+    const row = el.parentElement;
+    const children = row.querySelector('.tree-children');
+    const ellipsis = row.querySelector('.tree-ellipsis');
+    if (!children) return; // 安全检查
+
+    const isHidden = children.style.display === 'none';
+    children.style.display = isHidden ? 'inline' : 'none';
+    if (ellipsis) ellipsis.style.display = isHidden ? 'none' : 'inline';
+    el.textContent = isHidden ? '▼' : '▶';
+}
+
+function toggleString(el) {
+    const isExpanded = el.getAttribute('data-expanded') === 'true';
+    if (isExpanded) {
+        // 收起
+        const shortDecoded = decodeURIComponent(el.getAttribute('data-short'));
+        el.innerHTML = '"' + escapeHtml(shortDecoded) + '"';
+        el.setAttribute('data-expanded', 'false');
+        el.title = '点击展开全文';
+    } else {
+        // 展开
+        const fullDecoded = decodeURIComponent(el.getAttribute('data-full'));
+        el.innerHTML = '"' + escapeHtml(fullDecoded) + '"';
+        el.setAttribute('data-expanded', 'true');
+        el.title = '点击收起';
+    }
+}
+
+// ==================== Interaction Logic ====================
+function toggleRecord(idx) {
+    const card = document.getElementById(`card-${idx}`);
+    card.classList.toggle('open');
+}
+
+function toggleAllRecords() {
+    windowAllExpanded = !windowAllExpanded;
+    currentRecords.forEach((_, i) => {
+        const card = document.getElementById(`card-${i}`);
+        if (windowAllExpanded) card.classList.add('open');
+        else card.classList.remove('open');
+    });
+}
+
+function expandAllFields() {
+    document.querySelectorAll('.tree-children').forEach(el => el.style.display = 'inline');
+    document.querySelectorAll('.tree-ellipsis').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.tree-toggle').forEach(el => el.textContent = '▼');
+}
+
+function collapseAllFields() {
+    document.querySelectorAll('.tree-children').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.tree-ellipsis').forEach(el => el.style.display = 'inline');
+    document.querySelectorAll('.tree-toggle').forEach(el => el.textContent = '▶');
+}
+
+function navigateRecord(delta) {
+    const newIdx = currentRecordIdx + delta;
+    if (newIdx < 0 || newIdx >= currentRecords.length) return;
+    currentRecordIdx = newIdx;
+    updateNav();
+    scrollToRecord(newIdx);
+
+    // 如果轨迹面板已打开，同步更新
+    if (trajRecordIdx >= 0) {
+        openTrajectory(newIdx);
+    }
+}
+
+function updateNav() {
+    document.getElementById('navInfo').textContent = `${currentRecordIdx + 1} / ${currentRecords.length}`;
+    document.getElementById('btnPrev').disabled = currentRecordIdx <= 0;
+    document.getElementById('btnNext').disabled = currentRecordIdx >= currentRecords.length - 1;
+}
+
+function scrollToRecord(idx) {
+    const card = document.getElementById(`card-${idx}`);
+    if (card) {
+        document.querySelectorAll('.record-card.active').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (!card.classList.contains('open')) card.classList.add('open');
+    }
+}
+
+function clearAll() {
+    document.getElementById('runId').value = '';
+    document.getElementById('sessionList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128193;</div><div class="empty-text">输入 Run ID 开始查询</div></div>';
+    document.getElementById('recordList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128200;</div><div class="empty-text">在左侧选择 Session 查看轨迹详情</div></div>';
+    document.getElementById('sessionCount').style.display = 'none';
+    document.getElementById('recordNav').style.display = 'none';
+    closeTrajectory();
+    window._sessions = [];
+    currentRecords = [];
+    showToast('已重置', 'info');
+}
+
+// ==================== Trajectory View (轨迹视图) ====================
+
+/**
+ * 从 record 中提取对话消息列表
+ * 按顺序返回 OpenAI 格式的 messages 数组
+ */
+function extractConversation(record) {
+    const messages = [];
+
+    // 1. 提取请求消息
+    const reqMsgs = record.messages ||
+                    (record.raw_request && record.raw_request.messages) ||
+                    [];
+    if (Array.isArray(reqMsgs)) {
+        reqMsgs.forEach(m => messages.push({...m}));
+    }
+
+    // 2. 提取响应消息
+    let responseMsg = null;
+    if (record.raw_response && record.raw_response.choices) {
+        const choice = record.raw_response.choices[0];
+        if (choice && choice.message) {
+            responseMsg = {...choice.message};
+        }
+    }
+    // 回退: 使用 response_text
+    if (!responseMsg && record.response_text) {
+        responseMsg = {role: 'assistant', content: record.response_text};
+    }
+    // 回退: 使用 text_response
+    if (!responseMsg && record.text_response) {
+        const textResp = typeof record.text_response === 'string'
+            ? record.text_response
+            : JSON.stringify(record.text_response, null, 2);
+        responseMsg = {role: 'assistant', content: textResp};
+    }
+
+    if (responseMsg) {
+        // 避免重复：如果最后一条请求消息和响应消息相同（某些代理会把完整对话放入messages）
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg &&
+            lastMsg.role === 'assistant' &&
+            lastMsg.content === responseMsg.content &&
+            !lastMsg.tool_calls && !responseMsg.tool_calls) {
+            messages[messages.length - 1] = responseMsg;
+        } else {
+            messages.push(responseMsg);
+        }
+    }
+
+    // 3. 如果有错误且没有消息，用错误信息构造一条
+    if (messages.length === 0 && record.error) {
+        messages.push({role: 'system', content: `[Error] ${record.error}`});
+    }
+
+    return messages;
+}
+
+/**
+ * 打开轨迹视图，显示指定 record 的对话
+ */
+function openTrajectory(idx) {
+    trajRecordIdx = idx;
+    const record = currentRecords[idx];
+    const panel = document.getElementById('trajPanel');
+    panel.classList.add('open');
+
+    // 更新轨迹按钮高亮
+    document.querySelectorAll('.btn-traj').forEach(b => b.classList.remove('active'));
+    const activeBtn = document.querySelector(`#card-${idx} .btn-traj`);
+    if (activeBtn) activeBtn.classList.add('active');
+
+    // 更新面板头部
+    document.getElementById('trajRecordLabel').textContent = `#${idx + 1}`;
+    document.getElementById('trajModelLabel').textContent = record.model || 'Unknown';
+
+    // 提取并渲染对话
+    const messages = extractConversation(record);
+    renderChatView(messages, record);
+}
+
+/**
+ * 关闭轨迹视图
+ */
+function closeTrajectory() {
+    trajRecordIdx = -1;
+    const panel = document.getElementById('trajPanel');
+    panel.classList.remove('open');
+    document.querySelectorAll('.btn-traj').forEach(b => b.classList.remove('active'));
+    document.getElementById('chatContainer').innerHTML = `
+        <div class="traj-empty">
+            <div class="traj-empty-icon">&#128172;</div>
+            <div class="empty-text">点击记录卡片上的「轨迹」按钮查看对话</div>
+        </div>`;
+}
+
+/**
+ * 渲染聊天视图
+ */
+function renderChatView(messages, record) {
+    const container = document.getElementById('chatContainer');
+
+    if (messages.length === 0) {
+        container.innerHTML = `
+            <div class="traj-empty">
+                <div class="traj-empty-icon">&#128172;</div>
+                <div class="empty-text">该记录没有消息数据</div>
+            </div>`;
+        return;
+    }
+
+    let html = '';
+
+    // 顶部元信息
+    html += `<div class="chat-separator"><span>${formatTime(record.start_time)} | ${record.prompt_tokens ?? '?'} prompt / ${record.completion_tokens ?? '?'} completion tokens | ${record.processing_duration_ms ? record.processing_duration_ms + 'ms' : '?'}</span></div>`;
+
+    messages.forEach((msg, i) => {
+        const role = msg.role || 'unknown';
+        const roleIcons = {system: '&#9881;', user: '&#128100;', assistant: '&#129302;', tool: '&#128295;'};
+        const roleNames = {system: 'System', user: 'User', assistant: 'Assistant', tool: 'Tool'};
+        const icon = roleIcons[role] || '&#9679;';
+        const name = roleNames[role] || role;
+
+        html += `<div class="chat-msg ${escapeHtml(role)}">`;
+        html += `<div class="chat-role"><span class="chat-role-icon">${icon}</span> ${escapeHtml(name)}`;
+
+        // Tool 消息显示 tool_call_id
+        if (role === 'tool' && msg.tool_call_id) {
+            html += ` <span style="color:var(--text-dim);font-weight:400;font-size:10px;">(${escapeHtml(msg.tool_call_id)})</span>`;
+        }
+        html += `</div>`;
+
+        // 渲染内容
+        const contentStr = formatMessageContent(msg.content);
+        if (contentStr) {
+            if (contentStr.length > CHAT_COLLAPSE_LEN) {
+                const shortContent = contentStr.substring(0, CHAT_COLLAPSE_LEN);
+                html += `<div class="chat-content chat-content-collapsed" id="chat-content-${i}">${escapeHtml(shortContent)}</div>`;
+                html += `<button class="chat-expand-btn" onclick="expandChatMsg(${i}, true)">展开全文 (${contentStr.length} 字符)</button>`;
+                html += `<div class="chat-content hidden" id="chat-content-full-${i}">${escapeHtml(contentStr)}</div>`;
+                html += `<div class="chat-content hidden" id="chat-content-short-${i}">${escapeHtml(shortContent)}</div>`;
+            } else {
+                html += `<div class="chat-content">${escapeHtml(contentStr)}</div>`;
+            }
+        }
+
+        // 渲染 tool_calls
+        if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+            msg.tool_calls.forEach((tc, tcIdx) => {
+                const fn = tc.function || {};
+                const fnName = fn.name || 'unknown';
+                const fnArgs = fn.arguments || '{}';
+                let argsStr;
+                try {
+                    argsStr = typeof fnArgs === 'string' ? JSON.stringify(JSON.parse(fnArgs), null, 2) : JSON.stringify(fnArgs, null, 2);
+                } catch { argsStr = String(fnArgs); }
+
+                html += `<div class="tool-call-block">`;
+                html += `<div class="tool-call-header">`;
+                html += `<span class="tool-call-name">${escapeHtml(fnName)}</span>`;
+                if (tc.id) html += `<span class="tool-call-id">${escapeHtml(tc.id)}</span>`;
+                html += `</div>`;
+                html += `<div class="tool-call-args">${escapeHtml(argsStr)}</div>`;
+                html += `</div>`;
+            });
+        }
+
+        html += `</div>`;
+    });
+
+    container.innerHTML = html;
+}
+
+/**
+ * 格式化消息内容
+ * 支持纯字符串和 multimodal 数组格式
+ */
+function formatMessageContent(content) {
+    if (content === null || content === undefined) return '';
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+        // multimodal content: [{type: "text", text: "..."}, {type: "image_url", ...}]
+        return content.map(part => {
+            if (typeof part === 'string') return part;
+            if (part.type === 'text') return part.text || '';
+            if (part.type === 'image_url') return `[Image: ${part.image_url?.url || 'url'}]`;
+            return JSON.stringify(part, null, 2);
+        }).join('\n');
+    }
+    return JSON.stringify(content, null, 2);
+}
+
+/**
+ * 展开/收起聊天消息
+ */
+function expandChatMsg(idx, expand) {
+    const el = document.getElementById(`chat-content-${idx}`);
+    const btn = el.nextElementSibling;
+    const fullEl = document.getElementById(`chat-content-full-${idx}`);
+    const shortEl = document.getElementById(`chat-content-short-${idx}`);
+
+    if (expand) {
+        el.classList.remove('chat-content-collapsed');
+        el.classList.add('hidden');
+        fullEl.classList.remove('hidden');
+        btn.textContent = '收起';
+        btn.onclick = () => expandChatMsg(idx, false);
+    } else {
+        fullEl.classList.add('hidden');
+        el.classList.remove('hidden');
+        el.classList.add('chat-content-collapsed');
+        el.innerHTML = shortEl.innerHTML;
+        btn.textContent = `展开全文`;
+        btn.onclick = () => expandChatMsg(idx, true);
+    }
+}
+
+// Keyboard Shortcuts
+document.addEventListener('keydown', (e) => {
+    if (currentRecords.length === 0) return;
+    if (e.target.tagName === 'INPUT') return;
+
+    if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); navigateRecord(-1); }
+    if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); navigateRecord(1); }
+    if (e.key === 'Escape') { closeTrajectory(); }
+});
+</script>
+</body>
+</html>
