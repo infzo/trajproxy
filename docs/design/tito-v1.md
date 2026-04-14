@@ -10,7 +10,7 @@
 
 **第一轮对话：**
 ```
-<|im_start|>user\n你好<|im_end|>\n<|im_start|>assistant\n你好！有什么我可以帮你的吗？😊<|im_end|>
+<|im_start|>user\n你好<|im_end|>\n<|im_start|>assistant\n<think>\n</think>\n你好！有什么我可以帮你的吗？😊<|im_end|>
 ```
 
 **第二轮对话（问题所在）：**
