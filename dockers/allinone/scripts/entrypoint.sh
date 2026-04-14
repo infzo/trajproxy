@@ -339,6 +339,7 @@ if [ -f "${LITELLM_PRISMA_DIR}/schema.prisma" ]; then
     DATABASE_URL="${LITELLM_DATABASE_URL}" \
     /opt/litellm-venv/bin/prisma db push \
         --schema "${LITELLM_PRISMA_DIR}/schema.prisma" \
+        --skip-generate \
         --accept-data-loss 2>&1 || \
     echo "警告: LiteLLM Prisma 迁移失败，LiteLLM 部分功能可能不可用"
     echo "LiteLLM 数据表初始化完成"

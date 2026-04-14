@@ -39,9 +39,11 @@ RUN python -m venv /opt/litellm-venv && \
     'opentelemetry-api' 'opentelemetry-sdk' 'opentelemetry-exporter-otlp' \
     -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 
-# 单独运行 prisma generate，确保 Prisma 客户端和引擎二进制正确生成
-# 注意：LiteLLM 的 Prisma 迁移将在容器启动时由 entrypoint.sh 处理
-# 这里跳过 generate 步骤，因为会在运行时动态生成
+# 构建时执行 prisma generate，将引擎二进制烘焙进镜像
+# 这样运行时 prisma db push 无需网络下载引擎
+RUN PATH="/opt/litellm-venv/bin:$PATH" \
+    /opt/litellm-venv/bin/prisma generate \
+    --schema /opt/litellm-venv/lib/python3.11/site-packages/litellm/proxy/schema.prisma
 
 # ========================================
 # 应用代码复制
