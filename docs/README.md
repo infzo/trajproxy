@@ -17,8 +17,7 @@ docs/
 │   ├── identifier_design.md     # ID 设计规范（run_id, session_id）
 │   ├── parser.md                # Parser 模块设计
 │   ├── jinja-process.md         # Jinja 模板转换工作流
-│   ├── tito-v1.md               # TITO 前缀匹配方案
-│   └── tito-v2.md               # TITO 模式集成方案
+│   └── tito.md                  # TITO 前缀匹配方案（含方案对比）
 │
 ├── develop/                     # 开发与运维文档
 │   ├── api_nginx.md             # Nginx 入口 API（端口 12345）
@@ -62,7 +61,7 @@ docs/
 3. [归档机制](design/archive_mechanism.md) - 数据库归档设计文档（分区管理、调度执行、注意事项）
 4. [ID 设计规范](design/identifier_design.md) - run_id、session_id、model 语义定义
 5. [Parser 模块](design/parser.md) - 工具调用和推理内容解析
-6. [TITO 模式](design/tito-v1.md) - Token-in-Token-out 前缀匹配
+6. [TITO 模式](design/tito.md) - Token-in-Token-out 前缀匹配（含方案对比）
 
 ---
 
