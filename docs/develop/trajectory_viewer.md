@@ -112,19 +112,22 @@ Trajectory Viewer 通过以下 API 端点获取数据：
 ### 1. 获取 Sessions 列表
 
 ```
-GET /trajectories/sessions?run_id={run_id}
+GET /trajectories?run_id={run_id}
 ```
 
 **参数**：
-- `run_id`：要查询的运行 ID
+- `run_id`：要查询的运行 ID（必填）
 
 **响应示例**：
 ```json
 {
-  "sessions": [
+  "run_id": "run_001",
+  "trajectories": [
     {
       "session_id": "session-abc123",
+      "run_id": "run_001",
       "record_count": 242,
+      "first_request_time": "2024-04-14T10:30:00Z",
       "last_request_time": "2024-04-14T10:30:45Z"
     }
   ]
@@ -134,32 +137,45 @@ GET /trajectories/sessions?run_id={run_id}
 ### 2. 获取 Session 记录
 
 ```
-GET /trajectories/{session_id}/records
+GET /trajectories/{session_id}
 ```
 
 **参数**：
-- `session_id`：Session 唯一标识符
+- `session_id`：Session 唯一标识符（必填）
+- `limit`：最多返回的记录数，默认为 10000（可选）
 
 **响应示例**：
 ```json
 {
+  "session_id": "task-123",
   "records": [
     {
-      "record_id": "record-001",
+      "id": 1,
+      "unique_id": "task-123,req-uuid",
+      "request_id": "req-uuid",
+      "session_id": "task-123",
+      "run_id": "run_001",
       "model": "claude-3-opus-20240229",
+      "prompt_tokens": 10,
+      "completion_tokens": 20,
+      "total_tokens": 30,
+      "cache_hit_tokens": 0,
+      "processing_duration_ms": 1500.5,
       "start_time": "2024-04-14T10:30:00Z",
-      "request": { ... },
-      "response": { ... },
-      "trajectory": [
-        {
-          "role": "system",
-          "content": "You are a helpful assistant..."
-        },
-        {
-          "role": "user",
-          "content": "What's the weather?"
-        }
-      ]
+      "end_time": "2024-04-14T10:30:01.5Z",
+      "created_at": "2024-04-14T10:30:00Z",
+      "error": null,
+      "tokenizer_path": "Qwen/Qwen3.5-2B",
+      "messages": [...],
+      "raw_request": {...},
+      "raw_response": {...},
+      "prompt_text": "...",
+      "token_ids": [1, 2, 3],
+      "response_text": "...",
+      "response_ids": [4, 5, 6],
+      "full_conversation_text": "...",
+      "full_conversation_token_ids": [1, 2, 3, 4, 5, 6],
+      "error_traceback": null
     }
   ]
 }

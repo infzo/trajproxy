@@ -180,8 +180,8 @@ curl -X DELETE "http://localhost:12345/models?model_name=gpt-4&run_id=run_001"
 curl "http://localhost:12345/trajectory?session_id=task-123"
 
 # 轨迹查询（新接口）
-curl "http://localhost:12345/trajectories/sessions?run_id=run_001"
-curl "http://localhost:12345/trajectories/task-123/records"
+curl "http://localhost:12345/trajectories?run_id=run_001"
+curl "http://localhost:12345/trajectories/task-123"
 
 # 健康检查
 curl http://localhost:12345/health

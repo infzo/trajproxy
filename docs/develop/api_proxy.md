@@ -264,6 +264,31 @@ Body:
 }
 ```
 
+### GET /v1/models
+
+列出所有已注册模型（OpenAI 兼容格式）。
+
+**响应**:
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "qwen3.5-2b,run_001",
+      "object": "model",
+      "created": 1677610602,
+      "owned_by": "organization-owner"
+    },
+    {
+      "id": "gpt-4",
+      "object": "model",
+      "created": 1677610602,
+      "owned_by": "organization-owner"
+    }
+  ]
+}
+```
+
 ---
 
 ## 轨迹查询
@@ -493,6 +518,12 @@ response = requests.get(
     f"{BASE_URL}/trajectory",
     params={"session_id": "task-123"}
 )
+
+# 列出模型（管理格式）
+response = requests.get(f"{BASE_URL}/models")
+
+# 列出模型（OpenAI 兼容格式）
+response = requests.get(f"{BASE_URL}/v1/models")
 ```
 
 ### Python (OpenAI SDK)
@@ -521,6 +552,10 @@ response = client.chat.completions.create(
         "x-session-id": "task-123"
     }
 )
+
+# 列出模型（OpenAI 兼容格式）
+models = client.models.list()
+print(models.data)
 ```
 
 ### cURL
@@ -544,6 +579,7 @@ curl "http://localhost:12300/trajectory?session_id=task-123"
 
 # 模型管理
 curl http://localhost:12300/models
+curl http://localhost:12300/v1/models
 curl -X POST http://localhost:12300/models/register -d '{"model_name": "gpt-4", ...}'
 curl -X DELETE "http://localhost:12300/models?model_name=gpt-4&run_id=run_001"
 ```
