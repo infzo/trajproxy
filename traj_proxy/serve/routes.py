@@ -458,20 +458,20 @@ async def get_trajectory(
 
 # ========== 轨迹查询接口（新版） ==========
 
-@trajectory_router.get("/sessions")
-async def list_sessions(
+@trajectory_router.get("")
+async def list_trajectories(
     request: Request,
     run_id: str
 ) -> Dict[str, Any]:
     """
-    查询 session 分组列表
+    查询轨迹列表（可按 run_id 过滤）
 
     参数:
         request: FastAPI Request 对象
         run_id: 运行ID（必填）
 
     返回:
-        包含 run_id 和 session 列表的字典
+        包含 run_id 和轨迹列表的字典
 
     Raises:
         HTTPException: 当查询失败时抛出
@@ -480,24 +480,26 @@ async def list_sessions(
 
     try:
         provider = get_provider(request)
-        return await provider.list_sessions(run_id)
+        return await provider.list_trajectories(run_id)
     except Exception as e:
-        logger.exception(f"查询 session 列表失败: {str(e)}")
-        error_detail, status_code = build_error_response("list_sessions", e)
+        logger.exception(f"查询轨迹列表失败: {str(e)}")
+        error_detail, status_code = build_error_response("list_trajectories", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
 
 
-@trajectory_router.get("/{session_id}/records")
-async def get_trajectory_records(
+@trajectory_router.get("/{session_id}")
+async def get_trajectory_detail(
     request: Request,
-    session_id: str
+    session_id: str,
+    limit: int = 10000
 ) -> Dict[str, Any]:
     """
-    查询指定 session 的所有轨迹记录
+    查询指定轨迹的完整数据（详情）
 
     参数:
         request: FastAPI Request 对象
         session_id: 会话ID
+        limit: 最多返回的记录数，默认为10000
 
     返回:
         包含 session_id 和记录列表的字典
@@ -509,8 +511,12 @@ async def get_trajectory_records(
 
     try:
         provider = get_provider(request)
-        return await provider.get_trajectories(session_id)
+        result = await provider.get_trajectories(session_id)
+        # 应用 limit 限制
+        if limit and len(result["records"]) > limit:
+            result["records"] = result["records"][:limit]
+        return result
     except Exception as e:
-        logger.exception(f"查询轨迹记录失败: {str(e)}")
-        error_detail, status_code = build_error_response("get_trajectory_records", e)
+        logger.exception(f"查询轨迹详情失败: {str(e)}")
+        error_detail, status_code = build_error_response("get_trajectory_detail", e)
         raise HTTPException(status_code=status_code, detail=error_detail)

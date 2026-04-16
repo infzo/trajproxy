@@ -270,7 +270,9 @@ Body:
 
 ### GET /trajectory（旧接口）
 
-根据 session_id 查询请求轨迹记录（旧版接口，保持兼容）。
+> ⚠️ **注意**：建议使用 `/trajectories` 接口
+
+根据 session_id 查询请求轨迹记录（旧版接口，保持向后兼容）。
 
 **查询参数**:
 
@@ -287,6 +289,7 @@ Body:
   "count": 2,
   "records": [
     {
+      "id": 1,
       "unique_id": "task-123,req-uuid",
       "request_id": "req-uuid",
       "session_id": "task-123",
@@ -294,7 +297,28 @@ Body:
       "model": "qwen3.5-2b",
       "prompt_tokens": 10,
       "completion_tokens": 20,
-      "start_time": "2024-01-01T00:00:00Z"
+      "total_tokens": 30,
+      "cache_hit_tokens": 0,
+      "processing_duration_ms": 1500.5,
+      "start_time": "2024-01-01T00:00:00Z",
+      "end_time": "2024-01-01T00:00:01.5Z",
+      "created_at": "2024-01-01T00:00:00Z",
+      "error": null,
+      "tokenizer_path": "Qwen/Qwen3.5-2B",
+      "messages": [...],
+      "raw_request": {...},
+      "raw_response": {...},
+      "text_request": "...",
+      "text_response": "...",
+      "prompt_text": "...",
+      "token_ids": [1, 2, 3],
+      "token_request": [1, 2, 3],
+      "token_response": [4, 5, 6],
+      "response_text": "...",
+      "response_ids": [4, 5, 6],
+      "full_conversation_text": "...",
+      "full_conversation_token_ids": [1, 2, 3, 4, 5, 6],
+      "error_traceback": null
     }
   ]
 }
@@ -302,9 +326,9 @@ Body:
 
 ---
 
-### GET /trajectories/sessions（新接口）
+### GET /trajectories（新接口）
 
-查询指定 run_id 下的 session 分组列表。
+查询轨迹列表（可按 run_id 过滤）。
 
 **查询参数**:
 
@@ -317,7 +341,7 @@ Body:
 ```json
 {
   "run_id": "run_001",
-  "sessions": [
+  "trajectories": [
     {
       "session_id": "task-123",
       "run_id": "run_001",
@@ -338,15 +362,21 @@ Body:
 
 ---
 
-### GET /trajectories/{session_id}/records（新接口）
+### GET /trajectories/{session_id}（新接口）
 
-查询指定 session 的所有轨迹记录（返回完整详情字段）。
+查询指定轨迹的完整数据（详情）。
 
 **路径参数**:
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | session_id | string | 是 | 会话 ID |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| limit | integer | 否 | 10000 | 最大返回记录数 |
 
 **响应**:
 

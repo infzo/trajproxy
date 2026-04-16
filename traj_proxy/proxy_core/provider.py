@@ -43,22 +43,22 @@ class TrajectoryProvider:
             "records": records
         }
 
-    async def list_sessions(
+    async def list_trajectories(
         self,
         run_id: str
     ) -> Dict[str, Any]:
-        """查询指定 run_id 下的 session 列表
+        """查询指定 run_id 下的轨迹列表
 
         Args:
             run_id: 运行ID（必填）
 
         Returns:
-            包含 run_id 和 session 列表的字典
+            包含 run_id 和轨迹列表的字典
         """
         sessions = await self.request_repository.list_sessions(run_id)
         return {
             "run_id": run_id,
-            "sessions": sessions
+            "trajectories": sessions
         }
 
     async def get_trajectories(

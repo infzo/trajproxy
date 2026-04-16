@@ -647,8 +647,8 @@ async function fetchSessions() {
     listEl.innerHTML = '<div class="spinner"></div>';
 
     try {
-        const data = await apiGet(`/trajectories/sessions?run_id=${encodeURIComponent(runId)}`);
-        const sessions = data.sessions || [];
+        const data = await apiGet(`/trajectories?run_id=${encodeURIComponent(runId)}`);
+        const sessions = data.trajectories || [];
 
         const badge = document.getElementById('sessionCount');
         badge.textContent = sessions.length;
@@ -695,7 +695,7 @@ async function selectSession(idx) {
     closeTrajectory();
 
     try {
-        const data = await apiGet(`/trajectories/${encodeURIComponent(session.session_id)}/records`);
+        const data = await apiGet(`/trajectories/${encodeURIComponent(session.session_id)}`);
         let records = data.records || [];
         records.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
 

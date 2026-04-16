@@ -1,8 +1,8 @@
 #!/bin/bash
 # 场景 F112: Trajectories API 测试用例（Nginx 层）
-# 测试新的两阶段轨迹查询接口：
-#   - GET /trajectories/sessions?run_id={run_id}
-#   - GET /trajectories/{session_id}/records
+# 测试新的轨迹查询接口：
+#   - GET /trajectories?run_id={run_id}
+#   - GET /trajectories/{session_id}?limit=10000
 # 同时验证旧接口 /trajectory 向后兼容性
 
 # 获取脚本目录
@@ -122,14 +122,14 @@ log_separator
 echo ""
 
 # ============================================================
-# 步骤 3: 测试 GET /trajectories/sessions?run_id={run_id}
+# 步骤 3: 测试 GET /trajectories?run_id={run_id}
 # ============================================================
-log_step "步骤 3: 查询 session 列表（GET /trajectories/sessions）"
+log_step "步骤 3: 查询轨迹列表（GET /trajectories）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X GET '${TRAJ_API_BASE_URL}/trajectories/sessions?run_id=${TRAJ_API_RUN_ID}'"
+    -X GET '${TRAJ_API_BASE_URL}/trajectories?run_id=${TRAJ_API_RUN_ID}'"
 log_separator
 
-SESSIONS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories/sessions?run_id=${TRAJ_API_RUN_ID}")
+SESSIONS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories?run_id=${TRAJ_API_RUN_ID}")
 
 SESSIONS_BODY=$(echo "$SESSIONS_RESPONSE" | sed '$d')
 SESSIONS_STATUS=$(echo "$SESSIONS_RESPONSE" | sed -n '$p')
@@ -142,18 +142,18 @@ assert_http_status "200" "$SESSIONS_STATUS" "HTTP 状态码应为 200"
 
 # 验证响应结构
 assert_contains "$SESSIONS_BODY" "run_id" "响应应包含 run_id 字段"
-assert_contains "$SESSIONS_BODY" "sessions" "响应应包含 sessions 字段"
+assert_contains "$SESSIONS_BODY" "trajectories" "响应应包含 trajectories 字段"
 
 # 验证 run_id 匹配
 RESPONSE_RUN_ID=$(json_get "$SESSIONS_BODY" "run_id")
 assert_eq "$TRAJ_API_RUN_ID" "$RESPONSE_RUN_ID" "run_id 应为 ${TRAJ_API_RUN_ID}"
 
-# 验证 session 数量（应该至少有 3 个）
+# 验证轨迹数量（应该至少有 3 个）
 SESSION_COUNT=$(echo "$SESSIONS_BODY" | grep -o '"session_id"' | wc -l | tr -d ' ')
 if [ "$SESSION_COUNT" -ge 3 ] 2>/dev/null; then
-    log_success "Session 数量: ${SESSION_COUNT}，符合预期（>= 3）"
+    log_success "轨迹数量: ${SESSION_COUNT}，符合预期（>= 3）"
 else
-    log_error "Session 数量应为 >= 3，实际为: ${SESSION_COUNT}"
+    log_error "轨迹数量应为 >= 3，实际为: ${SESSION_COUNT}"
     TEST_FAILED=1
 fi
 
@@ -165,14 +165,14 @@ assert_contains "$SESSIONS_BODY" "${TRAJ_API_SESSION_ID_3}" "应包含 session_i
 echo ""
 
 # ============================================================
-# 步骤 4: 测试 GET /trajectories/sessions 缺少 run_id 参数
+# 步骤 4: 测试 GET /trajectories 缺少 run_id 参数
 # ============================================================
 log_step "步骤 4: 测试缺少 run_id 参数（应返回 422 错误）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X GET '${TRAJ_API_BASE_URL}/trajectories/sessions'"
+    -X GET '${TRAJ_API_BASE_URL}/trajectories'"
 log_separator
 
-NO_RUNID_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories/sessions")
+NO_RUNID_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories")
 
 NO_RUNID_BODY=$(echo "$NO_RUNID_RESPONSE" | sed '$d')
 NO_RUNID_STATUS=$(echo "$NO_RUNID_RESPONSE" | sed -n '$p')
@@ -192,14 +192,14 @@ fi
 echo ""
 
 # ============================================================
-# 步骤 5: 测试 GET /trajectories/{session_id}/records
+# 步骤 5: 测试 GET /trajectories/{session_id}
 # ============================================================
-log_step "步骤 5: 查询指定 session 的轨迹记录（GET /trajectories/{session_id}/records）"
+log_step "步骤 5: 查询指定轨迹的完整数据（GET /trajectories/{session_id}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X GET '${TRAJ_API_BASE_URL}/trajectories/${TRAJ_API_SESSION_ID_1}/records'"
+    -X GET '${TRAJ_API_BASE_URL}/trajectories/${TRAJ_API_SESSION_ID_1}'"
 log_separator
 
-RECORDS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories/${TRAJ_API_SESSION_ID_1}/records")
+RECORDS_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories/${TRAJ_API_SESSION_ID_1}")
 
 RECORDS_BODY=$(echo "$RECORDS_RESPONSE" | sed '$d')
 RECORDS_STATUS=$(echo "$RECORDS_RESPONSE" | sed -n '$p')
@@ -236,14 +236,14 @@ assert_contains "$RECORDS_BODY" "completion_tokens" "记录应包含 completion_
 echo ""
 
 # ============================================================
-# 步骤 6: 测试第二个 session 的轨迹记录
+# 步骤 6: 测试第二个轨迹的完整数据
 # ============================================================
-log_step "步骤 6: 查询第二个 session 的轨迹记录"
+log_step "步骤 6: 查询第二个轨迹的完整数据"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X GET '${TRAJ_API_BASE_URL}/trajectories/${TRAJ_API_SESSION_ID_2}/records'"
+    -X GET '${TRAJ_API_BASE_URL}/trajectories/${TRAJ_API_SESSION_ID_2}'"
 log_separator
 
-RECORDS_RESPONSE_2=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories/${TRAJ_API_SESSION_ID_2}/records")
+RECORDS_RESPONSE_2=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories/${TRAJ_API_SESSION_ID_2}")
 
 RECORDS_BODY_2=$(echo "$RECORDS_RESPONSE_2" | sed '$d')
 RECORDS_STATUS_2=$(echo "$RECORDS_RESPONSE_2" | sed -n '$p')
@@ -303,10 +303,10 @@ echo ""
 # ============================================================
 log_step "步骤 8: 测试不存在的 session_id（应返回空记录）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X GET '${TRAJ_API_BASE_URL}/trajectories/nonexistent-session-id/records'"
+    -X GET '${TRAJ_API_BASE_URL}/trajectories/nonexistent-session-id'"
 log_separator
 
-NOTEXIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories/nonexistent-session-id/records")
+NOTEXIST_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TRAJ_API_BASE_URL}/trajectories/nonexistent-session-id")
 
 NOTEXIST_BODY=$(echo "$NOTEXIST_RESPONSE" | sed '$d')
 NOTEXIST_STATUS=$(echo "$NOTEXIST_RESPONSE" | sed -n '$p')
