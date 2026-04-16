@@ -160,10 +160,14 @@ flowchart LR
 
 ```bash
 # Docker Compose 模式
-./scripts/start_docker_compose.sh
+./scripts/start_docker_compose.sh start    # 启动服务
+./scripts/start_docker_compose.sh stop     # 停止服务
+./scripts/start_docker_compose.sh restart  # 重启服务
 
 # All-in-One 模式
-./scripts/start_docker_allinone.sh
+./scripts/start_docker_allinone.sh start    # 启动服务
+./scripts/start_docker_allinone.sh stop     # 停止服务
+./scripts/start_docker_allinone.sh restart  # 重启服务
 ```
 
 ### 验证服务

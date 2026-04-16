@@ -121,8 +121,11 @@ database:
 ### 2. 启动服务
 
 ```bash
-# 一键启动所有容器
+# 启动所有服务（默认）
 ./scripts/start_docker_compose.sh
+
+# 或使用明确的 start 参数
+./scripts/start_docker_compose.sh start
 
 # 或手动启动
 cd dockers/compose && docker-compose up -d --build
@@ -173,6 +176,11 @@ python -m traj_proxy.app 2>&1 | tee logs/traj_proxy.log
 ### Docker 容器模式
 
 ```bash
+# 使用启动脚本管理服务（推荐）
+./scripts/start_docker_compose.sh start    # 启动服务
+./scripts/start_docker_compose.sh stop     # 停止服务
+./scripts/start_docker_compose.sh restart  # 重启服务
+
 # 查看服务状态
 cd dockers/compose && docker-compose ps
 
