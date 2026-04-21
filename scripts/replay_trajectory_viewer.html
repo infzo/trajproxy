@@ -506,10 +506,10 @@
             <span>&#9670;</span> TrajectoryViewer
         </div>
         <div class="search-group">
-            <label>Server</label>
-            <input type="text" id="serverUrl" value="http://localhost:12300" placeholder="API Endpoint" style="width: 220px;">
+            <label>SERVER_ADDRESS</label>
+            <input type="text" id="serverUrl" value="http://localhost:80" placeholder="API Endpoint" style="width: 220px;">
 
-            <label>Run ID</label>
+            <label>MY_JOB_NAME(Run ID)</label>
             <input type="text" id="runId" placeholder="e.g. run-123" style="width: 160px;">
 
             <button class="btn-primary" id="btnFetch" onclick="fetchSessions()">
@@ -530,7 +530,7 @@
         <div class="session-list" id="sessionList">
             <div class="empty-state">
                 <div class="empty-icon">&#128193;</div>
-                <div class="empty-text">输入 Run ID 开始查询</div>
+                <div class="empty-text">输入 MY_JOB_NAME(Run ID) 开始查询</div>
             </div>
         </div>
     </aside>
@@ -641,7 +641,7 @@ async function apiGet(path) {
 // ==================== Logic: Sessions ====================
 async function fetchSessions() {
     const runId = document.getElementById('runId').value.trim();
-    if (!runId) { showToast('请输入 Run ID', 'error'); return; }
+    if (!runId) { showToast('请输入 MY_JOB_NAME(Run ID)', 'error'); return; }
 
     const listEl = document.getElementById('sessionList');
     listEl.innerHTML = '<div class="spinner"></div>';
@@ -930,7 +930,7 @@ function scrollToRecord(idx) {
 
 function clearAll() {
     document.getElementById('runId').value = '';
-    document.getElementById('sessionList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128193;</div><div class="empty-text">输入 Run ID 开始查询</div></div>';
+    document.getElementById('sessionList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128193;</div><div class="empty-text">输入 MY_JOB_NAME(Run ID) 开始查询</div></div>';
     document.getElementById('recordList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128200;</div><div class="empty-text">在左侧选择 Session 查看轨迹详情</div></div>';
     document.getElementById('sessionCount').style.display = 'none';
     document.getElementById('recordNav').style.display = 'none';
