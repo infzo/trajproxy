@@ -217,7 +217,7 @@ class DirectPipeline(BasePipeline):
         """
         # 先处理 usage 信息（可能在没有 choices 的单独 chunk 中）
         # vLLM 在流式结束时发送一个只包含 usage 的 chunk
-        if "usage" in chunk:
+        if "usage" in chunk and chunk["usage"]:
             usage = chunk["usage"]
             if usage.get("prompt_tokens", None) is not None:
                 context.prompt_tokens = usage["prompt_tokens"]
@@ -243,6 +243,8 @@ class DirectPipeline(BasePipeline):
         # 3. 累积 reasoning（vLLM 扩展）
         if "reasoning" in delta and delta["reasoning"]:
             context.stream_reasoning += delta["reasoning"]
+        if "reasoning_content" in delta and delta["reasoning_content"]:
+            context.stream_reasoning += delta["reasoning_content"]
 
         # 4. 累积 tool_calls
         if "tool_calls" in delta and delta["tool_calls"]:
@@ -302,6 +304,7 @@ class DirectPipeline(BasePipeline):
         # 添加 reasoning（vLLM 扩展）
         if context.stream_reasoning:
             message["reasoning"] = context.stream_reasoning
+            message["reasoning_content"] = context.stream_reasoning
 
         # 添加 tool_calls
         if context.stream_tool_calls:

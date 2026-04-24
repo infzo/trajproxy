@@ -29,6 +29,7 @@ class InferClient:
         # 后端兼容性问题
         "response_format",       # 后端可能不支持
         "logit_bias",            # token_id 映射不同
+        "echo",                 # 语义不同
         # OpenAI 标准参数 - completions 不支持
         "tools",                 # 工具调用
         "tool_choice",           # 工具选择
@@ -42,7 +43,7 @@ class InferClient:
         "chat_template",         # 自定义模板
         "chat_template_kwargs",  # 模板参数
         "mm_processor_kwargs",   # 多模态处理器
-        "bad_words",             # 屏蔽词列表
+        # "bad_words",             # 屏蔽词列表
     })
 
     # 参数名映射（Chat -> Completion）

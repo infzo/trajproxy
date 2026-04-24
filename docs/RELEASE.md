@@ -4,6 +4,35 @@
 
 ---
 
+## [0.1.7] - 2026-04-24
+
+### 新增功能
+- **Header 透传**: 支持将客户端请求 header 透传到推理服务（黑名单模式，排除 HTTP 基础 header 和 TrajProxy 内部 header）
+- **Chat→Completion 参数转换**: InferClient 新增 `_transform_chat_params_to_completion()` 方法，自动过滤不兼容参数并映射参数名
+- **请求参数透传**: chat/completions 请求参数从白名单模式改为黑名单模式，新增参数自动透传
+
+### 优化改进
+- **InferClient 重构**: 提取统一异常处理（`_wrap_request_error`），新增异步上下文管理器支持，参数过滤逻辑定义为类常量
+- **参数兼容性**: `response_format` 和 `bad_words` 从不兼容参数列表移除，允许透传到推理服务
+
+### Bug 修复
+- **Header 未透传**: 修复请求 header 未转发到推理服务的问题
+- **Tokenizer 加载**: 修复 tokenizer 无法加载的问题，添加 `trust_remote_code=True`
+
+### 测试
+- **E2E 参数透传**: 新增 F210（direct 模式）和 F211（TITO 模式）参数透传测试场景
+- **Mock 推理服务**: 新增 mock_infer_server.py 用于验证参数和 header 透传
+
+### 影响范围
+- `traj_proxy/proxy_core/infer_client.py` - 推理客户端
+- `traj_proxy/proxy_core/context.py` - 处理上下文
+- `traj_proxy/proxy_core/pipeline/` - 流水线模块
+- `traj_proxy/proxy_core/processor.py` - 请求处理器
+- `traj_proxy/serve/routes.py` - API 路由
+- `tests/e2e/layers/proxy/` - E2E 测试
+
+---
+
 ## [0.1.6] - 2026-04-22
 
 ### 优化改进
