@@ -291,10 +291,9 @@ class InferClient:
             "max_tokens": transformed.get("max_tokens") if transformed.get("max_tokens") is not None else 100,
             "temperature": transformed.get("temperature") if transformed.get("temperature") is not None else 0.7,
             "stream": stream,
-            "logprobs": transformed.get("logprobs", 1),
-            "extra_body": transformed.get("extra_body", {})
+            "logprobs": 1,
+            "return_token_ids": True
         }
-        body["extra_body"].update({"return_token_ids": True}) # vLLM 扩展参数
 
         # 透传所有未显式处理的参数
         for k, v in transformed.items():

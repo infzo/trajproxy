@@ -21,6 +21,7 @@ import time
 import sys
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from typing import Dict, Any, List
 
 # 请求记录存储
@@ -63,8 +64,11 @@ class MockInferHandler(BaseHTTPRequestHandler):
         """发送JSON响应"""
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        self.send_header('Connection', 'close')
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+        self.wfile.flush()
+        self.close_connection = True  # 显式关闭连接
 
     def _send_sse_response(self, chunks: list):
         """发送SSE流式响应"""
@@ -221,8 +225,11 @@ class MockInferHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port: int = 19990):
-    """启动Mock服务"""
-    server = HTTPServer(('0.0.0.0', port), MockInferHandler)
+    """启动Mock服务（多线程模式，避免阻塞）"""
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True  # 主线程退出时自动结束子线程
+
+    server = ThreadedHTTPServer(('0.0.0.0', port), MockInferHandler)
     print(f"Mock Infer Server started on port {port}", flush=True)
     server.serve_forever()
 
