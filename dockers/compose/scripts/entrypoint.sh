@@ -254,6 +254,21 @@ def init_database():
                 END $$;
             """)
 
+            # tokenizer_packages 表（存储 tokenizer 压缩包）
+            print("  创建 tokenizer_packages 表...")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tokenizer_packages (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    content BYTEA NOT NULL,
+                    size INTEGER NOT NULL,
+                    file_count INTEGER,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                )
+            """)
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_tokenizer_packages_name ON tokenizer_packages (name)")
+            print("  tokenizer_packages 表创建完成")
+
             print("表和索引创建完成")
     except Exception as e:
         print(f"错误: 创建表失败: {e}")

@@ -20,6 +20,7 @@ from traj_proxy.proxy_core.infer_client import InferClient
 from traj_proxy.store.database_manager import DatabaseManager
 from traj_proxy.store.model_repository import ModelRepository
 from traj_proxy.store.request_repository import RequestRepository
+from traj_proxy.store.tokenizer_repository import TokenizerRepository
 from traj_proxy.store.models import ModelConfig
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
@@ -63,6 +64,9 @@ class ProcessorManager:
         # 模型注册表（供 ModelSynchronizer 使用）
         self.model_registry = ModelRepository(db_manager.pool)
         self.request_repository = RequestRepository(db_manager.pool)
+
+        # Tokenizer 仓库（支持从数据库下载 tokenizer）
+        self._tokenizer_repo = TokenizerRepository(db_manager)
 
         logger.info("ProcessorManager 初始化完成")
 
@@ -556,40 +560,63 @@ class ProcessorManager:
     def _resolve_tokenizer_path(self, tokenizer: str) -> str:
         """解析 tokenizer 路径
 
+        仅支持相对路径，查找顺序:
+        1. 本地 models_dir
+        2. 数据库 tokenizer_packages 表
+
         Args:
-            tokenizer: Tokenizer（本地路径或 HuggingFace 模型名称）
+            tokenizer: 相对路径，如 "Qwen/Qwen3.5-2B"
 
         Returns:
-            实际的 tokenizer 路径
+            本地 tokenizer 目录的绝对路径
 
         Raises:
-            ValueError: 如果 tokenizer 不存在
+            ValueError: tokenizer 在本地和数据库都不存在
         """
-        # 如果是绝对路径，直接使用
-        if os.path.isabs(tokenizer):
-            if not os.path.exists(tokenizer):
-                raise ValueError(f"Tokenizer 路径不存在: {tokenizer}")
-            return tokenizer
-
-        # 检查是否是 HuggingFace 模型名称（包含 /）
-        if "/" in tokenizer and not tokenizer.startswith("/"):
-            # 先检查本地 models 目录是否存在
-            models_dir = get_models_dir()
-            local_path = os.path.join(models_dir, tokenizer)
-            if os.path.exists(local_path):
-                return local_path
-            # 本地不存在，返回 HuggingFace 名称，让 AutoTokenizer.from_pretrained 处理
-            return tokenizer
-
-        # 相对路径：在 models 目录下查找
         models_dir = get_models_dir()
         local_path = os.path.join(models_dir, tokenizer)
 
+        # 1. 本地查找
         if os.path.exists(local_path):
             return local_path
 
-        raise ValueError(
-            f"Tokenizer '{tokenizer}' 不存在。请使用 download_tokenizer.py 脚本下载，"
-            f"或使用绝对路径，或使用 HuggingFace 模型名称（如 'Qwen/Qwen3.5-2B'）。"
-            f"已检查目录: {models_dir}"
-        )
+        # 2. 数据库查找
+        return self._resolve_db_tokenizer(tokenizer)
+
+    def _resolve_db_tokenizer(self, name: str) -> str:
+        """从数据库下载 tokenizer 并解压到本地
+
+        Args:
+            name: tokenizer 名称
+
+        Returns:
+            解压后的本地路径
+
+        Raises:
+            ValueError: tokenizer 不存在于数据库
+        """
+        import asyncio
+        import concurrent.futures
+
+        models_dir = get_models_dir()
+
+        # 先检查本地缓存（可能在等待锁时被其他进程下载）
+        local_path = os.path.join(models_dir, name)
+        if os.path.exists(local_path):
+            return local_path
+
+        # 同步调用异步方法
+        try:
+            loop = asyncio.get_running_loop()
+            # 已在事件循环中，使用线程池
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    self._tokenizer_repo.download_to_local(name, models_dir)
+                )
+                return future.result()
+        except RuntimeError:
+            # 无事件循环，直接运行
+            return asyncio.run(
+                self._tokenizer_repo.download_to_local(name, models_dir)
+            )
