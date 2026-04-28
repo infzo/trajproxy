@@ -8,6 +8,7 @@ from xml.parsers.expat import ParserCreate
 
 import regex as re
 
+from vllm.entrypoints.chat_utils import make_tool_call_id
 from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionRequest,
     ChatCompletionToolsParam,
@@ -19,7 +20,6 @@ from vllm.entrypoints.openai.engine.protocol import (
     ExtractedToolCallInformation,
     FunctionCall,
     ToolCall,
-    make_tool_call_id,
 )
 from vllm.logger import init_logger
 from vllm.tokenizers import TokenizerLike

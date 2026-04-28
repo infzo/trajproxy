@@ -27,6 +27,14 @@ _TOOL_PARSERS_TO_REGISTER = {
         "tool_parsers.qwen3coder_tool_parser",
         "Qwen3CoderToolParser",
     ),
+    "qwen3_xml": (
+        "tool_parsers.qwen3xml_tool_parser",
+        "Qwen3XMLToolParser",
+    ),
+    "hermes": (
+        "tool_parsers.hermes_tool_parser",
+        "Hermes2ProToolParser",
+    ),
     # 添加更多 parser 到这里
     # 示例：
     # "deepseek_v3": (
