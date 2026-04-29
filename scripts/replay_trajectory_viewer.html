@@ -371,6 +371,10 @@
         background: rgba(245, 158, 11, 0.08);
         border-left: 3px solid #f59e0b;
     }
+    .chat-msg.thinking {
+        background: rgba(139, 92, 246, 0.1);
+        border-left: 3px solid #8b5cf6;
+    }
 
     .chat-role {
         font-size: 11px;
@@ -387,6 +391,7 @@
     .chat-msg.user .chat-role { color: #60a5fa; }
     .chat-msg.assistant .chat-role { color: #34d399; }
     .chat-msg.tool .chat-role { color: #fbbf24; }
+    .chat-msg.thinking .chat-role { color: #a78bfa; }
 
     .chat-content {
         font-size: 13px;
@@ -438,6 +443,81 @@
     .tool-call-name { color: #fbbf24; font-weight: 600; }
     .tool-call-id { color: var(--text-dim); font-size: 11px; }
     .tool-call-args { color: var(--text-muted); white-space: pre-wrap; margin-top: 4px; max-height: 200px; overflow-y: auto; }
+
+    /* 思考内容块样式 */
+    .thinking-block {
+        background: rgba(139, 92, 246, 0.08);
+        border: 1px solid rgba(139, 92, 246, 0.2);
+        border-radius: var(--radius-sm);
+        padding: 10px 14px;
+        margin-bottom: 10px;
+        position: relative;
+    }
+    .thinking-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #a78bfa;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .thinking-content {
+        color: var(--text-muted);
+        white-space: pre-wrap;
+        font-size: 12px;
+        line-height: 1.6;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    .thinking-toggle {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: none;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        color: #a78bfa;
+        padding: 2px 8px;
+        border-radius: 3px;
+        font-size: 10px;
+        cursor: pointer;
+    }
+    .thinking-toggle:hover { background: rgba(139, 92, 246, 0.15); }
+    .thinking-content.collapsed { max-height: 120px; overflow: hidden; position: relative; }
+    .thinking-content.collapsed::after {
+        content: '';
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        height: 40px;
+        background: linear-gradient(transparent, rgba(30, 41, 59, 0.95));
+    }
+
+    /* 正常输出块样式 */
+    .output-block {
+        background: rgba(16, 185, 129, 0.05);
+        border: 1px solid rgba(16, 185, 129, 0.15);
+        border-radius: var(--radius-sm);
+        padding: 10px 14px;
+    }
+    .output-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #34d399;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .output-content {
+        color: var(--text-main);
+        white-space: pre-wrap;
+        font-size: 13px;
+        line-height: 1.6;
+    }
 
     .chat-separator {
         text-align: center;
@@ -1058,8 +1138,8 @@ function renderChatView(messages, record) {
 
     messages.forEach((msg, i) => {
         const role = msg.role || 'unknown';
-        const roleIcons = {system: '&#9881;', user: '&#128100;', assistant: '&#129302;', tool: '&#128295;'};
-        const roleNames = {system: 'System', user: 'User', assistant: 'Assistant', tool: 'Tool'};
+        const roleIcons = {system: '&#9881;', user: '&#128100;', assistant: '&#129302;', tool: '&#128295;', thinking: '&#128173;'};
+        const roleNames = {system: 'System', user: 'User', assistant: 'Assistant', tool: 'Tool', thinking: 'Thinking'};
         const icon = roleIcons[role] || '&#9679;';
         const name = roleNames[role] || role;
 
@@ -1072,39 +1152,97 @@ function renderChatView(messages, record) {
         }
         html += `</div>`;
 
-        // 渲染内容
-        const contentStr = formatMessageContent(msg.content);
-        if (contentStr) {
-            if (contentStr.length > CHAT_COLLAPSE_LEN) {
-                const shortContent = contentStr.substring(0, CHAT_COLLAPSE_LEN);
-                html += `<div class="chat-content chat-content-collapsed" id="chat-content-${i}">${escapeHtml(shortContent)}</div>`;
-                html += `<button class="chat-expand-btn" onclick="expandChatMsg(${i}, true)">展开全文 (${contentStr.length} 字符)</button>`;
-                html += `<div class="chat-content hidden" id="chat-content-full-${i}">${escapeHtml(contentStr)}</div>`;
-                html += `<div class="chat-content hidden" id="chat-content-short-${i}">${escapeHtml(shortContent)}</div>`;
-            } else {
-                html += `<div class="chat-content">${escapeHtml(contentStr)}</div>`;
+        // Assistant 消息特殊处理：区分思考、工具、正常输出
+        if (role === 'assistant') {
+            // 1. 渲染 reasoning_content (思考内容)
+            const reasoningContent = msg.reasoning_content || msg.reasoning;
+            if (reasoningContent) {
+                const reasoningStr = formatMessageContent(reasoningContent);
+                if (reasoningStr) {
+                    html += `<div class="thinking-block">`;
+                    html += `<div class="thinking-header">&#128173; 思考过程</div>`;
+                    if (reasoningStr.length > 500) {
+                        html += `<div class="thinking-content collapsed" id="thinking-${i}">${escapeHtml(reasoningStr)}</div>`;
+                        html += `<button class="thinking-toggle" onclick="toggleThinking(${i})">展开</button>`;
+                    } else {
+                        html += `<div class="thinking-content">${escapeHtml(reasoningStr)}</div>`;
+                    }
+                    html += `</div>`;
+                }
             }
-        }
 
-        // 渲染 tool_calls
-        if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
-            msg.tool_calls.forEach((tc, tcIdx) => {
-                const fn = tc.function || {};
-                const fnName = fn.name || 'unknown';
-                const fnArgs = fn.arguments || '{}';
-                let argsStr;
-                try {
-                    argsStr = typeof fnArgs === 'string' ? JSON.stringify(JSON.parse(fnArgs), null, 2) : JSON.stringify(fnArgs, null, 2);
-                } catch { argsStr = String(fnArgs); }
+            // 2. 渲染 tool_calls (工具调用)
+            if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+                msg.tool_calls.forEach((tc, tcIdx) => {
+                    const fn = tc.function || {};
+                    const fnName = fn.name || 'unknown';
+                    const fnArgs = fn.arguments || '{}';
+                    let argsStr;
+                    try {
+                        argsStr = typeof fnArgs === 'string' ? JSON.stringify(JSON.parse(fnArgs), null, 2) : JSON.stringify(fnArgs, null, 2);
+                    } catch { argsStr = String(fnArgs); }
 
-                html += `<div class="tool-call-block">`;
-                html += `<div class="tool-call-header">`;
-                html += `<span class="tool-call-name">${escapeHtml(fnName)}</span>`;
-                if (tc.id) html += `<span class="tool-call-id">${escapeHtml(tc.id)}</span>`;
+                    html += `<div class="tool-call-block">`;
+                    html += `<div class="tool-call-header">`;
+                    html += `<span class="tool-call-name">&#128295; ${escapeHtml(fnName)}</span>`;
+                    if (tc.id) html += `<span class="tool-call-id">${escapeHtml(tc.id)}</span>`;
+                    html += `</div>`;
+                    html += `<div class="tool-call-args">${escapeHtml(argsStr)}</div>`;
+                    html += `</div>`;
+                });
+            }
+
+            // 3. 渲染正常输出内容 (content)
+            const contentStr = formatMessageContent(msg.content);
+            if (contentStr) {
+                html += `<div class="output-block">`;
+                html += `<div class="output-header">&#128172; 输出内容</div>`;
+                if (contentStr.length > CHAT_COLLAPSE_LEN) {
+                    const shortContent = contentStr.substring(0, CHAT_COLLAPSE_LEN);
+                    html += `<div class="output-content chat-content-collapsed" id="chat-content-${i}">${escapeHtml(shortContent)}</div>`;
+                    html += `<button class="chat-expand-btn" onclick="expandChatMsg(${i}, true)">展开全文 (${contentStr.length} 字符)</button>`;
+                    html += `<div class="output-content hidden" id="chat-content-full-${i}">${escapeHtml(contentStr)}</div>`;
+                    html += `<div class="output-content hidden" id="chat-content-short-${i}">${escapeHtml(shortContent)}</div>`;
+                } else {
+                    html += `<div class="output-content">${escapeHtml(contentStr)}</div>`;
+                }
                 html += `</div>`;
-                html += `<div class="tool-call-args">${escapeHtml(argsStr)}</div>`;
-                html += `</div>`;
-            });
+            }
+        } else {
+            // 非 assistant 消息：常规渲染
+            const contentStr = formatMessageContent(msg.content);
+            if (contentStr) {
+                if (contentStr.length > CHAT_COLLAPSE_LEN) {
+                    const shortContent = contentStr.substring(0, CHAT_COLLAPSE_LEN);
+                    html += `<div class="chat-content chat-content-collapsed" id="chat-content-${i}">${escapeHtml(shortContent)}</div>`;
+                    html += `<button class="chat-expand-btn" onclick="expandChatMsg(${i}, true)">展开全文 (${contentStr.length} 字符)</button>`;
+                    html += `<div class="chat-content hidden" id="chat-content-full-${i}">${escapeHtml(contentStr)}</div>`;
+                    html += `<div class="chat-content hidden" id="chat-content-short-${i}">${escapeHtml(shortContent)}</div>`;
+                } else {
+                    html += `<div class="chat-content">${escapeHtml(contentStr)}</div>`;
+                }
+            }
+
+            // tool 角色的 tool_calls
+            if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+                msg.tool_calls.forEach((tc, tcIdx) => {
+                    const fn = tc.function || {};
+                    const fnName = fn.name || 'unknown';
+                    const fnArgs = fn.arguments || '{}';
+                    let argsStr;
+                    try {
+                        argsStr = typeof fnArgs === 'string' ? JSON.stringify(JSON.parse(fnArgs), null, 2) : JSON.stringify(fnArgs, null, 2);
+                    } catch { argsStr = String(fnArgs); }
+
+                    html += `<div class="tool-call-block">`;
+                    html += `<div class="tool-call-header">`;
+                    html += `<span class="tool-call-name">&#128295; ${escapeHtml(fnName)}</span>`;
+                    if (tc.id) html += `<span class="tool-call-id">${escapeHtml(tc.id)}</span>`;
+                    html += `</div>`;
+                    html += `<div class="tool-call-args">${escapeHtml(argsStr)}</div>`;
+                    html += `</div>`;
+                });
+            }
         }
 
         html += `</div>`;
@@ -1154,6 +1292,23 @@ function expandChatMsg(idx, expand) {
         el.innerHTML = shortEl.innerHTML;
         btn.textContent = `展开全文`;
         btn.onclick = () => expandChatMsg(idx, true);
+    }
+}
+
+/**
+ * 展开/收起思考内容
+ */
+function toggleThinking(idx) {
+    const contentEl = document.getElementById(`thinking-${idx}`);
+    const btn = contentEl.nextElementSibling;
+    const isCollapsed = contentEl.classList.contains('collapsed');
+
+    if (isCollapsed) {
+        contentEl.classList.remove('collapsed');
+        btn.textContent = '收起';
+    } else {
+        contentEl.classList.add('collapsed');
+        btn.textContent = '展开';
     }
 }
 
