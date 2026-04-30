@@ -52,7 +52,8 @@ class Processor:
         config: Optional[Dict[str, Any]] = None,
         run_id: str = "",
         tool_parser: str = "",
-        reasoning_parser: str = ""
+        reasoning_parser: str = "",
+        updated_at: Optional[datetime] = None
     ):
         """初始化 Processor
 
@@ -65,6 +66,7 @@ class Processor:
             run_id: 运行ID，空字符串表示全局模型
             tool_parser: Tool parser 名称
             reasoning_parser: Reasoning parser 名称
+            updated_at: 模型注册/更新时间
         """
         self.model = model
         self.run_id = run_id
@@ -72,6 +74,7 @@ class Processor:
         self.request_repository = request_repository
         self.infer_client = infer_client
         self.tool_parser_name = tool_parser
+        self.updated_at = updated_at
         self.reasoning_parser_name = reasoning_parser
 
         # 从传入的配置读取 token_in_token_out

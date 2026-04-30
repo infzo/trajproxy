@@ -12,6 +12,7 @@ ProcessorManager - 多模型处理器管理器
 """
 
 from typing import Dict, Optional, List, Tuple
+from datetime import datetime
 import os
 import traceback
 
@@ -75,7 +76,8 @@ class ProcessorManager:
         token_in_token_out: bool = False,
         run_id: str = "",
         tool_parser: str = "",
-        reasoning_parser: str = ""
+        reasoning_parser: str = "",
+        updated_at: Optional[datetime] = None
     ) -> Processor:
         """创建 Processor 实例的工厂方法
 
@@ -91,6 +93,7 @@ class ProcessorManager:
             run_id: 运行ID，空字符串表示全局模型
             tool_parser: Tool parser 名称
             reasoning_parser: Reasoning parser 名称
+            updated_at: 模型注册/更新时间
 
         Returns:
             新创建的 Processor 实例
@@ -125,7 +128,8 @@ class ProcessorManager:
             infer_client=infer_client,
             config=config,
             tool_parser=tool_parser,
-            reasoning_parser=reasoning_parser
+            reasoning_parser=reasoning_parser,
+            updated_at=updated_at
         )
 
         return processor
@@ -197,7 +201,8 @@ class ProcessorManager:
             token_in_token_out=config.token_in_token_out,
             run_id=config.run_id,
             tool_parser=config.tool_parser,
-            reasoning_parser=config.reasoning_parser
+            reasoning_parser=config.reasoning_parser,
+            updated_at=config.updated_at
         )
 
         key = (config.run_id, config.model_name)
@@ -254,7 +259,7 @@ class ProcessorManager:
         if token_in_token_out and tokenizer_path:
             resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
 
-        # 创建 Processor
+        # 创建 Processor（使用当前时间作为 updated_at）
         processor = self._create_processor(
             model_name=model_name,
             url=url,
@@ -263,7 +268,8 @@ class ProcessorManager:
             token_in_token_out=token_in_token_out,
             run_id=run_id,
             tool_parser=tool_parser,
-            reasoning_parser=reasoning_parser
+            reasoning_parser=reasoning_parser,
+            updated_at=datetime.now()
         )
 
         return processor, key
@@ -538,7 +544,8 @@ class ProcessorManager:
             "model_name": processor.model,
             "tokenizer_path": processor.tokenizer_path,
             "token_in_token_out": processor.token_in_token_out,
-            "infer_client_url": processor.infer_client.base_url if processor.infer_client else None
+            "infer_client_url": processor.infer_client.base_url if processor.infer_client else None,
+            "updated_at": processor.updated_at.isoformat() if processor.updated_at else None
         }
 
     def get_all_processors_info(self) -> List[Dict]:
