@@ -168,23 +168,75 @@ def init_database():
             """)
             print("  request_details_active 分区表创建完成")
 
-            # 创建当月分区
+            # 创建月分区（处理默认分区数据冲突）
             import datetime as _dt
-            _now = _dt.datetime.now()
-            _month_start = _now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            if _now.month == 12:
-                _next_month = _month_start.replace(year=_now.year + 1, month=1)
-            else:
-                _next_month = _month_start.replace(month=_now.month + 1)
-            _partition_name = f"request_details_active_{_now.strftime('%Y_%m')}"
-            conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS public.{_partition_name}
-                    PARTITION OF public.request_details_active
-                    FOR VALUES FROM ('{_month_start.isoformat()}') TO ('{_next_month.isoformat()}')
-            """)
-            print(f"  创建当月分区: {_partition_name}")
 
-            # 创建默认分区（兜底：防止无对应月分区时 INSERT 失败）
+            def _create_month_partition(conn, target_date):
+                """创建指定月份的分区，处理默认分区数据冲突"""
+                _ms = target_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                if target_date.month == 12:
+                    _me = _ms.replace(year=target_date.year + 1, month=1)
+                else:
+                    _me = _ms.replace(month=target_date.month + 1)
+                _pn = f"request_details_active_{target_date.strftime('%Y_%m')}"
+
+                # 分区已存在则跳过
+                if conn.execute(f"""
+                    SELECT 1 FROM pg_class
+                    WHERE relname = '{_pn}' AND relnamespace = 'public'::regnamespace
+                """).fetchone():
+                    return
+
+                try:
+                    conn.execute(f"""
+                        CREATE TABLE public.{_pn}
+                            PARTITION OF public.request_details_active
+                            FOR VALUES FROM ('{_ms.isoformat()}') TO ('{_me.isoformat()}')
+                    """)
+                    print(f"  创建分区: {_pn}")
+                except Exception as _e:
+                    _err = str(_e)
+                    if "default partition" not in _err or "would be violated" not in _err:
+                        raise
+
+                    # 升级场景：默认分区包含冲突数据，迁移到新分区
+                    print(f"  检测到默认分区数据冲突，迁移 {_pn} 数据...")
+                    conn.execute("""
+                        ALTER TABLE public.request_details_active
+                        DETACH PARTITION public.request_details_active_default
+                    """)
+                    conn.execute(f"""
+                        CREATE TABLE public.{_pn}
+                            PARTITION OF public.request_details_active
+                            FOR VALUES FROM ('{_ms.isoformat()}') TO ('{_me.isoformat()}')
+                    """)
+                    conn.execute(f"""
+                        INSERT INTO public.{_pn}
+                            SELECT * FROM public.request_details_active_default
+                            WHERE created_at >= '{_ms.isoformat()}'
+                              AND created_at < '{_me.isoformat()}'
+                    """)
+                    conn.execute(f"""
+                        DELETE FROM public.request_details_active_default
+                        WHERE created_at >= '{_ms.isoformat()}'
+                          AND created_at < '{_me.isoformat()}'
+                    """)
+                    conn.execute("""
+                        ALTER TABLE public.request_details_active
+                        ATTACH PARTITION public.request_details_active_default DEFAULT
+                    """)
+                    print(f"  数据迁移完成: {_pn}")
+
+            # 创建当月 + 下月分区（下月分区预防跨月运行时数据落入默认分区）
+            _now = _dt.datetime.now()
+            _create_month_partition(conn, _now)
+            if _now.month == 12:
+                _next = _now.replace(year=_now.year + 1, month=1)
+            else:
+                _next = _now.replace(month=_now.month + 1)
+            _create_month_partition(conn, _next)
+
+            # 默认分区（兜底）
             print("  创建默认分区...")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS public.request_details_active_default

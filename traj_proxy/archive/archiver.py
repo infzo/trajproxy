@@ -108,10 +108,57 @@ async def archive_details(
     return result
 
 
-async def ensure_current_partition(conn):
-    """确保当前月份的分区存在
+async def _create_partition(conn, name, start, end):
+    """创建月分区，处理默认分区数据冲突
 
-    每次归档时顺便检查并创建下月分区，避免月底边界问题。
+    当默认分区中存在属于新分区范围的数据时，先迁移再创建。
+    使用 SELECT * 迁移，无需维护列名列表。
+    """
+    try:
+        await conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS public.{name}
+                PARTITION OF public.request_details_active
+                FOR VALUES FROM ('{start.isoformat()}') TO ('{end.isoformat()}')
+        """)
+        logger.info(f"已创建分区: {name}")
+    except Exception as e:
+        if "default partition" not in str(e) or "would be violated" not in str(e):
+            raise
+
+        # 默认分区包含冲突数据：DETACH → 创建 → 迁移 → ATTACH
+        logger.info(f"默认分区存在冲突数据，迁移到 {name}...")
+        await conn.execute("""
+            ALTER TABLE public.request_details_active
+            DETACH PARTITION public.request_details_active_default
+        """)
+        await conn.execute(f"""
+            CREATE TABLE public.{name}
+                PARTITION OF public.request_details_active
+                FOR VALUES FROM ('{start.isoformat()}') TO ('{end.isoformat()}')
+        """)
+        await conn.execute(f"""
+            INSERT INTO public.{name}
+                SELECT * FROM public.request_details_active_default
+                WHERE created_at >= '{start.isoformat()}'
+                  AND created_at < '{end.isoformat()}'
+        """)
+        await conn.execute(f"""
+            DELETE FROM public.request_details_active_default
+            WHERE created_at >= '{start.isoformat()}'
+              AND created_at < '{end.isoformat()}'
+        """)
+        await conn.execute("""
+            ALTER TABLE public.request_details_active
+            ATTACH PARTITION public.request_details_active_default DEFAULT
+        """)
+        logger.info(f"数据迁移完成: {name}")
+
+
+async def ensure_current_partition(conn):
+    """确保当前月份和下月分区存在
+
+    每次调用时检查并创建当月+下月分区，避免月底边界问题。
+    处理默认分区数据冲突（升级部署场景）。
 
     Args:
         conn: 数据库连接
@@ -119,9 +166,6 @@ async def ensure_current_partition(conn):
     now = datetime.now()
     next_month = now.month + 1 if now.month < 12 else 1
     next_year = now.year if now.month < 12 else now.year + 1
-
-    partition_name = f"request_details_active_{now.strftime('%Y_%m')}"
-    next_partition_name = f"request_details_active_{next_year:04d}_{next_month:02d}"
 
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     next_month_start = datetime(next_year, next_month, 1)
@@ -131,39 +175,26 @@ async def ensure_current_partition(conn):
         1,
     )
 
+    partition_name = f"request_details_active_{now.strftime('%Y_%m')}"
+    next_partition_name = f"request_details_active_{next_year:04d}_{next_month:02d}"
+
     # 检查并创建当前月分区
     async with conn.cursor() as cur:
         await cur.execute(
-            """
-            SELECT 1 FROM pg_class
-            WHERE relname = %s AND relnamespace = 'public'::regnamespace
-            """,
+            "SELECT 1 FROM pg_class WHERE relname = %s AND relnamespace = 'public'::regnamespace",
             (partition_name,),
         )
         if not await cur.fetchone():
-            await conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS public.{partition_name}
-                    PARTITION OF public.request_details_active
-                    FOR VALUES FROM ('{month_start.isoformat()}') TO ('{next_month_start.isoformat()}')
-            """)
-            logger.info(f"已创建当月分区: {partition_name}")
+            await _create_partition(conn, partition_name, month_start, next_month_start)
 
     # 检查并创建下月分区（提前创建）
     async with conn.cursor() as cur:
         await cur.execute(
-            """
-            SELECT 1 FROM pg_class
-            WHERE relname = %s AND relnamespace = 'public'::regnamespace
-            """,
+            "SELECT 1 FROM pg_class WHERE relname = %s AND relnamespace = 'public'::regnamespace",
             (next_partition_name,),
         )
         if not await cur.fetchone():
-            await conn.execute(f"""
-                CREATE TABLE IF NOT EXISTS public.{next_partition_name}
-                    PARTITION OF public.request_details_active
-                    FOR VALUES FROM ('{next_month_start.isoformat()}') TO ('{next_next_month_start.isoformat()}')
-            """)
-            logger.info(f"已创建下月分区: {next_partition_name}")
+            await _create_partition(conn, next_partition_name, next_month_start, next_next_month_start)
 
     # 确保默认分区存在（兜底）
     async with conn.cursor() as cur:
