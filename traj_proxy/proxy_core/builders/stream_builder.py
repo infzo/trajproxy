@@ -75,14 +75,15 @@ class StreamChunkBuilder(BaseResponseBuilder):
             "finish_reason": context.stream_finish_reason or "stop"
         }
 
-        # 添加 logprobs
-        if context.stream_logprobs:
+        # 仅在请求参数中要求时才返回 logprobs 给客户端
+        if context.stream_logprobs and context.request_params.get('logprobs'):
             choice["logprobs"] = context.stream_logprobs
 
-        # 添加 vLLM 扩展字段
+        # 添加 vLLM 扩展字段（stop_reason 总是返回）
         if context.stream_stop_reason is not None:
             choice["stop_reason"] = context.stream_stop_reason
-        if context.stream_token_ids:
+        # 仅在请求参数中要求时才返回 token_ids 给客户端
+        if context.stream_token_ids and context.request_params.get('return_token_ids'):
             choice["token_ids"] = context.stream_token_ids
 
         return {

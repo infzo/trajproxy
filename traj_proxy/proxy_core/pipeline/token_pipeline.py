@@ -675,6 +675,7 @@ class TokenPipeline(BasePipeline):
                 "index": 0,
                 "finish_reason": "stop",
             }
+            # token_response 用于数据库存储，总是包含 token_ids 和 logprobs
             if context.response_ids is not None:
                 choice["token_ids"] = context.response_ids
             if context.stream_logprobs:

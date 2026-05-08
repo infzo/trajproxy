@@ -113,16 +113,28 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         if tool_calls:
             message["tool_calls"] = tool_calls
 
+        choice = {
+            "index": 0,
+            "message": message,
+            "finish_reason": finish_reason
+        }
+
+        # 仅在请求参数中要求时才返回 logprobs 给客户端
+        if context.request_params.get('logprobs') and context.token_response:
+            choices = context.token_response.get("choices", [])
+            if choices and "logprobs" in choices[0]:
+                choice["logprobs"] = choices[0]["logprobs"]
+
+        # 仅在请求参数中要求时才返回 token_ids 给客户端
+        if context.request_params.get('return_token_ids') and context.response_ids:
+            choice["token_ids"] = context.response_ids
+
         return {
             "id": f"chatcmpl-{context.request_id}",
             "object": "chat.completion",
             "created": int(context.start_time.timestamp()) if context.start_time else 0,
             "model": self.model,
-            "choices": [{
-                "index": 0,
-                "message": message,
-                "finish_reason": finish_reason
-            }],
+            "choices": [choice],
             "usage": {
                 "prompt_tokens": context.prompt_tokens or 0,
                 "completion_tokens": context.completion_tokens or 0,

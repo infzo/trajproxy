@@ -243,7 +243,7 @@ class DirectPipeline(BasePipeline):
         # 3. 累积 reasoning（vLLM 扩展）
         if "reasoning" in delta and delta["reasoning"]:
             context.stream_reasoning += delta["reasoning"]
-        if "reasoning_content" in delta and delta["reasoning_content"]:
+        elif "reasoning_content" in delta and delta["reasoning_content"]:
             context.stream_reasoning += delta["reasoning_content"]
 
         # 4. 累积 tool_calls
@@ -321,14 +321,15 @@ class DirectPipeline(BasePipeline):
             "finish_reason": context.stream_finish_reason or "stop"
         }
 
-        # 添加 logprobs
-        if context.stream_logprobs:
+        # 仅在请求参数中要求时才返回 logprobs 给客户端
+        if context.stream_logprobs and context.request_params.get('logprobs'):
             choice["logprobs"] = context.stream_logprobs
 
-        # 添加 vLLM 扩展字段
+        # 添加 vLLM 扩展字段（stop_reason 总是返回）
         if context.stream_stop_reason is not None:
             choice["stop_reason"] = context.stream_stop_reason
-        if context.stream_token_ids:
+        # 仅在请求参数中要求时才返回 token_ids 给客户端
+        if context.stream_token_ids and context.request_params.get('return_token_ids'):
             choice["token_ids"] = context.stream_token_ids
 
         # 构建最终响应
@@ -344,6 +345,38 @@ class DirectPipeline(BasePipeline):
                 "total_tokens": context.total_tokens
             }
         }
+
+        # 构建 token_response 用于数据库存储（总是包含 logprobs 和 token_ids）
+        context.token_response = {
+            "id": f"cmpl-{context.unique_id}",
+            "object": "text_completion",
+            "created": int(context.start_time.timestamp()),
+            "model": self.model,
+            "usage": {
+                "prompt_tokens": context.prompt_tokens,
+                "completion_tokens": context.completion_tokens,
+                "total_tokens": context.total_tokens
+            },
+            "choices": [{
+                "text": context.response_text or "",
+                "index": 0,
+                "finish_reason": context.stream_finish_reason or "stop"
+            }]
+        }
+
+        # 添加 logprobs 和 token_ids 到 token_response（用于轨迹存储，无论请求参数是否要求）
+        token_choice = context.token_response["choices"][0]
+        if context.stream_logprobs:
+            token_choice["logprobs"] = context.stream_logprobs
+        if context.stream_token_ids:
+            token_choice["token_ids"] = context.stream_token_ids
+        # 添加 prompt_token_ids（如果有的话）
+        if hasattr(context, 'prompt_token_ids') and context.prompt_token_ids:
+            token_choice["prompt_token_ids"] = context.prompt_token_ids
+
+        # 添加扩展字段
+        if context.stream_stop_reason is not None:
+            token_choice["stop_reason"] = context.stream_stop_reason
 
         ttft_str = f"{context.ttft_ms:.2f}" if context.ttft_ms else "N/A"
         inference_str = f"{context.inference_duration_ms:.2f}" if context.inference_duration_ms else "N/A"

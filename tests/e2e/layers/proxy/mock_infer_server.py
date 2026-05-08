@@ -129,16 +129,38 @@ class MockInferHandler(BaseHTTPRequestHandler):
     def _handle_chat_completion(self, body: dict):
         """处理非流式chat completion请求"""
         model = body.get('model', 'mock-model')
+
+        # 构建choice
+        choice = {
+            "index": 0,
+            "message": {"role": "assistant", "content": "Hello!"},
+            "finish_reason": "stop"
+        }
+
+        # 如果请求了logprobs，添加模拟数据
+        if body.get('logprobs'):
+            choice["logprobs"] = {
+                "content": [{
+                    "token": "Hello",
+                    "logprob": -0.1,
+                    "bytes": [72, 101, 108, 108, 111]
+                }, {
+                    "token": "!",
+                    "logprob": -0.2,
+                    "bytes": [33]
+                }]
+            }
+
+        # 如果请求了token_ids，添加模拟数据
+        if body.get('return_token_ids'):
+            choice["token_ids"] = [9901, 0]  # Hello! 的模拟token ids
+
         self._send_json_response({
             "id": "chatcmpl-mock",
             "object": "chat.completion",
             "created": int(time.time()),
             "model": model,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hello!"},
-                "finish_reason": "stop"
-            }],
+            "choices": [choice],
             "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
         })
 
@@ -146,6 +168,28 @@ class MockInferHandler(BaseHTTPRequestHandler):
         """处理流式chat completion请求"""
         model = body.get('model', 'mock-model')
         created = int(time.time())
+
+        # 构建最后一个chunk，包含finish_reason和可能的logprobs/token_ids
+        final_choice = {"index": 0, "delta": {}, "finish_reason": "stop"}
+
+        # 如果请求了logprobs，在最后一个chunk添加
+        if body.get('logprobs'):
+            final_choice["logprobs"] = {
+                "content": [{
+                    "token": "Hello",
+                    "logprob": -0.1,
+                    "bytes": [72, 101, 108, 108, 111]
+                }, {
+                    "token": "!",
+                    "logprob": -0.2,
+                    "bytes": [33]
+                }]
+            }
+
+        # 如果请求了token_ids，在最后一个chunk添加
+        if body.get('return_token_ids'):
+            final_choice["token_ids"] = [9901, 0]  # Hello! 的模拟token ids
+
         chunks = [
             {
                 "id": "chatcmpl-mock",
@@ -166,7 +210,7 @@ class MockInferHandler(BaseHTTPRequestHandler):
                 "object": "chat.completion.chunk",
                 "created": created,
                 "model": model,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "choices": [final_choice],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
             }
         ]
@@ -175,17 +219,32 @@ class MockInferHandler(BaseHTTPRequestHandler):
     def _handle_completion(self, body: dict):
         """处理非流式completion请求（TITO模式）"""
         model = body.get('model', 'mock-model')
-        # 返回简单文本，让TITO流程走text分支
+
+        # 构建choice
+        choice = {
+            "index": 0,
+            "text": "Hello!",
+            "finish_reason": "stop"
+        }
+
+        # 如果请求了logprobs，添加模拟数据
+        if body.get('logprobs'):
+            choice["logprobs"] = {
+                "tokens": ["Hello", "!"],
+                "token_logprobs": [-0.1, -0.2],
+                "text_offset": [0, 5]
+            }
+
+        # 如果请求了token_ids，添加模拟数据
+        if body.get('return_token_ids'):
+            choice["token_ids"] = [9901, 0]
+
         self._send_json_response({
             "id": "cmpl-mock",
             "object": "text_completion",
             "created": int(time.time()),
             "model": model,
-            "choices": [{
-                "index": 0,
-                "text": "Hello!",
-                "finish_reason": "stop"
-            }],
+            "choices": [choice],
             "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
         })
 
@@ -193,6 +252,22 @@ class MockInferHandler(BaseHTTPRequestHandler):
         """处理流式completion请求（TITO模式）"""
         model = body.get('model', 'mock-model')
         created = int(time.time())
+
+        # 构建最后一个chunk
+        final_choice = {"index": 0, "text": "", "finish_reason": "stop"}
+
+        # 如果请求了logprobs，在最后一个chunk添加
+        if body.get('logprobs'):
+            final_choice["logprobs"] = {
+                "tokens": ["Hello", "!"],
+                "token_logprobs": [-0.1, -0.2],
+                "text_offset": [0, 5]
+            }
+
+        # 如果请求了token_ids，在最后一个chunk添加
+        if body.get('return_token_ids'):
+            final_choice["token_ids"] = [9901, 0]
+
         chunks = [
             {
                 "id": "cmpl-mock",
@@ -213,7 +288,7 @@ class MockInferHandler(BaseHTTPRequestHandler):
                 "object": "text_completion",
                 "created": created,
                 "model": model,
-                "choices": [{"index": 0, "text": "", "finish_reason": "stop"}],
+                "choices": [final_choice],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
             }
         ]
