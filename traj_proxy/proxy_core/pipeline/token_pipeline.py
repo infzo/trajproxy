@@ -408,15 +408,6 @@ class TokenPipeline(BasePipeline):
         chunk_content, chunk_token_ids, tool_calls_delta = \
             InferResponseParser.parse_stream_chunk(infer_chunk, is_token_mode=True)
 
-        # 调试：打印 chunk 结构
-        if "choices" in infer_chunk and infer_chunk["choices"]:
-            choice = infer_chunk["choices"][0]
-            logger.debug(
-                f"[{context.unique_id}] stream_chunk keys: {list(infer_chunk.keys())}, "
-                f"choice keys: {list(choice.keys())}, "
-                f"token_ids: {chunk_token_ids}"
-            )
-
         # Token-in-Token-out 模式：增量解码 token IDs
         if chunk_token_ids:
             chunk_content = self.token_converter.decode_streaming(
