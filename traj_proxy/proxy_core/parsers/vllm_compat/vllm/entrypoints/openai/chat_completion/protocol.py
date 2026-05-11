@@ -37,6 +37,10 @@ class ChatCompletionNamedToolChoiceParam:
     type: Literal["function"] = "function"
 
 
+# 别名：兼容 vllm 内部引用（vllm 中有时用 NamedToolsChoiceParam）
+ChatCompletionNamedToolsChoiceParam = ChatCompletionNamedToolChoiceParam
+
+
 # 工具选择类型
 ToolChoice = Union[
     Literal["none"],
@@ -58,6 +62,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     # 以下字段用于 parser 逻辑
     response_format: Optional[Dict[str, Any]] = None
     structured_outputs: Optional[Any] = None
+    skip_special_tokens: Optional[bool] = True
 
     # 流式选项
     stream: Optional[bool] = False

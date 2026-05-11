@@ -10,12 +10,8 @@ vLLM 协议类适配器
 """
 from dataclasses import dataclass, field
 from typing import Any, Optional, List
-import uuid
 
-
-def make_tool_call_id() -> str:
-    """生成工具调用 ID"""
-    return f"call_{uuid.uuid4().hex[:24]}"
+from vllm.entrypoints.chat_utils import make_tool_call_id
 
 
 @dataclass
@@ -39,6 +35,13 @@ class DeltaFunctionCall:
     name: Optional[str] = None
     arguments: Optional[str] = None
 
+    def model_dump(self, exclude_none: bool = False) -> dict:
+        """兼容 Pydantic BaseModel.model_dump 接口"""
+        result = {"name": self.name, "arguments": self.arguments}
+        if exclude_none:
+            result = {k: v for k, v in result.items() if v is not None}
+        return result
+
 
 @dataclass
 class DeltaToolCall:
@@ -47,6 +50,18 @@ class DeltaToolCall:
     type: Optional[str] = None
     index: int = 0
     function: Optional[DeltaFunctionCall] = None
+
+    def model_dump(self, exclude_none: bool = False) -> dict:
+        """兼容 Pydantic BaseModel.model_dump 接口"""
+        result = {
+            "id": self.id,
+            "type": self.type,
+            "index": self.index,
+            "function": self.function.model_dump(exclude_none=exclude_none) if self.function else None,
+        }
+        if exclude_none:
+            result = {k: v for k, v in result.items() if v is not None}
+        return result
 
 
 @dataclass
