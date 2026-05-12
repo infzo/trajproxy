@@ -1,0 +1,280 @@
+import json
+import random
+from typing import List, Dict, Any
+from datetime import datetime
+from email.utils import parsedate_to_datetime
+import asyncio
+import aiohttp
+
+from aura.controllers.utils.http_status import HTTP_OK_200
+from aura.base.log.loggers import Loggers
+from aura.runner.agent_engine_wrapper.proxy_client.traj_proxy_client import TrajProxyClient
+
+logger = Loggers(__name__).get_logger()
+
+
+class SWETrajProxyClient(TrajProxyClient):
+    """
+    华东：7.150.8.143 7.150.14.86 7.150.13.68
+    贵阳：7.242.104.24 7.242.109.252
+    乌兰：7.216.52.206 7.216.52.56
+    """
+    def __init__(self, model_name: str, infer_url: str | list):
+        super().__init__(model_name, infer_url)
+
+    async def get_agent_trajectory(self, session_id: str) -> dict[str, Any] | None:
+        """
+        通过HTTP请求获取轨迹记录
+
+        Args:
+            session_id: 会话ID，对应HTTP接口的session_id
+
+        Returns:
+            dict: 包含session_id和step_info列表的字典，失败时返回None
+        """
+
+        if isinstance(self.infer_url, list):
+            base_url = random.choice(self.infer_url)
+        else:
+            base_url = self.infer_url
+        url = f"{base_url}/trajectories/{session_id}"
+        logger.info(f"Getting trajectory, url: {url}, session_id: {session_id}")
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.get(url) as response:
+                        if response.status == HTTP_OK_200:
+                            data = await response.json()
+                            records = data.get("records", [])
+                            count = data.get("count", len(records))
+                            logger.info(f"Get trajectory success, session_id: {session_id}, count: {count}")
+
+                            step_infos = self._convert_step_info(records, session_id=session_id)
+
+                            return {
+                                "session_id": session_id,
+                                "step_info": step_infos
+                            }
+                        else:
+                            if attempt < max_retries - 1:
+                                wait_time = attempt + 1
+                                logger.warning(f"Failed to get trajectory, session_id: {session_id}, HTTP {response.status}. "
+                                             f"Retry {attempt + 1}/{max_retries} after {wait_time}s")
+                                await asyncio.sleep(wait_time)
+                            else:
+                                logger.error(f"Failed to get trajectory after {max_retries} retries, session_id: {session_id}, HTTP {response.status}")
+                                return None
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        wait_time = attempt + 1
+                        logger.warning(f"Error getting trajectory, url: {url}, session_id: {session_id}, error: {e}. "
+                                     f"Retry {attempt + 1}/{max_retries} after {wait_time}s")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"Error getting trajectory after {max_retries} retries, url: {url}, session_id: {session_id}, error: {e}", exc_info=True)
+                        return None
+
+        return None
+
+    def _parse_datetime(self, time_str: str) -> datetime | None:
+        """
+        解析时间字符串为datetime对象，支持多种格式
+
+        Args:
+            time_str: 时间字符串，支持ISO格式和RFC 2822格式
+
+        Returns:
+            datetime | None: 解析后的datetime对象，失败返回None
+        """
+        if not time_str:
+            return None
+
+        # 尝试解析RFC 2822格式的时间字符串 (如: "Thu, 26 Mar 2026 17:13:08 GMT")
+        try:
+            return parsedate_to_datetime(time_str)
+        except (ValueError, TypeError, AttributeError):
+            pass
+
+        # 尝试解析ISO格式的时间字符串 (如: "2026-03-26T17:13:08")
+        try:
+            return datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            return None
+
+    def _calculate_time_diff_seconds(self, start_time_str: str, end_time_str: str) -> float | None:
+        """
+        计算两个时间字符串之间的差值（秒数），使用微秒级精度
+
+        Args:
+            start_time_str: 开始时间字符串
+            end_time_str: 结束时间字符串
+
+        Returns:
+            float | None: 时间差（秒数），如果计算失败返回0
+        """
+        if not start_time_str or not end_time_str:
+            return 0
+
+        try:
+            start_time = self._parse_datetime(start_time_str)
+            end_time = self._parse_datetime(end_time_str)
+
+            if start_time is None or end_time is None:
+                return 0
+
+            # 使用微秒级精度相减，然后使用浮点除法转换为秒数
+            time_diff = end_time - start_time
+            return time_diff.microseconds / 1_000_000.0 + time_diff.days * 86400.0 + time_diff.seconds
+        except Exception:
+            return 0
+
+    def _get_system_prompt(self, messages: List[Dict[str, Any]]) -> str | None:
+        for message in messages:
+            if message.get("role") == "system":
+                return message.get("content")
+        return None
+
+    def _get_user_prompt(self, messages: List[Dict[str, Any]]) -> str | None:
+        for message in messages:
+            if message.get("role") == "user":
+                return message.get("content")
+        return None
+
+    def _get_model_response(self, messages: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+        """
+        获取LLM的输出
+        Args:
+            messages:
+
+        Returns:
+
+        """
+        for message in reversed(messages):
+            role = message.get("role", None)
+            if role == "assistant":
+                return message
+        return None
+
+    def _get_env_response(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        获取工具的输出
+        Args:
+            messages:
+
+        Returns:
+
+        """
+        env_messages = []
+        for message in reversed(messages):
+            role = message.get("role", None)
+            # if role in ["assistant", "system"]:
+            #     break
+            if role == "tool" or role == "user":
+                env_messages.insert(0, message)
+                break
+        return env_messages
+
+    def _convert_step_info(self, records: List[Dict[str, Any]], session_id: str) -> List[Dict[str, Any]]:
+        """
+        转换轨迹记录为步骤信息
+
+        Args:
+            records: 从TrajProxy返回的记录列表
+
+        Returns:
+            List[Dict[str, Any]]: 转换后的步骤信息列表,包含step_id、env_time、llm_time等字段
+        """
+        if not records:
+            return []
+
+        filtered_safe_records = [record for record in records if record['response_text'] != "\n\nSAFE"]
+        logger.info(f"filtered safe records count: {len(filtered_safe_records)}, remove rows: {len(records) - len(filtered_safe_records)}")
+        filtered_records = [record for record in filtered_safe_records if 'raw_response' in record and record['raw_response'] is not None]
+        logger.info(f"filtered no raw_response records count: {len(filtered_records)}, remove rows: {len(filtered_safe_records) - len(filtered_records)}")
+        # 按 start_time 字段升序排序
+        sorted_records = sorted(filtered_records, key=lambda x: x.get('start_time', 0))
+        # 去重
+        sorted_records = self._dedup_retried_requests(sorted_records)
+
+        # 为每行添加新属性
+        result = []
+        for i, record in enumerate(sorted_records):
+            # 创建新的记录副本,避免修改原始数据
+            step_info = record.copy()
+
+            # 添加 step_id,从0开始
+            step_info['step_id'] = i
+
+            # 添加 llm_time: 本行的 end_time - start_time
+            start_time = record.get('start_time')
+            end_time = record.get('end_time')
+            step_info['llm_time'] = self._calculate_time_diff_seconds(start_time, end_time)
+
+            # 添加 system_prompt 字段，值为 messages 中 role 为 system 的 content
+            system_prompt = self._get_system_prompt(record.get('messages'))
+            if system_prompt is not None:
+                step_info['system_prompt'] = system_prompt
+                truncated_prompt = system_prompt if len(system_prompt) <= 50 else system_prompt[:50] + "......"
+                logger.info(f"Get system_prompt: session_id={session_id}, step_id={i}: {truncated_prompt}")
+            user_prompt = self._get_user_prompt(record.get('messages'))
+            if user_prompt is not None:
+                step_info['user_prompt'] = user_prompt
+                truncated_prompt = user_prompt if len(user_prompt) <= 50 else user_prompt[:50] + "......"
+                logger.info(f"Get user_prompt: session_id={session_id}, step_id={i}: {truncated_prompt}")
+
+            # 添加 model_response 字段，先用本轮的raw_response填充
+            if 'raw_response' in step_info and step_info['raw_response'] is not None:
+                step_info['model_response'] = step_info['raw_response']['choices'][0]['message']
+            else:
+                logger.error(f"raw_response not found in step_info: session_id={session_id}, step_id={i}")
+                continue
+
+            if 'raw_request' in step_info and step_info['raw_request'] is not None:
+                tools = step_info['raw_request'].get('tools', [])
+                step_info['tools'] = tools
+                logger.info(f"Get tools: session_id={session_id}, step_id={i}, tools count={len(tools)}: {[tool['function']['name'] for tool in tools]}")
+            else:
+                logger.warn(f"raw_request not found in step_info: session_id={session_id}, step_id={i}")
+
+            if i > 0:
+                # 添加 env_time: 本行的 start_time - 上一行的 end_time
+                prev_end_time = sorted_records[i - 1].get('end_time')
+                curr_start_time = record.get('start_time')
+                result[i - 1]['env_time'] = self._calculate_time_diff_seconds(prev_end_time, curr_start_time)
+
+                # 添加 env_response
+                env_responses = self._get_env_response(record.get('messages'))
+                if env_responses is not None:
+                    logger.info(f"tool call counts: session_id={session_id}, call numbers={len(env_responses)}")
+                    logger.info(f"tool call result: {env_responses}")
+                    result[i - 1]['env_response'] = env_responses
+
+            result.append(step_info)
+
+        return result
+
+    def _dedup_retried_requests(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # 按时间降序排列，确保我们最先处理后发送的请求
+        sorted_records = sorted(records, key=lambda x: x.get('start_time', 0), reverse=True)
+        deduped_records = []
+        seen_messages = set()
+
+        logger.info("start dedup records with same request messages")
+        for record in sorted_records:
+            messages = record.get("messages", "")
+            # 将消息转换为可哈希的字符串作为唯一标识
+            msg_key = json.dumps(messages)
+
+            if msg_key not in seen_messages:
+                # 如果是新消息，添加到结果集，并标记为已存在
+                deduped_records.append(record.copy())
+                seen_messages.add(msg_key)
+            else:
+                logger.warning(f"remove duplicated record, msg_key: {msg_key}")
+
+        # 按时间升序排列
+        deduped_records = sorted(deduped_records, key=lambda x: x.get('start_time', 0))
+        return deduped_records
+
