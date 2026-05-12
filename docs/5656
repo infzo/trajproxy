@@ -1,0 +1,136 @@
+worker_rlimit_nofile 65535;
+worker_processes 8;
+
+error_log /var/log/nginx/error.log warn;
+
+events {
+    worker_connections 10240;
+    use epoll;
+    multi_accept on;
+}
+
+http {
+    charset utf-8;
+    client_max_body_size 128M;
+    client_body_buffer_size 10m;
+
+    # 长超时
+    proxy_connect_timeout 60s;
+
+    # 大响应头/缓冲
+    proxy_buffer_size 128k;
+    proxy_buffers 4 256k;
+    proxy_busy_buffers_size 256k;
+
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for" '
+                    'request_id=$request_id upstream_time=$upstream_response_time';
+
+    access_log off;
+
+    upstream litellm_backend {
+        server litellm:4000;
+        keepalive 80;
+    }
+
+
+    server {
+        listen 80;
+
+        # 1. bridge service
+        location /bridge/ {
+            proxy_pass http://bridge-manager:5000/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+	location /trajectory {
+            proxy_pass http://traj-proxy:12300/trajectory;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            proxy_buffering off;
+            proxy_read_timeout 300s;
+            proxy_connect_timeout 120s;
+
+        }
+	location ~ ^/trajectories(/.*)?$ {
+    	    proxy_pass http://traj-proxy:12300;
+
+    	    proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            proxy_buffering off;
+    	    proxy_read_timeout 300s;
+    	    proxy_connect_timeout 120s;
+
+	}
+
+        location ^~ /gateway/ {
+            proxy_pass http://litellm_backend/;
+	    proxy_http_version 1.1;
+            proxy_set_header Connection '';
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            
+            proxy_redirect / /gateway/;
+            proxy_read_timeout 1200s;
+            proxy_send_timeout 1200s;
+        }
+
+        # ui static asset
+	location ~ ^/(litellm-asset-prefix|static|assets|api|ui|v1|v2|user|public|credentials|router|organization|login|key|model|models|model_group|team|tag|customer|budget|get|config|config_overrides|health|metrics|alerting|email|callbacks|cloudzero|schedule|spend|_next)/ {
+            proxy_pass http://litellm_backend;
+            proxy_set_header Host $host;
+	        proxy_set_header X-Real-IP $remote_addr;
+    	    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+    	    proxy_set_header Authorization $http_authorization;
+    	    proxy_pass_header Authorization;
+	        proxy_set_header X-Forwarded-Proto $scheme;
+
+    	    proxy_http_version 1.1;
+            proxy_set_header Connection '';
+	    proxy_buffering off;
+            proxy_read_timeout 1200s;
+            proxy_send_timeout 1200s;
+        }
+    location ~ ^/s/(?<session_id>[^/]+)/(?<remaining>.*)$ {
+            access_log /dev/stdout main;
+            proxy_set_header x-litellm-customer-id $session_id;
+            proxy_set_header x-sandbox-traj-id $session_id;
+            proxy_set_header x-session-id $session_id;
+	    proxy_pass http://litellm_backend/$remaining$is_args$args;
+            proxy_read_timeout 1200s;
+            proxy_send_timeout 1200s;
+
+             # 流式响应支持
+            proxy_http_version 1.1;
+            proxy_set_header Connection '';
+            chunked_transfer_encoding on;
+            proxy_buffering off;
+        }
+	location / {
+            proxy_pass http://frps:7000;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;  
+            proxy_set_header X-Real-IP $remote_addr;
+
+            proxy_read_timeout 1200s;
+            proxy_send_timeout 1200s;
+	    proxy_connect_timeout 30s;
+
+	    proxy_buffering off;
+        }
+    }
+}
