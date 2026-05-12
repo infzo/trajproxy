@@ -177,6 +177,8 @@ class ProcessorManager:
     def _build_processor(self, config: ModelConfig) -> Processor:
         """从 ModelConfig 创建 Processor（不存储）
 
+        tokenizer 路径已在注册时解析为标准路径，此处直接使用。
+
         Args:
             config: 模型配置
 
@@ -365,12 +367,17 @@ class ProcessorManager:
         if token_in_token_out and not tokenizer_path:
             raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
 
+        # 解析 tokenizer 路径（注册时即标准化，fail-fast）
+        resolved_tokenizer_path = None
+        if token_in_token_out and tokenizer_path:
+            resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
+
         # 构建并存储配置
         config = ModelConfig(
             model_name=model_name,
             url=url,
             api_key=api_key,
-            tokenizer_path=tokenizer_path,
+            tokenizer_path=resolved_tokenizer_path,
             token_in_token_out=token_in_token_out,
             run_id=run_id,
             tool_parser=tool_parser,
@@ -424,12 +431,17 @@ class ProcessorManager:
         if token_in_token_out and not tokenizer_path:
             raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
 
+        # 解析 tokenizer 路径（注册时即标准化，fail-fast，持久化到 DB）
+        resolved_tokenizer_path = None
+        if token_in_token_out and tokenizer_path:
+            resolved_tokenizer_path = self._resolve_tokenizer_path(tokenizer_path)
+
         # 构建配置
         config = ModelConfig(
             model_name=model_name,
             url=url,
             api_key=api_key,
-            tokenizer_path=tokenizer_path,
+            tokenizer_path=resolved_tokenizer_path,
             token_in_token_out=token_in_token_out,
             run_id=run_id,
             tool_parser=tool_parser,
@@ -448,7 +460,7 @@ class ProcessorManager:
                     model_name=model_name,
                     url=url,
                     api_key=api_key,
-                    tokenizer_path=tokenizer_path,
+                    tokenizer_path=resolved_tokenizer_path or "",
                     token_in_token_out=token_in_token_out,
                     run_id=run_id,
                     tool_parser=tool_parser,
