@@ -99,6 +99,10 @@ class DatabaseManager:
                 if usage_pct > self._peak_usage_pct:
                     self._peak_usage_pct = usage_pct
 
+                requests_queued = stats.get('requests_queued', 0)
+                requests_errors = stats.get('requests_errors', 0)
+                requests_waiting = stats.get('requests_waiting', 0)
+
                 if usage_pct >= 80:
                     logger.warning(
                         f"连接池使用率过高: "
@@ -107,8 +111,8 @@ class DatabaseManager:
                         f"usage={usage_pct:.1f}%, "
                         f"peak_used={self._peak_used}, "
                         f"peak_usage={self._peak_usage_pct:.1f}%, "
-                        f"requests_queued={stats.get('requests_queued', 0)}, "
-                        f"requests_errors={stats.get('requests_errors', 0)}"
+                        f"queued={requests_queued}, waiting={requests_waiting}, "
+                        f"errors={requests_errors}"
                     )
                 else:
                     logger.info(
@@ -117,7 +121,9 @@ class DatabaseManager:
                         f"available={pool_available}, "
                         f"usage={usage_pct:.1f}%, "
                         f"peak_used={self._peak_used}, "
-                        f"peak_usage={self._peak_usage_pct:.1f}%"
+                        f"peak_usage={self._peak_usage_pct:.1f}%, "
+                        f"queued={requests_queued}, waiting={requests_waiting}, "
+                        f"errors={requests_errors}"
                     )
             except asyncio.CancelledError:
                 break

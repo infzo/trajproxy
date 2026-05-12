@@ -74,7 +74,7 @@ def _extract_run_id(model: str, x_run_id: Optional[str], run_id: Optional[str]) 
         run_id 或 None
     """
     # 优先级1：路径参数（最高）
-    if run_id:
+    if run_id is not None and run_id.strip():
         return normalize_run_id(run_id.strip())
 
     # 优先级2：x-run-id header
@@ -85,7 +85,7 @@ def _extract_run_id(model: str, x_run_id: Optional[str], run_id: Optional[str]) 
     if ',' in model:
         return normalize_run_id(model.split(',', 1)[1].strip())
 
-    return None
+    return normalize_run_id(None)
 
 
 def _extract_actual_model(model: str) -> str:
