@@ -304,7 +304,8 @@ class ProxyWorker:
         self.app.state.request_semaphore = self._request_semaphore
         self.app.state.max_concurrent_requests = get_max_concurrent_requests()
 
-        logger.info(f"ProxyWorker 初始化完成，预置模型: {len(self.processor_manager.config_processors)}, 动态模型: {len(self.processor_manager.dynamic_processors)}")
+        logger.info(f"ProxyWorker 初始化完成，预置模型: {self.processor_manager.config_processor_count}, "
+                    f"动态模型: {self.processor_manager.dynamic_processor_count}")
 
     async def shutdown(self):
         """关闭资源"""

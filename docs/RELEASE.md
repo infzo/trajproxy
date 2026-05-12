@@ -4,6 +4,29 @@
 
 ---
 
+## [0.2.0] - 2026-05-12
+
+### 优化改进
+- **Worker 并行启动**: 多个 ProxyWorker 从串行 `await` 改为 `asyncio.gather` 并行初始化，启动耗时从 N 倍降至与单 Worker 相当
+- **Processor 懒加载**: Processor 从 Worker 启动时全量预加载改为首次请求时按需加载，消除启动阶段的 tokenizer 加载和 pipeline 构建耗时
+- **Processor LRU 缓存**: 引入 `OrderedDict` 实现 LRU 淘汰策略，每进程最多常驻 N 个 Processor（默认 32，可配置），低频模型自动淘汰后下次请求时重新加载
+- **并发加载保护**: `asyncio.Lock` + 双重检查防止同一未加载模型的并发请求重复创建 Processor
+
+### 配置更新
+- **processor_cache_max_size**: 新增 `processor_manager.processor_cache_max_size` 配置项，控制单进程 LRU 缓存上限（默认 32）
+
+### 影响范围
+- `traj_proxy/workers/manager.py` - Worker 并行启动
+- `traj_proxy/proxy_core/processor_manager.py` - LRU 缓存、懒加载、并发保护
+- `traj_proxy/serve/routes.py` - 适配 `get_processor_async` 和 `ModelConfig` 返回值
+- `traj_proxy/workers/worker.py` - 适配新属性
+- `traj_proxy/utils/config.py` - 新增 `get_processor_cache_max_size()`
+- `configs/config.yaml` - 新增配置项
+- `dockers/allinone/configs/config.yaml` - 同步配置
+- `dockers/compose/configs/config.yaml` - 同步配置
+
+---
+
 ## [0.1.9] - 2026-05-12
 
 ### Bug 修复

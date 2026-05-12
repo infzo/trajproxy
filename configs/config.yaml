@@ -52,6 +52,7 @@ processor_manager:
   sync_retry_delay: 5           # 同步重试初始延迟（秒），采用指数退避
   listen_reconnect_delay: 5     # LISTEN 连接重连初始延迟（秒）
   listen_max_reconnect_delay: 60  # LISTEN 连接重连最大延迟（秒）
+  processor_cache_max_size: 32    # LRU 缓存最大 Processor 数（per worker）
 
 # InferClient 配置
 infer_client:

@@ -191,6 +191,16 @@ def get_archive_config() -> Dict:
     })
 
 
+def get_processor_cache_max_size() -> int:
+    """
+    获取 LRU 缓存最大 Processor 数量
+
+    Returns:
+        最大 Processor 数，默认 32
+    """
+    return get_processor_manager_config().get("processor_cache_max_size", 32)
+
+
 def get_infer_client_config() -> Dict:
     """
     获取 InferClient 配置

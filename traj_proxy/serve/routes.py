@@ -223,8 +223,8 @@ async def chat_completions(
         # 获取 ProcessorManager 实例（从请求上下文）
         processor_manager = get_processor_manager(request)
 
-        # 根据 run_id 和 model_name 获取对应的 processor
-        processor = processor_manager.get_processor(final_run_id, actual_model)
+        # 根据 run_id 和 model_name 获取对应的 processor（懒加载）
+        processor = await processor_manager.get_processor_async(final_run_id, actual_model)
 
         if processor is None:
             # 本地未找到模型，尝试从数据库查询（回退机制）
@@ -327,7 +327,7 @@ async def register_model(request: Request, req: RegisterModelRequest):
         run_id = normalize_run_id(req.run_id.strip())
 
         # 注册模型（会同步持久化到数据库）
-        processor = await processor_manager.register_dynamic_processor(
+        config = await processor_manager.register_dynamic_processor(
             model_name=req.model_name,
             url=req.url,
             api_key=req.api_key,
@@ -346,12 +346,12 @@ async def register_model(request: Request, req: RegisterModelRequest):
             run_id=normalize_run_id(run_id),
             model_name=req.model_name,
             detail={
-                "run_id": processor.run_id,
-                "model": processor.model,
-                "tokenizer_path": processor.tokenizer_path,
-                "token_in_token_out": processor.token_in_token_out,
-                "tool_parser": processor.tool_parser_name,
-                "reasoning_parser": processor.reasoning_parser_name,
+                "run_id": config.run_id,
+                "model": config.model_name,
+                "tokenizer_path": config.tokenizer_path,
+                "token_in_token_out": config.token_in_token_out,
+                "tool_parser": config.tool_parser,
+                "reasoning_parser": config.reasoning_parser,
                 "sync_info": "模型已持久化到数据库，其他 Worker 已通过 LISTEN/NOTIFY 即时通知"
             }
         )

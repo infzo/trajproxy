@@ -173,12 +173,15 @@ class WorkerManager:
         base_port = proxy_config.get("base_port", 12300)
 
         logger.info(f"Starting {worker_count} ProxyWorkers from port {base_port}")
-        for i in range(worker_count):
+
+        async def _init_worker(i: int):
             port = base_port + i
             worker = RemoteWorker.remote(ProxyWorker, i, port, db_url)
             await worker.initialize.remote()
-            self.workers.append(worker)
             logger.info(f"ProxyWorker {i} started on port {port}")
+            return worker
+
+        self.workers = await asyncio.gather(*[_init_worker(i) for i in range(worker_count)])
 
         logger.info(f"All workers started: {len(self.workers)} ProxyWorkers")
 
