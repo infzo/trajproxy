@@ -164,6 +164,16 @@ def get_custom_parsers_dir() -> str:
     return os.path.abspath(custom_parsers_dir)
 
 
+def get_max_concurrent_requests() -> int:
+    """
+    获取单 worker 最大并发请求数
+
+    返回:
+        最大并发请求数，默认 128
+    """
+    return get_proxy_workers_config().get("max_concurrent_requests", 128)
+
+
 def get_archive_config() -> Dict:
     """
     获取归档配置

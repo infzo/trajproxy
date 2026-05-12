@@ -107,6 +107,40 @@ class RequestRepository:
         except Exception as e:
             raise DatabaseError(f"插入轨迹记录失败: {str(e)}\n{traceback.format_exc()}")
 
+    async def get_prefix_candidates(
+        self,
+        session_id: str,
+    ) -> List[Dict[str, Any]]:
+        """获取前缀匹配候选记录（仅查询匹配所需字段）
+
+        与 get_by_session 不同，此方法只查询 full_conversation_text
+        和 full_conversation_token_ids 两个字段，避免加载 messages、
+        raw_request 等大 JSONB 字段，大幅减少数据传输量。
+
+        查询全部历史记录，不做 LIMIT，保证前缀匹配的完整性。
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            候选记录列表，按 start_time 倒序
+        """
+        async with self.pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute("""
+                    SELECT
+                        d.full_conversation_text,
+                        d.full_conversation_token_ids
+                    FROM public.request_metadata m
+                    JOIN public.request_details_active d ON m.unique_id = d.unique_id
+                    WHERE m.session_id = %s
+                      AND m.archive_location IS NULL
+                      AND d.full_conversation_text IS NOT NULL
+                      AND d.full_conversation_text != ''
+                    ORDER BY m.start_time DESC
+                """, (session_id,))
+                return await cur.fetchall()
+
     async def get_by_session(
         self,
         session_id: str,

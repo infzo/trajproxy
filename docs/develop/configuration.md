@@ -29,7 +29,11 @@ proxy_workers:
   base_port: 12300            # 起始端口（12300, 12301）
   models:                     # 预置模型配置
     - model_name: qwen3.5-2b
-      url: http://host.docker.internal:8000
+      url: http://host.docker.internal:8000/v1
+      api_key: sk-1234
+    - model_name: qwen3.5-2b
+      run_id: app-001
+      url: http://host.docker.internal:8000/v1
       api_key: sk-1234
       tokenizer_path: Qwen/Qwen3.5-2B
       token_in_token_out: true
@@ -46,9 +50,9 @@ ray:
 database:
   url: "postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy"
   pool:
-    min_size: 20              # 最小连接数
-    max_size: 100             # 最大连接数
-    timeout: 30               # 连接超时时间（秒）
+    min_size: 10              # 最小连接数
+    max_size: 30              # 最大连接数
+    timeout: 60               # 连接超时时间（秒）
 
 # ProcessorManager 配置
 processor_manager:
@@ -63,6 +67,7 @@ infer_client:
   connect_timeout: 60       # 连接超时（秒）
   read_timeout: 600         # 读取超时（秒）
   max_connections: 1000     # 最大连接数
+  max_retries: 2            # 请求失败重试次数（针对 502/503/504 错误）
 
 # 归档配置
 archive:
@@ -255,6 +260,7 @@ InferClient 超时配置，控制 TrajProxy 到推理服务的 HTTP 请求超时
 | `connect_timeout` | int | 60 | 连接超时（秒） |
 | `read_timeout` | int | 600 | 读取超时（秒） |
 | `max_connections` | int | 1000 | 最大连接数 |
+| `max_retries` | int | 2 | 请求失败重试次数（针对 502/503/504 错误） |
 
 **端到端超时链路：**
 

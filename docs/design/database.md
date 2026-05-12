@@ -104,7 +104,7 @@ class ModelConfig:
     url: str
     api_key: str
     tokenizer_path: Optional[str] = None  # 可选，直接转发模式下不需要
-    run_id: str = ""                       # 运行ID，空字符串表示全局模型
+    run_id: Optional[str] = None           # 运行ID，None 表示全局模型
     model_name: str = ""
     token_in_token_out: bool = False
     tool_parser: str = ""                  # 工具解析器名称

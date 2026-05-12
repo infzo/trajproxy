@@ -68,7 +68,7 @@ class RemoteWorker:
             from threading import Thread
 
             def run_server():
-                uvicorn.run(self.worker.app, host="0.0.0.0", port=self.port, log_level="info")
+                uvicorn.run(self.worker.app, host="0.0.0.0", port=self.port, log_level="info", timeout_keep_alive=65)
 
             thread = Thread(target=run_server, daemon=True)
             thread.start()

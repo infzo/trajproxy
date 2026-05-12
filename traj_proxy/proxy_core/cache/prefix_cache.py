@@ -61,8 +61,8 @@ class PrefixMatchCache(BaseCacheStrategy):
             context.uncached_token_ids = token_ids
             return token_ids
 
-        # 查询该 session 的所有历史请求
-        history = await self.request_repository.get_by_session(context.session_id)
+        # 查询该 session 的所有历史请求（仅取前缀匹配所需字段）
+        history = await self.request_repository.get_prefix_candidates(context.session_id)
 
         # 找到最长前缀匹配（匹配完整对话文本）
         matched_trajectory = self._find_longest_prefix_match(text, history)
@@ -101,6 +101,9 @@ class PrefixMatchCache(BaseCacheStrategy):
     ) -> Optional[Dict[str, Any]]:
         """在历史记录中找到最长前缀匹配
 
+        按 token_ids 长度降序排列候选记录，第一条匹配即为最长前缀。
+        避免遍历全部记录。
+
         Args:
             text: 当前完整对话文本
             history: 历史请求记录列表
@@ -108,17 +111,18 @@ class PrefixMatchCache(BaseCacheStrategy):
         Returns:
             匹配最长的轨迹记录，如果没有匹配则返回 None
         """
-        longest_match = None
-        longest_length = 0
+        # 按 full_conversation_token_ids 长度降序排列
+        sorted_history = sorted(
+            history,
+            key=lambda t: len(t.get("full_conversation_token_ids") or []),
+            reverse=True
+        )
 
-        for trajectory in history:
-            # 匹配完整对话文本（请求+响应）
+        for trajectory in sorted_history:
             cached_text = trajectory.get("full_conversation_text")
-            # 跳过无效记录（None 或空字符串）
             if not cached_text:
                 continue
-            if text.startswith(cached_text) and len(cached_text) > longest_length:
-                longest_match = trajectory
-                longest_length = len(cached_text)
+            if text.startswith(cached_text):
+                return trajectory  # 已排序，第一条匹配即最长
 
-        return longest_match
+        return None

@@ -7,6 +7,7 @@ Worker 实现
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
+import asyncio
 import time
 import traceback
 import uuid
@@ -17,7 +18,7 @@ from traj_proxy.proxy_core.processor_manager import ProcessorManager
 from traj_proxy.store.model_synchronizer import ModelSynchronizer
 from traj_proxy.proxy_core.provider import TrajectoryProvider
 from traj_proxy.utils.logger import get_logger
-from traj_proxy.utils.config import get_database_pool_config
+from traj_proxy.utils.config import get_database_pool_config, get_max_concurrent_requests
 from traj_proxy.utils.validators import normalize_run_id
 
 logger = get_logger(__name__)
@@ -133,6 +134,11 @@ class ProxyWorker:
         worker_name = f"ProxyWorker-{worker_id}"
         self.logger = get_logger(__name__, worker_id=worker_name)
         self.logger.info(f"Worker 初始化完成: {worker_name} (端口: {port})")
+
+        # 并发限流信号量（单 worker 级别）
+        max_concurrent = get_max_concurrent_requests()
+        self._request_semaphore = asyncio.Semaphore(max_concurrent)
+        self.logger.info(f"并发限流已启用: max_concurrent={max_concurrent}")
 
         # 初始化组件（稍后在 initialize 中完成）
         self.db_url = db_url
@@ -293,6 +299,10 @@ class ProxyWorker:
                     logger.warning(f"预置模型注册失败（可能已存在）: {model_config.get('model_name')}, 错误: {e}")
                 except Exception as e:
                     logger.error(f"预置模型注册异常: {model_config.get('model_name')}, 错误: {e}\n{traceback.format_exc()}")
+
+        # 将并发限流信号量挂到 app.state，供路由使用
+        self.app.state.request_semaphore = self._request_semaphore
+        self.app.state.max_concurrent_requests = get_max_concurrent_requests()
 
         logger.info(f"ProxyWorker 初始化完成，预置模型: {len(self.processor_manager.config_processors)}, 动态模型: {len(self.processor_manager.dynamic_processors)}")
 

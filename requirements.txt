@@ -4,6 +4,7 @@ pydantic==2.5.3
 pyyaml==6.0.1
 ray[default]
 httpx==0.26.0
+orjson>=3.9.0
 psycopg[binary,pool]==3.1.18
 transformers>=5.0
 jinja2

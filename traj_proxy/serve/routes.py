@@ -8,11 +8,18 @@ FastAPI 路由定义
 """
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from typing import Dict, Any, Optional
+import asyncio
 import json
 import traceback
 import uuid
+
+try:
+    import orjson
+    _HAS_ORJSON = True
+except ImportError:
+    _HAS_ORJSON = False
 
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.serve.schemas import (
@@ -36,6 +43,17 @@ transcript_router = APIRouter()
 trajectory_router = APIRouter()
 
 logger = get_logger(__name__)
+
+
+def _serialize_json(obj: Any) -> bytes:
+    """序列化对象为 JSON bytes
+
+    优先使用 orjson（2-5x 更快），不可用时回退到 stdlib json。
+    返回 bytes 供 Response(content=...) 直接使用。
+    """
+    if _HAS_ORJSON:
+        return orjson.dumps(obj)
+    return json.dumps(obj, ensure_ascii=False).encode("utf-8")
 
 
 def _extract_run_id(model: str, x_run_id: Optional[str], run_id: Optional[str]) -> Optional[str]:
@@ -138,6 +156,25 @@ async def chat_completions(
         处理后的响应（JSON 或 SSE 流）
     """
     request_id = str(uuid.uuid4())
+
+    # 并发限流：获取信号量，超时 5s 返回 429
+    semaphore = getattr(request.app.state, "request_semaphore", None)
+    acquired = False
+    if semaphore:
+        try:
+            await asyncio.wait_for(semaphore.acquire(), timeout=5.0)
+            acquired = True
+        except asyncio.TimeoutError:
+            max_conc = getattr(request.app.state, "max_concurrent_requests", "?")
+            logger.warning(
+                f"[{request_id}] 并发限流拒绝: max_concurrent={max_conc} 已达上限"
+            )
+            raise HTTPException(
+                status_code=429,
+                detail="服务繁忙，请稍后重试",
+                headers={"Retry-After": "3"}
+            )
+
     try:
         # 获取请求体
         body = await request.json()
@@ -264,6 +301,9 @@ async def chat_completions(
         logger.exception(f"[{request_id}] 聊天补全请求处理失败: {str(e)}")
         error_detail, status_code = build_error_response(request_id, e)
         raise HTTPException(status_code=status_code, detail=error_detail)
+    finally:
+        if acquired:
+            semaphore.release()
 
 
 # ========== 模型管理接口 ==========
@@ -478,11 +518,14 @@ async def get_trajectory(
         # 使用新方法查询，然后转换为旧格式
         result = await provider.get_trajectories(session_id)
         records = result["records"][:limit]
-        return {
+        result_data = {
             "session_id": session_id,
             "count": len(records),
             "records": records
         }
+        # 在线程池中序列化大 JSON，避免阻塞事件循环导致连接重置
+        json_bytes = await asyncio.to_thread(_serialize_json, result_data)
+        return Response(content=json_bytes, media_type="application/json")
     except Exception as e:
         logger.exception(f"轨迹查询失败: {str(e)}")
         error_detail, status_code = build_error_response("trajectory_query", e)
@@ -548,7 +591,9 @@ async def get_trajectory_detail(
         # 应用 limit 限制
         if limit and len(result["records"]) > limit:
             result["records"] = result["records"][:limit]
-        return result
+        # 在线程池中序列化大 JSON，避免阻塞事件循环导致连接重置
+        json_bytes = await asyncio.to_thread(_serialize_json, result)
+        return Response(content=json_bytes, media_type="application/json")
     except Exception as e:
         logger.exception(f"查询轨迹详情失败: {str(e)}")
         error_detail, status_code = build_error_response("get_trajectory_detail", e)

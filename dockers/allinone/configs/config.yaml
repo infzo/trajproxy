@@ -16,6 +16,7 @@ custom_parsers_dir: /app/custom_parsers
 proxy_workers:
   count: 2                    # Worker 数量
   base_port: 12300            # 起始端口（12300, 12301）
+  max_concurrent_requests: 128  # 单 Worker 最大并发请求数（超限返回 429）
   models:                     # 预置模型配置
     - model_name: qwen3.5-2b
       url: http://host.docker.internal:8000/v1

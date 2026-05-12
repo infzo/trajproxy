@@ -103,7 +103,7 @@ flowchart LR
         PW --> PRoute{内部路由}
 
         PRoute -->|聊天请求| PM[ProcessorManager]
-        PRoute -->|轨迹查询| TP[TranscriptProvider<br/>历史查询]
+        PRoute -->|轨迹查询| TP[TrajectoryProvider<br/>历史查询]
 
         subgraph "推理流程"
             PM --> Proc[Processor]
@@ -200,16 +200,21 @@ TrajProxy/
 │   └── images/            # 镜像文件
 ├── docs/                  # 详细文档
 ├── traj_proxy/            # 主代码
-│   ├── proxy_core/        # 推理核心
-│   ├── store/             # 存储层
-│   ├── workers/           # Worker 管理
-│   └── utils/             # 工具模块
+│   ├── proxy_core/        # 推理核心（Processor、Pipeline、Converter、Parser、Cache、Builder）
+│   ├── serve/             # API 层（路由、数据模型、依赖注入、错误处理）
+│   ├── store/             # 存储层（数据库管理、模型仓库、请求仓库、同步器）
+│   ├── archive/           # 归档模块（过期数据归档、调度器）
+│   ├── workers/           # Worker 管理（ProxyWorker、WorkerManager、路由注册）
+│   └── utils/             # 工具模块（配置、日志、校验）
 ├── tests/                 # 测试
 ├── scripts/               # 工具脚本
-│   ├── archive_records.py
+│   ├── init_db.py         # 数据库初始化（建表、分区、索引）
+│   ├── archive_records.py # 手动归档脚本
 │   ├── download_tokenizer.py
 │   └── verify_jinja_consistency.py
-├── models/                # 模型文件
+├── configs/               # 配置文件
+│   └── config.yaml
+├── models/                # 模型文件（Tokenizer）
 └── custom_parsers/        # 自定义解析器（可选）
     ├── tool_parsers/      # 自定义工具解析器
     └── reasoning_parsers/ # 自定义推理解析器

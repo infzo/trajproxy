@@ -4,6 +4,38 @@
 
 ---
 
+## [0.1.9] - 2026-05-12
+
+### Bug 修复
+- **大轨迹查询连接重置**: 修复查询 5-40MB 轨迹数据时 `ClientPayloadError` 报错（根因：`json.dumps()` 同步阻塞 uvicorn 事件循环，导致 HTTP 连接在序列化期间超时断开）。改为线程池序列化 + orjson 加速
+
+### 优化改进
+- **PrefixMatchCache 查询优化**: 前缀缓存查询改为仅选取 `full_conversation_text` 和 `full_conversation_token_ids` 字段，单次查询数据量从 5-40MB 降至 KB 级
+- **PrefixMatchCache 匹配算法**: 候选记录按 `token_ids` 长度降序排列，首个匹配即为最长前缀，消除逐一遍历
+- **并发限流**: `chat/completions` 端点新增 `asyncio.Semaphore` 并发控制（可配置，默认 128），超限返回 HTTP 429，实现服务端背压
+- **连接池监控**: `DatabaseManager` 新增后台监控任务，每 30s 采样连接池使用量，追踪峰值，使用率超过 80% 时告警
+- **JSON 序列化**: 引入 `orjson`（2-5x 加速），优先使用 `orjson.dumps()` 返回 bytes，减少大响应序列化耗时
+- **Uvicorn Keep-Alive**: `timeout_keep_alive` 从默认 5s 提升至 65s，减少长时间处理场景下的连接断开
+
+### 配置更新
+- **max_concurrent_requests**: 新增 `proxy_workers.max_concurrent_requests` 配置项，控制单 Worker 最大并发请求数
+- **orjson**: 新增 `orjson>=3.9.0` 依赖
+
+### 影响范围
+- `traj_proxy/serve/routes.py` - 并发限流、线程池序列化、orjson 优先
+- `traj_proxy/proxy_core/cache/prefix_cache.py` - 前缀匹配算法优化
+- `traj_proxy/store/request_repository.py` - 新增 `get_prefix_candidates()` 方法
+- `traj_proxy/store/database_manager.py` - 连接池使用量监控
+- `traj_proxy/workers/worker.py` - Semaphore 创建与挂载
+- `traj_proxy/workers/manager.py` - uvicorn keep-alive 配置
+- `traj_proxy/utils/config.py` - 新增 `get_max_concurrent_requests()` 配置函数
+- `configs/config.yaml` - 新增并发限流配置项
+- `dockers/allinone/configs/config.yaml` - 同步配置
+- `dockers/compose/configs/config.yaml` - 同步配置
+- `requirements.txt` - 新增 orjson 依赖
+
+---
+
 ## [0.1.8] - 2026-04-29
 
 ### 新增功能
