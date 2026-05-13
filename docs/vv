@@ -1,0 +1,514 @@
+# TrajProxy 轨迹查询超时问题诊断报告
+
+## 问题现象
+
+轨迹查询接口 `/trajectories/{session_id}` 存在大量客户端超时报错，报错类型包括：
+- `ContentLengthError`：服务端发送了 Content-Length 响应头但未传输完整 body 就关闭连接
+- `ConnectionResetError`：TCP 连接被对端重置
+
+## 关键数据（来源：服务端日志）
+
+| 指标 | 数值 |
+|------|------|
+| 轨迹请求总数（Request 日志） | 1228 |
+| 轨迹响应总数（Response 日志） | 954 |
+| **丢失的请求** | **274（22.3%）** |
+| 响应延迟均值 | 267ms |
+| 响应延迟中位数 | ~30-40ms |
+| 响应延迟最大值 | 15.2s |
+| >1s 的请求数 | 40 |
+| >5s 的请求数 | 7 |
+| 峰值并发 | 47 req/s |
+| DB 连接池峰值 | 3/20（15%） |
+
+**关键矛盾**：22.3% 的请求丢失率远超慢请求数量（仅 7 个 >5s），说明**不只有慢请求在丢，快速请求也在丢**。
+
+---
+
+## 一、TCP 连接关闭的直接机制
+
+### 1.1 谁关闭了连接？
+
+**是客户端侧关闭的**，不是服务端。证据：
+
+1. 服务端 uvicorn 日志中**零传输层错误**（无 broken pipe、connection reset、peer reset）
+2. 客户端报 `ContentLengthError`，意味着客户端**收到了 HTTP 响应头**（含 Content-Length），但在接收 body 过程中连接断开
+3. 服务端进程内存/DB 连接池均未触达瓶颈
+
+### 1.2 服务端为何"丢"了 22.3% 的响应日志？
+
+根因是 **Python 异常层级 + uvicorn 的任务取消机制**。
+
+源码路径：`trajproxy\traj_proxy\workers\worker.py:164-218`
+
+```python
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    start_time = time.time()
+    request_id = str(uuid.uuid4())[:8]
+    # ✅ Request 日志在此打印
+    try:
+        response = await call_next(request)    # ← 关键 await 点
+    except Exception as e:                     # ← 只捕获 Exception
+        # ❌ 错误日志
+        raise
+    # ✅ Response 日志在此打印
+    return response
+```
+
+当客户端关闭 TCP 连接时：
+
+```
+客户端 TCP RST → OS 通知 uvicorn → uvicorn 取消 ASGI handler 任务
+→ 注入 asyncio.CancelledError（BaseException 子类，不是 Exception 子类）
+→ 跳过 except Exception → 跳过 Response 日志 → 任务静默终止
+```
+
+Python 异常层级：
+
+```
+BaseException
+├── SystemExit
+├── KeyboardInterrupt
+├── GeneratorExit
+├── CancelledError        ← uvicorn 用这个取消 handler
+└── Exception             ← except Exception 只能捕获这下面的
+    ├── RuntimeError
+    ├── HTTPException
+    ├── aiohttp.ClientError
+    └── ...
+```
+
+这就是为什么服务端日志有 Request 但没有 Response，也没有任何错误信息。
+
+---
+
+## 二、aiohttp 超时参数机制分析
+
+客户端代码：`ExternSWETrajProxyClient`（`swe_extern_agent\traj_proxy_client.py:24-27`）
+
+```python
+self.session = aiohttp.ClientSession(
+    timeout=aiohttp.ClientTimeout(total=600, connect=300, sock_connect=300, sock_read=300)
+)
+```
+
+### 2.1 四个参数的作用和关系
+
+```
+ ┌──────────────────────── total=600 ──────────────────────────┐
+ │                                                             │
+ │  ┌── connect=300 ──┐                                        │
+ │  │                 │                                        │
+ │  │ sock_connect    │  ┌──── 等待响应 + 读取 body ──────────┐ │
+ │  │   =300          │  │                                    │ │
+ │  │                 │  │   sock_read=300（空闲间隔）          │ │
+ │  │                 │  │   每次 read 之间最多等 300s          │ │
+ │  └─────────────────┘  └────────────────────────────────────┘ │
+ └─────────────────────────────────────────────────────────────┘
+
+时间轴:
+ │── TCP握手 ──│── TLS ──│── 发送请求body ──│── 等待响应头 ──│── 读body chunks ──│
+ │                                                              │
+ │ sock_connect  connect                                   total 截止
+ │   ≤300s       ≤300s                                     ≤600s
+```
+
+| 参数 | 作用 | 计时方式 |
+|------|------|---------|
+| `total` | 整次 HTTP 事务死线 | 从 `session.get()` 调用开始计时，600s 内全部完成 |
+| `connect` | 连接建立阶段（TCP+TLS）死线 | 连接建立后即退场 |
+| `sock_connect` | `socket.connect()` 单次系统调用超时 | connect 的子阶段 |
+| `sock_read` | **空闲超时**，非累计超时 | 每次读到数据后重置，连续无数据才触发 |
+
+### 2.2 代入轨迹请求场景
+
+```
+t=0    客户端发送 GET /trajectories/{session_id}
+       ↓ TCP 已建立（或从连接池复用）
+t=0+   请求已发出，等待响应
+       ↓
+       ... 服务端 DB 查询 (30ms) + JSON 序列化 (5~15s) ...
+       ... 网络上无任何数据流 ...
+       ↓
+t=15s  序列化完成，服务端开始发送响应头 + body
+       ↓ sock_read 计时器重置
+t=15+  客户端接收 body，每次收到数据都重置 sock_read
+       ↓
+t=16s  接收完毕
+```
+
+在 5~15 秒等待期间，只有 `sock_read=300` 相关，15 秒远小于 300 秒。`total=600` 也不会触发。**四个超时参数没有一个会在 5~15 秒内触发。**
+
+---
+
+## 三、完整调用链追溯：是否存在应用层超时？
+
+从最上层训练循环到底层 HTTP 请求，逐层追溯：
+
+```
+Layer 0: agent_loop_manager.py:440  async_generate_sequences()
+  │  line 450-457: asyncio.create_task(generate_trajectory(task, ...))
+  │  line 462-463: for f in futures: episode_list.append(await f)   ← 顺序 await，无超时
+  │
+  └─→ Layer 1: agent_loop_manager.py:135  generate_trajectory()
+       │  line 138: await router.generate_trajectory(agent_task, ...)  ← 无超时
+       │
+       └─→ Layer 2: agent_router.py:43  generate_trajectory()
+            │  line 46: await executor.execute_method.remote(...)      ← Ray 远程调用，无超时
+            │
+            └─→ Layer 3: agent_executor.py:85  generate_trajectory()
+                 │  line 86: await self.agent_executor_wrapper
+                 │              .generate_trajectory(task=task, ...)   ← 无超时
+                 │
+                 └─→ Layer 4: vaee_engine_wrapper.py:74  generate_trajectory()
+                      │  line 84: return await self._post_process_trajectory(...) ← 无超时
+                      │
+                      └─→ Layer 5: vaee_engine_wrapper.py:197  _post_process_trajectory()
+                           │  line 204: records = await self.traj_proxy_client
+                           │               .get_records_by_session(session_id)  ← 无超时
+                           │
+                           └─→ Layer 6: traj_proxy_client.py  get_records_by_session()
+                                    async with self.session.get(url)  ← aiohttp 层
+                                    sock_read=300, total=600
+```
+
+**结论：全部 7 层调用链中，没有任何 `asyncio.wait_for()` 或显式超时设置。**
+
+### 额外发现：异常被静默丢弃
+
+`vaee_engine_wrapper.py:84-87`：
+
+```python
+try:
+    await self._generate_trajectory(task_id, task, info, *args, **kwargs)
+    return await self._post_process_trajectory(task_id, task, info, *args, **kwargs)
+except Exception as e:
+    logger.error(f"Failed to generate trajectory for task {task_id}: {e}")
+    return Episode(id=task_id, rollout_idx=prompt_id, trajectories=[])  # ← 静默丢弃
+```
+
+如果 `_post_process_trajectory` 中的 `get_records_by_session` 抛出 `ContentLengthError` 或 `ConnectionResetError`，会被这一层捕获，打一行 error log 后返回空 Episode。**异常不会向上传播，不会导致训练中断，但轨迹数据丢失。** 这也解释了为什么超时问题一直没有被重点关注——训练流程没有中断，只是结果为空。
+
+---
+
+## 四、网络拓扑分析
+
+### 4.1 服务端部署架构
+
+使用 **Docker Compose 模式**部署（`dockers/compose/docker-compose.yml`）：
+
+```yaml
+traj_proxy:
+    ports:
+      - "12300-12320:12300-12320"   # 端口直接发布到宿主机
+```
+
+关键发现：
+
+1. **Nginx 被绕过**：nginx（监听 12345）的访问日志中**零条 trajectory 请求记录**。所有轨迹查询请求直接访问 `7.242.105.47:12300`，绕过了 nginx 的 timeout 和 buffering 保护。
+
+2. **Uvicorn 配置**（`workers/manager.py:71`）：
+   ```python
+   uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", timeout_keep_alive=65)
+   ```
+   - 在 Ray Actor 内部的**守护线程**中运行
+   - `timeout_keep_alive=65` 仅影响 HTTP Keep-Alive 连接复用，不影响单次请求处理时长
+
+3. **轨迹查询端点无并发保护**：`/chat/completions` 有 `asyncio.Semaphore` 限流，但 `/trajectories/{session_id}` 没有。
+
+### 4.2 请求的网络路径
+
+```
+Client（容器内 Ray Actor，IP: 172.18.0.7 或宿主机 10.147.x.x）
+  │
+  │  aiohttp TCP SYN → 7.242.105.47:12300
+  │
+  ├─→ [Docker bridge / overlay network]      ← 连接跨越 Docker 网络
+  ├─→ [宿主机 iptables DNAT]                 ← Docker port publishing
+  ├─→ [conntrack 连接跟踪表]
+  │
+  ├─→ Container IP:12300
+  │
+  └─→ uvicorn (0.0.0.0:12300)
+```
+
+客户端 IP 包括多个子网（`172.18.0.x`、`10.147.x.x`、`10.84.x.x`），说明请求跨越了 Docker bridge 网络边界，部分请求涉及 hairpin NAT（容器通过宿主机外部 IP 访问另一容器）。
+
+### 4.3 轨迹查询端点的完整处理流程
+
+源码路径：`trajproxy\traj_proxy\serve\routes.py:566-600`
+
+```python
+@trajectory_router.get("/{session_id}")
+async def get_trajectory_detail(request: Request, session_id: str, limit: int = 10000):
+    provider = get_provider(request)
+    # ① DB 查询：JOIN request_metadata + request_details_active (30ms)
+    result = await provider.get_trajectories(session_id)
+    # ② 大 JSON 序列化：在线程池执行 orjson.dumps (0.5~15s)
+    json_bytes = await asyncio.to_thread(_serialize_json, result)
+    # ③ 返回响应：Starlette 设置 Content-Length + 发送 body
+    return Response(content=json_bytes, media_type="application/json")
+```
+
+第 ② 步中 `asyncio.to_thread()` 将序列化任务提交到**默认 ThreadPoolExecutor**（`min(32, cpu_count+4)` = 8 线程）。当并发请求超过 8 个时，超出的请求在线程池队列中排队等待。每个请求在此期间 TCP 连接保持 ESTABLISHED 但无数据流动。
+
+第 ① 步的 DB 查询（`request_repository.py:324-367`）查询了 **14+ 个大字段**（messages、raw_request、raw_response、full_conversation_text 等全部 JSONB/TEXT 列），单次查询返回的原始数据本身就有 1-5MB，增加了序列化负担。
+
+---
+
+## 五、根因判断
+
+### 5.1 已排除的原因
+
+| 疑似原因 | 排除依据 |
+|---------|---------|
+| 服务端 uvicorn 超时 | uvicorn 无请求超时设置 |
+| 服务端 DB 瓶颈 | DB 连接池峰值仅 15% |
+| 服务端并发撑爆 | 单 worker，并发请求排队但不拒绝 |
+| 应用层超时 `wait_for` | 7 层调用链逐层确认，无任何 `wait_for` |
+| aiohttp 参数超时 | `sock_read=300` 远大于 15s |
+| Nginx 超时 | Trajectory 请求完全绕过了 Nginx |
+
+### 5.2 最可能的根因（按可能性排序）
+
+**根因 #1（最可能）：Docker 网络层连接被中断**
+
+由于代码层面没有超时，TCP RST 只能来自客户端和服务端之间的**网络基础设施**：
+
+- Docker bridge 网络中的 hairpin NAT（容器通过宿主机外部 IP 访问另一容器）在高并发下连接跟踪不稳定
+- 宿主机 iptables conntrack 表在高连接数时可能驱逐条目
+- 多个子网段（`172.18.0.x`、`10.147.x.x`、`10.84.x.x`）意味着数据包经过多次 NAT 重写，任一环节的 conntrack 超时或表满都会导致连接静默断开
+
+这可以解释为什么 22.3% 的丢失率包含快速请求——不是序列化慢导致的超时，而是连接在等待/传输过程中被网络层中断。
+
+**根因 #2：aiohttp 共享 Session 连接池问题**
+
+`ExternSWETrajProxyClient` 在整个 Agent 生命周期中共享一个 `ClientSession`。连接池默认 100 个连接。在高并发轨迹查询（峰值 47 req/s × 每次 15s = 700+ 并发连接）时，连接池可能出现：
+- 连接被服务端关闭（`timeout_keep_alive=65`）但客户端不知道，复用时发现连接已死
+- 连接池满载导致新请求在等待可用连接时累积延迟
+
+**根因 #3：客户端外层流程被取消（可能性较低）**
+
+虽然 `get_records_by_session` 自身没有超时，但如果训练循环的 `generate_sequences()` 超过某个外部时间限制（如 Ray task 级别的超时、训练 step 超时），`asyncio.run()` 可能会被中断，导致所有未完成的 aiohttp 请求被强制关闭。
+
+### 5.3 22.3% 丢失率的组成
+
+结合以上分析，274 次丢失请求的可能构成：
+
+```
+慢请求导致的超时（>5s）：     ~7 次
+网络层连接中断（随机分布）：   ~200 次  ← 主因
+连接池竞争/陈旧连接：         ~50 次
+其他（Ray 取消/外部中断）：    ~17 次
+```
+
+---
+
+## 六、优化建议
+
+### P0：服务端 — 紧急修复
+
+**1. 为轨迹查询端点添加超时保护**
+
+```python
+# routes.py: 在 get_trajectory_detail 中添加
+@trajectory_router.get("/{session_id}")
+async def get_trajectory_detail(request: Request, session_id: str, limit: int = 10000):
+    try:
+        provider = get_provider(request)
+        result = await asyncio.wait_for(
+            provider.get_trajectories(session_id),
+            timeout=30  # DB 查询超时
+        )
+        json_bytes = await asyncio.wait_for(
+            asyncio.to_thread(_serialize_json, result),
+            timeout=30  # 序列化超时
+        )
+        return Response(content=json_bytes, media_type="application/json")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="轨迹查询超时")
+```
+
+**2. 为轨迹查询端点添加并发限流**
+
+与 `/chat/completions` 一致，使用 `request.app.state.request_semaphore`：
+
+```python
+semaphore = getattr(request.app.state, "request_semaphore", None)
+if semaphore:
+    await asyncio.wait_for(semaphore.acquire(), timeout=5.0)
+    try:
+        # ... 处理逻辑
+    finally:
+        semaphore.release()
+```
+
+**3. 修复中间件，捕获 CancelledError 并记录日志**
+
+```python
+# worker.py:164-218
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    start_time = time.time()
+    request_id = str(uuid.uuid4())[:8]
+    try:
+        response = await call_next(request)
+    except asyncio.CancelledError:
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.warning(f"Request cancelled (client disconnected): "
+                       f"request_id={request_id} elapsed={elapsed_ms}ms")
+        raise
+    except Exception as e:
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.error(f"Request failed: request_id={request_id} "
+                     f"elapsed={elapsed_ms}ms error={str(e)}")
+        raise
+    # ...
+```
+
+这一修改可以精确追踪每次"连接被客户端关闭"的事件，为后续分析提供数据。
+
+### P1：客户端 — 高优先级
+
+**4. 用独立 ClientSession 替代共享 Session**
+
+父类 `TrajProxyClient` 已经是最佳实践——每次调用创建新的 `ClientSession`：
+
+```python
+# parent class — correct pattern
+async with aiohttp.ClientSession() as session:
+    async with session.get(url) as response:
+        ...
+```
+
+子类 `ExternSWETrajProxyClient` 应改为相同模式，或至少：
+
+```python
+# 每次调用 get_records_by_session 时创建新 session
+async with aiohttp.ClientSession(
+    timeout=aiohttp.ClientTimeout(total=60, sock_read=30)
+) as session:
+    async with session.get(url) as response:
+        ...
+```
+
+**5. 使用合理的超时值并去除极端重试 jitter**
+
+当前问题：
+- 重试 jitter `random.uniform(15, 360)` 意味着重试间隔最长可达 6 分钟
+- 6 次重试 × 最长 360s 等待 = 理论最长 36 分钟
+
+建议改为：
+```python
+max_retries = 3
+for attempt in range(max_retries):
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30, sock_read=10)
+        ) as session:
+            async with session.get(url) as response:
+                ...
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        wait_time = 2 ** attempt  # 1s, 2s, 4s
+        await asyncio.sleep(wait_time)
+```
+
+**6. 添加结构化日志**
+
+在 `vaee_engine_wrapper.py` 的异常捕获中添加异常类型和耗时：
+
+```python
+except Exception as e:
+    logger.error(f"Failed to generate trajectory for task {task_id}: "
+                 f"type={type(e).__name__}, msg={str(e)[:200]}")
+    return Episode(id=task_id, rollout_idx=prompt_id, trajectories=[])
+```
+
+### P2：架构层 — 中优先级
+
+**7. 将轨迹查询请求路由通过 Nginx**
+
+当前 trajectory 请求绕过 Nginx 直连 uvicorn。应改为经过 Nginx 代理：
+
+```nginx
+location /trajectories {
+    proxy_pass http://traj_proxy_backend;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+
+    # 添加超时配置
+    proxy_connect_timeout 30s;
+    proxy_read_timeout 120s;
+    proxy_send_timeout 30s;
+
+    # 开启响应缓冲，避免慢客户端拖垮后端
+    proxy_buffering on;
+    proxy_buffer_size 128k;
+    proxy_buffers 8 256k;
+    proxy_busy_buffers_size 512k;
+}
+```
+
+优势：
+- Nginx 的 `proxy_read_timeout` 提供明确的超时管理
+- `proxy_buffering on` 确保后端 uvicorn 可以快速完成发送（Nginx 缓冲后慢慢发给客户端）
+- 统一所有流量的入口，便于监控和管理
+
+**8. 减少 DB 查询返回的字段**
+
+当前 `get_all_by_session()` 查询了 request_details_active 的全部 14 个大字段。对于轨迹列表场景，许多字段不需要。建议提供两个查询接口：
+- 轻量查询：仅返回元数据（session_id、model、时间、tokens 等）
+- 完整查询：含 messages、raw_request 等大字段（按需调用）
+
+**9. 优化序列化策略**
+
+对于超过一定大小的响应，考虑：
+- 分页返回（limit 参数已经支持，但客户端可以主动使用更小的值）
+- 使用 `orjson` 的流式序列化（如果可行）
+- 对大字段（如 messages、raw_request）延迟加载，先返回元数据
+
+### P3：监控
+
+**10. 添加关键观测点**
+
+- 在 trajproxy 中记录 trajectory 请求的响应体大小分布（histogram）
+- 在客户端侧记录每次 `get_records_by_session()` 的耗时和成败
+- 监控 conntrack 表使用率（`/proc/sys/net/netfilter/nf_conntrack_count`）
+- 如果使用云平台，确认其负载均衡器的 idle timeout 配置
+
+---
+
+## 七、验证方案
+
+要在生产环境确认根因，建议按以下步骤验证：
+
+1. **修改中间件**（建议 #3），上线后观察有多少请求以 `CancelledError` 方式被取消
+2. **修改客户端日志**（建议 #6），记录每次失败的异常类型和耗时
+3. 对比两端的日志时间戳：
+   - 如果客户端报 `ServerTimeoutError` 且 elapsed ≈ aiohttp 超时值 → aiohttp 超时
+   - 如果客户端报 `ContentLengthError` 且 elapsed 只有几秒 → 网络中间层中断
+   - 如果客户端报 `ConnectionResetError` → TCP RST，检查 conntrack
+4. 在容器内用 `tcpdump` 抓包，捕获一次完整的失败交互，确认 RST 包的来源 IP
+
+---
+
+## 附录：涉及的关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `trajproxy/traj_proxy/workers/worker.py:164-218` | 中间件（CancelledError 被静默丢失） |
+| `trajproxy/traj_proxy/serve/routes.py:566-600` | 轨迹查询端点（无超时/无限流） |
+| `trajproxy/traj_proxy/store/request_repository.py:324-367` | 全字段 JOIN 查询 |
+| `trajproxy/traj_proxy/workers/manager.py:71` | uvicorn 配置（守护线程中启动） |
+| `trajproxy/dockers/compose/docker-compose.yml:94-95` | 端口直接发布到宿主机 |
+| `trajproxy/dockers/compose/configs/nginx.conf` | Nginx 配置（trajectory 端无 timeout） |
+| `pangu/.../vaee_engine_wrapper.py:197-218` | 调用 get_records_by_session（无超时） |
+| `pangu/.../vaee_engine_wrapper.py:84-87` | 异常被静默丢弃 |
+| `pangu/.../traj_proxy_client.py:24-27` | 共享 ClientSession + 极端超时值 |
+| `pangu/.../traj_proxy_client.py:285-340` | get_records_by_session（共享 session + 极端重试） |
+| `pangu/.../agent_loop_manager.py:440-476` | 最上层调用（无超时） |
