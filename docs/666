@@ -1,0 +1,50 @@
+89f306-2056-0] Provider.get_trajectories 完成: 69条记录, 耗时: 42094.9ms [repeated 18x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:13 | WARNING | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] DB查询超时 (30s), 已耗时: 36543.3ms [repeated 60x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:16 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] DB查询完成: 69条记录, 耗时: 42785.1ms [repeated 19x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:16 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] JSON序列化完成: 49878.9KB, 耗时: 1225.2ms, 总耗时: 42819.6ms [repeated 23x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:16 | INFO | worker | - | Response: GET http://7.242.104.203/trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 | request_id=a743bca8 | status=200 | elapsed=42830ms [repeated 136x across cluster]
+(RemoteWorker pid=1031) INFO:     172.18.0.7:59594 - "GET /trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 HTTP/1.1" 504 Gateway Timeout [repeated 60x across cluster]
+(RemoteWorker pid=1032) INFO:     172.18.0.7:46338 - "GET /trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 HTTP/1.1" 200 OK [repeated 30x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:20 | INFO | request_repository | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Repository.get_all_by_session: 69条记录, 字段数=30, 获取连接=7479.0ms, SQL执行+fetchall=39953.7ms, 总仓库耗时=47432.7ms [repeated 9x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:20 | INFO | provider | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Provider.get_trajectories 完成: 69条记录, 耗时: 46899.8ms [repeated 7x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:21 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] DB查询完成: 69条记录, 耗时: 47775.1ms [repeated 9x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:20 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] JSON序列化完成: 49878.9KB, 耗时: 2356.3ms, 总耗时: 47581.2ms [repeated 9x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:21 | INFO | worker | - | Response: GET http://7.242.104.203/trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 | request_id=fd381968 | status=200 | elapsed=47710ms [repeated 12x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:23 | INFO | database_manager | - | 连接池状态: used=23, size=40, max=40, available=17, usage=57.5%, peak_used=40, peak_usage=100.0%, queued=126, waiting=0, errors=60
+2026-05-15 03:55:24 | INFO | database_manager | - | 连接池状态: used=0, size=5, max=40, available=5, usage=0.0%, peak_used=5, peak_usage=12.5%, queued=0, waiting=0, errors=0
+(RemoteWorker pid=1032) INFO:     172.18.0.7:46376 - "GET /trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 HTTP/1.1" 200 OK [repeated 8x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:26 | INFO | request_repository | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Repository.get_all_by_session: 69条记录, 字段数=30, 获取连接=13027.3ms, SQL执行+fetchall=39450.4ms, 总仓库耗时=52477.7ms [repeated 11x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:25 | INFO | provider | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Provider.get_trajectories 完成: 69条记录, 耗时: 52038.6ms [repeated 12x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:26 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] DB查询完成: 69条记录, 耗时: 52818.3ms [repeated 10x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:26 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] JSON序列化完成: 49878.9KB, 耗时: 813.5ms, 总耗时: 52782.7ms [repeated 11x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:27 | INFO | worker | - | Response: GET http://7.242.104.203/trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 | request_id=6fda2b26 | status=200 | elapsed=53699ms [repeated 11x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:23 | INFO | database_manager | - | 连接池状态: used=25, size=40, max=40, available=15, usage=62.5%, peak_used=40, peak_usage=100.0%, queued=122, waiting=0, errors=56
+(RemoteWorker pid=1032) INFO:     172.18.0.7:46402 - "GET /trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 HTTP/1.1" 200 OK [repeated 8x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:31 | INFO | request_repository | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Repository.get_all_by_session: 69条记录, 字段数=30, 获取连接=20598.6ms, SQL执行+fetchall=37019.8ms, 总仓库耗时=57618.5ms [repeated 12x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:30 | INFO | provider | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Provider.get_trajectories 完成: 69条记录, 耗时: 57496.0ms [repeated 11x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:32 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] DB查询完成: 69条记录, 耗时: 58759.8ms [repeated 12x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:32 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] JSON序列化完成: 49878.9KB, 耗时: 2440.1ms, 总耗时: 58667.8ms [repeated 11x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:32 | INFO | worker | - | Response: GET http://7.242.104.203/trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 | request_id=4c4e0510 | status=200 | elapsed=58794ms [repeated 9x across cluster]
+(RemoteWorker pid=1032) INFO:     172.18.0.7:46440 - "GET /trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 HTTP/1.1" 200 OK [repeated 8x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:36 | INFO | request_repository | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Repository.get_all_by_session: 69条记录, 字段数=30, 获取连接=25781.8ms, SQL执行+fetchall=36855.4ms, 总仓库耗时=62637.3ms [repeated 12x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:35 | INFO | provider | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Provider.get_trajectories 完成: 69条记录, 耗时: 62271.1ms [repeated 12x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:36 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] DB查询完成: 69条记录, 耗时: 63065.8ms [repeated 12x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:37 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] JSON序列化完成: 49878.9KB, 耗时: 1071.7ms, 总耗时: 63812.3ms [repeated 9x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:36 | INFO | worker | - | Response: GET http://7.242.104.203/trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 | request_id=df74406c | status=200 | elapsed=63367ms [repeated 8x across cluster]
+(RemoteWorker pid=1031) INFO:     172.18.0.7:58996 - "GET /trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 HTTP/1.1" 200 OK [repeated 9x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:41 | INFO | request_repository | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Repository.get_all_by_session: 69条记录, 字段数=30, 获取连接=33024.7ms, SQL执行+fetchall=34655.1ms, 总仓库耗时=67679.8ms [repeated 12x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:41 | INFO | provider | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Provider.get_trajectories 完成: 69条记录, 耗时: 67725.3ms [repeated 8x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:41 | INFO | worker | - | Request: GET http://localhost:12300/health | request_id=9ad0f426 | model=unknown | client=127.0.0.1
+(RemoteWorker pid=1031) INFO:     127.0.0.1:54132 - "GET /health HTTP/1.1" 200 OK
+(RemoteWorker pid=1032) 2026-05-15 03:55:42 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] DB查询完成: 69条记录, 耗时: 68696.0ms [repeated 12x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:42 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] JSON序列化完成: 49878.9KB, 耗时: 399.8ms, 总耗时: 68768.3ms [repeated 14x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:42 | INFO | worker | - | Response: GET http://7.242.104.203/trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 | request_id=6433e33f | status=200 | elapsed=68829ms [repeated 16x across cluster]
+(RemoteWorker pid=1031) 2026-05-15 03:55:53 | INFO | database_manager | - | 连接池状态: used=2, size=40, max=40, available=38, usage=5.0%, peak_used=40, peak_usage=100.0%, queued=126, waiting=0, errors=60
+(RemoteWorker pid=1032) 2026-05-15 03:55:41 | INFO | request_repository | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Repository.get_all_by_session: 69条记录, 字段数=30, 获取连接=35342.8ms, SQL执行+fetchall=32830.8ms, 总仓库耗时=68173.5ms
+(RemoteWorker pid=1031) 2026-05-15 03:55:42 | INFO | provider | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] Provider.get_trajectories 完成: 69条记录, 耗时: 68256.3ms [repeated 7x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:42 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] DB查询完成: 69条记录, 耗时: 68714.3ms
+(RemoteWorker pid=1032) 2026-05-15 03:55:43 | INFO | routes | - | [10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0] JSON序列化完成: 49878.9KB, 耗时: 559.0ms, 总耗时: 69780.8ms [repeated 7x across cluster]
+(RemoteWorker pid=1032) 2026-05-15 03:55:43 | INFO | worker | - | Response: GET http://7.242.104.203/trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 | request_id=d42ef5bb | status=200 | elapsed=69874ms [repeated 9x across cluster]
+2026-05-15 03:55:54 | INFO | database_manager | - | 连接池状态: used=0, size=5, max=40, available=5, usage=0.0%, peak_used=5, peak_usage=12.5%, queued=0, waiting=0, errors=0
+(RemoteWorker pid=1031) INFO:     127.0.0.1:53398 - "GET /health HTTP/1.1" 200 OK
+(RemoteWorker pid=1032) INFO:     172.18.0.7:46590 - "GET /trajectories/10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0 HTTP/1.1" 200 OK [repeated 22x across cluster]
