@@ -1,0 +1,122 @@
+验证方法：控制变量压测
+
+  核心思路：固定并发数，对比 fields=all（49MB）vs fields=-full_conversation_text（预估 <5MB），如果后者延迟断崖式下降，就证明数据量是根因。
+
+  方法 1：Python 脚本直接压测（最直接）
+
+  用 asyncio + aiohttp 控制并发，测量每条请求的耗时：
+
+  # verify_concurrency.py
+  import asyncio, time, aiohttp
+
+  SESSION = "10-1-ff141c83-bdb2-465f-bd07-f55aba89f306-2056-0"
+  BASE = "http://localhost:12300/trajectories"
+  N = 20  # 并发数
+
+  async def fetch(session, fields=None):
+      params = {"limit": 10000}
+      if fields:
+          params["fields"] = fields
+      t0 = time.perf_counter()
+      async with session.get(f"{BASE}/{SESSION}", params=params) as resp:
+          body = await resp.read()
+      elapsed = (time.perf_counter() - t0) * 1000
+      return elapsed, len(body) / 1024
+
+  async def run(label, fields, n=N):
+      async with aiohttp.ClientSession() as session:
+          tasks = [fetch(session, fields) for _ in range(n)]
+          results = await asyncio.gather(*tasks)
+      latencies = [r[0] for r in results]
+      sizes = [r[1] for r in results]
+      print(f"\n=== {label} (并发={n}) ===")
+      print(f"  平均耗时: {sum(latencies)/len(latencies):.0f}ms")
+      print(f"  P50/P95/P99: {sorted(latencies)[n//2]:.0f}/{sorted(latencies)[int(n*0.95)]:.0f}/{sorted(latencies)[int(n*0.99)]:.0f}ms")
+      print(f"  单响应大小: {sizes[0]:.0f}KB")
+
+  async def main():
+      await run("全部字段", None)
+      await run("排除 conversation", "-full_conversation_text,-full_conversation_token_ids")
+
+  asyncio.run(main())
+
+  预期：全部字段 → 平均 30s+; 排除后 → 平均 <3s。如果排除后仍然慢，说明还有别的大字段（messages/raw_request 等）。
+
+  方法 2：pg_stat_statements 对比（看 PG 端实际耗时）
+
+  -- 先重置统计
+  SELECT pg_stat_statements_reset();
+
+  -- 跑一轮查询后，对比
+  SELECT
+      LEFT(query, 60) AS query_snip,
+      calls,
+      ROUND(mean_exec_time::numeric, 1) AS mean_ms,
+      ROUND((total_exec_time / 1000 / 60)::numeric, 2) AS total_minutes,
+      ROUND((shared_blks_read * 8192 / 1024 / 1024)::numeric, 0) AS shared_read_mb,
+      ROUND((shared_blks_hit * 8192 / 1024 / 1024)::numeric, 0) AS shared_hit_mb,
+      rows
+  FROM pg_stat_statements
+  WHERE query LIKE '%request_details_active%'
+  ORDER BY total_exec_time DESC
+  LIMIT 5;
+
+  看两列：
+  - mean_ms：PG 统计的单次平均执行时间。如果并发时 mean_ms 和单查时接近（~1.8s），说明 SQL 本身没变慢，时间全耗在传输层
+  - shared_read_mb：从磁盘读的数据量。如果很大，说明 PG 缓存被打爆，需要从磁盘 TOAST 表读
+
+  方法 3：并发梯度测试（定位退化拐点）
+
+  在容器内用 ab 或 wrk 做梯度并发：
+
+  # 在 traj_proxy 容器内或 nginx 容器内
+  for c in 1 3 5 10 20 30 40; do
+      echo "=== 并发数: $c ==="
+      curl -s -o /dev/null -w "HTTP %{http_code}, %{time_total}s\n" \
+          "http://localhost:12300/trajectories/${SESSION}" &
+      # 简单并发：用 xargs
+      seq $c | xargs -P$c -I{} \
+          curl -s -o /dev/null -w "%{time_total}\n" \
+          "http://localhost:12300/trajectories/${SESSION}" \
+          | awk '{sum+=$1; count++} END {print "平均:", sum/count"s"}'
+  done
+
+  如果 1 并发 2s → 5 并发 5s → 20 并发 30s，退化曲线光滑，就是 IO/带宽争抢。
+
+  方法 4：PG 等待事件（确认争抢类型）
+
+  在并发高的时候执行：
+
+  SELECT
+      wait_event_type, wait_event, state, COUNT(*) AS sessions
+  FROM pg_stat_activity
+  WHERE state = 'active' AND query LIKE '%request_details_active%'
+  GROUP BY 1, 2, 3
+  ORDER BY COUNT(*) DESC;
+
+  ┌─────────────────────────┬────────────────┬─────────────────────┐
+  │     wait_event_type     │      含义      │      对应瓶颈       │
+  ├─────────────────────────┼────────────────┼─────────────────────┤
+  │ IO / DataFileRead       │ 从磁盘读数据页 │ 磁盘 IO 打满        │
+  ├─────────────────────────┼────────────────┼─────────────────────┤
+  │ LWLock / buffer_mapping │ 等 buffer 锁   │ shared_buffers 争抢 │
+  ├─────────────────────────┼────────────────┼─────────────────────┤
+  │ CPU                     │ CPU 排队       │ CPU 瓶颈            │
+  ├─────────────────────────┼────────────────┼─────────────────────┤
+  │ 空（无等待）            │ 正在计算       │ TOAST 解压/序列化   │
+  └─────────────────────────┴────────────────┴─────────────────────┘
+
+  方法 5：网络带宽监控
+
+  在 PG 容器或 proxy 容器内，压力测试时跑：
+
+  # 看 eth0 的实时流量（需要 iftop 或 nload）
+  # 粗略版：
+  sar -n DEV 1 5 | grep eth0
+
+  如果跑满千兆（~125MB/s），49MB × 40 = 2GB ÷ 125MB/s ≈ 16s，完全吻合你的日志。
+
+  总结验证路径
+
+  最快的验证是方法 1（Python 脚本），跑两轮对比，5 分钟出结论。如果 fields=-full_conversation_text
+  后并发延迟下降到接近单查询水平，数据量就是根因。如果排除了大字段还是慢，说明瓶颈在别处（DB 连接/CPU/锁），再深入排查。
