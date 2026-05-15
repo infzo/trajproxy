@@ -4,8 +4,12 @@ TrajectoryProvider - 转录提供者
 负责处理轨迹记录查询的业务逻辑
 """
 
-from typing import Dict, Any
+import time
+from typing import Dict, Any, Optional
 from traj_proxy.store.request_repository import RequestRepository
+from traj_proxy.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class TrajectoryProvider:
@@ -63,18 +67,48 @@ class TrajectoryProvider:
 
     async def get_trajectories(
         self,
-        session_id: str
+        session_id: str,
+        fields: Optional[str] = None
     ) -> Dict[str, Any]:
         """查询指定 session 的所有轨迹记录
 
         Args:
             session_id: 会话ID
+            fields: 逗号分隔的字段名，None 返回全部
 
         Returns:
             包含 session_id 和记录列表的字典
         """
-        records = await self.request_repository.get_all_by_session(session_id)
+        t_start = time.perf_counter()
+        records = await self.request_repository.get_all_by_session(session_id, fields=fields)
+        t_elapsed = (time.perf_counter() - t_start) * 1000
+        logger.info(f"[{session_id}] Provider.get_trajectories 完成: {len(records)}条记录, 耗时: {t_elapsed:.1f}ms")
         return {
             "session_id": session_id,
+            "records": records
+        }
+
+    async def get_trajectory_metadata(
+        self,
+        session_id: str,
+        limit: int = 10000,
+        fields: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """查询指定 session 的元数据（轻量查询，不含大字段）
+
+        只查 request_metadata 表，不 JOIN 详情表，适合统计和列表展示。
+
+        Args:
+            session_id: 会话ID
+            limit: 最多返回的记录数
+            fields: 逗号分隔的字段名，None 返回全部
+
+        Returns:
+            包含 session_id 和元数据列表的字典
+        """
+        records = await self.request_repository.get_metadata_by_session(session_id, limit, fields=fields)
+        return {
+            "session_id": session_id,
+            "count": len(records),
             "records": records
         }

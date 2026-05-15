@@ -190,6 +190,16 @@ class ProxyWorker:
             # 处理请求
             try:
                 response = await call_next(request)
+            except asyncio.CancelledError:
+                # 客户端断开连接时 uvicorn 注入 CancelledError（BaseException 子类）
+                # 必须在 except Exception 之前捕获，否则会被静默跳过
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                self.logger.warning(
+                    f"Request cancelled (client disconnected): {method} {url} | "
+                    f"request_id={request_id} | "
+                    f"elapsed={elapsed_ms}ms"
+                )
+                raise
             except Exception as e:
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 self.logger.error(

@@ -5,6 +5,7 @@ RequestRepository - 请求轨迹记录操作
 采用方案二架构：元数据表长期保留统计信息，详情表只存近期大字段。
 """
 
+import time
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
 import traceback
@@ -12,10 +13,113 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
 from traj_proxy.exceptions import DatabaseError
+from traj_proxy.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 延迟导入以避免循环导入
 if TYPE_CHECKING:
     from traj_proxy.proxy_core.context import ProcessContext
+
+# ======================== 字段映射（fields 参数支持） ========================
+
+# 详情查询字段映射（JOIN request_metadata + request_details_active）
+FIELDS_MAPPING: Dict[str, str] = {
+    "id": "m.id",
+    "unique_id": "m.unique_id",
+    "request_id": "m.request_id",
+    "session_id": "m.session_id",
+    "run_id": "m.run_id",
+    "model": "m.model",
+    "prompt_tokens": "m.prompt_tokens",
+    "completion_tokens": "m.completion_tokens",
+    "total_tokens": "m.total_tokens",
+    "cache_hit_tokens": "m.cache_hit_tokens",
+    "processing_duration_ms": "m.processing_duration_ms",
+    "start_time": "m.start_time",
+    "end_time": "m.end_time",
+    "created_at": "m.created_at",
+    "error": "m.error",
+    "tokenizer_path": "d.tokenizer_path",
+    "messages": "d.messages",
+    "raw_request": "d.raw_request",
+    "raw_response": "d.raw_response",
+    "text_request": "d.text_request",
+    "text_response": "d.text_response",
+    "prompt_text": "d.prompt_text",
+    "token_ids": "d.token_ids",
+    "token_request": "d.token_request",
+    "token_response": "d.token_response",
+    "response_text": "d.response_text",
+    "response_ids": "d.response_ids",
+    "full_conversation_text": "d.full_conversation_text",
+    "full_conversation_token_ids": "d.full_conversation_token_ids",
+    "error_traceback": "d.error_traceback",
+}
+
+# 元数据查询字段映射（仅 request_metadata 表，无 JOIN）
+META_FIELDS_MAPPING: Dict[str, str] = {
+    "id": "id",
+    "unique_id": "unique_id",
+    "request_id": "request_id",
+    "session_id": "session_id",
+    "run_id": "run_id",
+    "model": "model",
+    "prompt_tokens": "prompt_tokens",
+    "completion_tokens": "completion_tokens",
+    "total_tokens": "total_tokens",
+    "cache_hit_tokens": "cache_hit_tokens",
+    "processing_duration_ms": "processing_duration_ms",
+    "start_time": "start_time",
+    "end_time": "end_time",
+    "created_at": "created_at",
+    "error": "error",
+    "archive_location": "archive_location",
+    "archived_at": "archived_at",
+}
+
+ALL_FIELDS = list(FIELDS_MAPPING.keys())
+META_ALL_FIELDS = list(META_FIELDS_MAPPING.keys())
+
+
+def resolve_fields(fields_str: Optional[str], mapping: Dict[str, str]) -> List[str]:
+    """解析 fields 参数，返回最终的字段名列表
+
+    支持两种语法：
+    - field_name: 包含指定字段
+    - -field_name: 排除指定字段
+
+    不在 mapping 白名单中的字段名静默忽略。
+
+    Args:
+        fields_str: 逗号分隔的字段名，None 或空字符串表示返回全部
+        mapping: 字段名 → SQL 列表达式的映射（同时作为白名单）
+
+    Returns:
+        保持 mapping 键顺序的字段名列表
+    """
+    all_fields = list(mapping.keys())
+
+    if not fields_str or not fields_str.strip():
+        return all_fields[:]
+
+    parts = [p.strip() for p in fields_str.split(",") if p.strip()]
+    included: set[str] = set()
+    excluded: set[str] = set()
+
+    for part in parts:
+        if part.startswith("-"):
+            name = part[1:]
+            if name in mapping:
+                excluded.add(name)
+        else:
+            if part in mapping:
+                included.add(part)
+
+    if not included:
+        included = set(all_fields)
+
+    return [f for f in all_fields if f in included and f not in excluded]
 
 
 class RequestRepository:
@@ -191,7 +295,8 @@ class RequestRepository:
     async def get_metadata_by_session(
         self,
         session_id: str,
-        limit: int = 10000
+        limit: int = 10000,
+        fields: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """根据 session_id 获取元数据（轻量查询，含活跃+已归档）
 
@@ -200,6 +305,8 @@ class RequestRepository:
         Args:
             session_id: 会话 ID
             limit: 最多返回的记录数
+            fields: 逗号分隔的字段名列表，None 返回全部；
+                    支持 field_name（包含）和 -field_name（排除）
 
         Returns:
             元数据记录列表
@@ -208,15 +315,12 @@ class RequestRepository:
             DatabaseError: 当查询失败时抛出
         """
         try:
+            field_list = resolve_fields(fields, META_FIELDS_MAPPING)
+            select_columns = ", ".join(META_FIELDS_MAPPING[f] for f in field_list)
             async with self.pool.connection() as conn:
                 async with conn.cursor(row_factory=dict_row) as cur:
-                    await cur.execute("""
-                        SELECT
-                            id, unique_id, request_id, session_id, run_id, model,
-                            prompt_tokens, completion_tokens, total_tokens,
-                            cache_hit_tokens, processing_duration_ms,
-                            start_time, end_time, created_at, error,
-                            archive_location, archived_at
+                    await cur.execute(f"""
+                        SELECT {select_columns}
                         FROM public.request_metadata
                         WHERE session_id = %s
                         ORDER BY start_time DESC
@@ -323,7 +427,8 @@ class RequestRepository:
 
     async def get_all_by_session(
         self,
-        session_id: str
+        session_id: str,
+        fields: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """查询指定 session 的所有轨迹记录
 
@@ -332,6 +437,8 @@ class RequestRepository:
 
         Args:
             session_id: 会话 ID
+            fields: 逗号分隔的字段名列表，None 返回全部；
+                    支持 field_name（包含）和 -field_name（排除）
 
         Returns:
             轨迹记录列表，按 start_time 倒序
@@ -339,28 +446,32 @@ class RequestRepository:
         Raises:
             DatabaseError: 当查询失败时抛出
         """
+        t_start = time.perf_counter()
+        field_list = resolve_fields(fields, FIELDS_MAPPING)
+        select_columns = ", ".join(FIELDS_MAPPING[f] for f in field_list)
         try:
+            t_conn_start = time.perf_counter()
             async with self.pool.connection() as conn:
+                t_conn_elapsed = (time.perf_counter() - t_conn_start) * 1000
+                t_query_start = time.perf_counter()
                 async with conn.cursor(row_factory=dict_row) as cur:
-                    await cur.execute("""
-                        SELECT
-                            m.id, m.unique_id, m.request_id, m.session_id, m.run_id, m.model,
-                            m.prompt_tokens, m.completion_tokens, m.total_tokens,
-                            m.cache_hit_tokens, m.processing_duration_ms,
-                            m.start_time, m.end_time, m.created_at, m.error,
-                            d.tokenizer_path, d.messages,
-                            d.raw_request, d.raw_response,
-                            d.text_request, d.text_response,
-                            d.prompt_text, d.token_ids,
-                            d.token_request, d.token_response,
-                            d.response_text, d.response_ids,
-                            d.full_conversation_text, d.full_conversation_token_ids,
-                            d.error_traceback
+                    await cur.execute(f"""
+                        SELECT {select_columns}
                         FROM public.request_metadata m
                         JOIN public.request_details_active d ON m.unique_id = d.unique_id
                         WHERE m.session_id = %s AND m.archive_location IS NULL
                         ORDER BY m.start_time DESC
                     """, (session_id,))
-                    return await cur.fetchall()
+                    rows = await cur.fetchall()
+                t_query_elapsed = (time.perf_counter() - t_query_start) * 1000
+                t_total = (time.perf_counter() - t_start) * 1000
+                logger.info(
+                    f"[{session_id}] Repository.get_all_by_session: {len(rows)}条记录, "
+                    f"字段数={len(field_list)}, 获取连接={t_conn_elapsed:.1f}ms, "
+                    f"SQL执行+fetchall={t_query_elapsed:.1f}ms, 总仓库耗时={t_total:.1f}ms"
+                )
+                return rows
         except Exception as e:
+            t_total = (time.perf_counter() - t_start) * 1000
+            logger.error(f"[{session_id}] Repository.get_all_by_session 失败, 已耗时={t_total:.1f}ms: {e}")
             raise DatabaseError(f"查询轨迹记录失败: {str(e)}\n{traceback.format_exc()}")
