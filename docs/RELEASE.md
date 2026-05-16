@@ -4,6 +4,36 @@
 
 ---
 
+## [0.2.1] - 2026-05-16
+
+**类型**: Bug 修复
+
+### Bug 修复
+- **EOS Token 一致性**: 修复 `full_conversation_text` 与 `full_conversation_token_ids` 不一致导致前缀匹配出现双重 EOS 的问题。响应处理完成后 re-decode `response_ids`（`skip_special_tokens=False`），使 `response_text` 含 EOS 与 `response_ids` 一致，`full_conversation_text = prompt_text + response_text` 自然含 EOS
+- **Tokenizer 路径持久化**: 修复 tokenizer 路径在模型注册时解析为绝对路径并持久化到 DB，避免 Worker 重启后路径不一致
+
+### 优化改进
+- **run_id 兜底**: `_extract_run_id` 空 `run_id` 不再返回 `None`，统一兜底为 `DEFAULT`
+- **连接池监控增强**: 连接池监控 INFO 日志新增 `queued`/`waiting`/`errors` 累计指标
+
+### 测试
+- **F114**: 新增 EOS Token 一致性 e2e 测试（跨轮对比 EOS + finish_reason 验证）
+- **F215**: 新增 Processor 懒加载 e2e 测试
+- **F216**: 新增 LRU 缓存命中 e2e 测试
+- **F217**: 新增预置模型懒加载 e2e 测试
+- **F218**: 新增 LRU 淘汰 e2e 测试
+- **F219**: 新增轨迹查询 fields 参数 e2e 测试
+
+### 影响范围
+- `traj_proxy/proxy_core/pipeline/token_pipeline.py` - EOS 一致性修复
+- `traj_proxy/proxy_core/processor_manager.py` - tokenizer 路径持久化
+- `traj_proxy/serve/routes.py` - run_id 兜底
+- `traj_proxy/store/database_manager.py` - 连接池监控增强
+- `tests/e2e/layers/nginx/scenarios/F114_eos_consistency.sh` - EOS 一致性测试
+- `tests/e2e/layers/proxy/scenarios/F215-F219` - LRU 相关及 fields 参数测试
+
+---
+
 ## [0.2.0] - 2026-05-12
 
 ### 优化改进
