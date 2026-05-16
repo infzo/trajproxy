@@ -123,11 +123,15 @@ class TokenPipeline(BasePipeline):
             self._update_stats(context)
 
             self._update_timing(context)
+
+            cache_db = f"{context.cache_db_query_ms:.2f}" if context.cache_db_query_ms else "N/A"
+            cache_match = f"{context.cache_prefix_match_ms:.2f}" if context.cache_prefix_match_ms else "N/A"
             logger.info(
                 f"[{context.unique_id}] 请求处理完成: "
                 f"duration_ms={context.processing_duration_ms:.2f}, "
                 f"transform={context.transform_duration_ms:.2f}ms, "
-                f"encode={context.encode_duration_ms:.2f}ms, "
+                f"encode={context.encode_duration_ms:.2f}ms "
+                f"(cache_db={cache_db}ms, match={cache_match}ms), "
                 f"inference={context.inference_duration_ms:.2f}ms, "
                 f"decode={context.decode_duration_ms:.2f}ms"
             )
@@ -175,13 +179,6 @@ class TokenPipeline(BasePipeline):
             context.encode_duration_ms = (time.perf_counter() - t0) * 1000
             prompt_input = context.token_ids
 
-            logger.info(
-                f"[{context.unique_id}] TokenIds 转换完成: "
-                f"prompt_tokens={context.prompt_tokens}, "
-                f"cache_hit_tokens={context.cache_hit_tokens}, "
-                f"encode_ms={context.encode_duration_ms:.2f}"
-            )
-
             # 流式状态
             previous_text = ""
             previous_token_ids = []
@@ -211,9 +208,6 @@ class TokenPipeline(BasePipeline):
                         if not first_chunk_received:
                             context.ttft_ms = (time.perf_counter() - infer_start_time) * 1000
                             first_chunk_received = True
-                            logger.info(
-                                f"[{context.unique_id}] TTFT: {context.ttft_ms:.2f}ms"
-                            )
 
                         # 更新状态
                         previous_text = context.stream_buffer_text
@@ -341,9 +335,19 @@ class TokenPipeline(BasePipeline):
 
     def _build_response(self, context: ProcessContext) -> ProcessContext:
         """阶段 5: 构建响应"""
-        # 构建完整对话
-        context.full_conversation_text = context.prompt_text + context.response_text
+        # 1. 先构建用户响应（response_text 仍为 skip_special_tokens=True 的结果，不含 EOS）
+        context.raw_response = self.response_builder.build(
+            context.response_text, context
+        )
 
+        # 2. re-decode response，保留 EOS，与 response_ids 一致
+        if context.response_ids:
+            context.response_text = self.token_converter.tokenizer.decode(
+                context.response_ids, skip_special_tokens=False
+            )
+
+        # 3. full_conversation 自然一致（text 和 token_ids 都含 EOS）
+        context.full_conversation_text = context.prompt_text + context.response_text
         if context.token_ids and context.response_ids:
             context.full_conversation_token_ids = context.token_ids + context.response_ids
         else:
@@ -352,16 +356,6 @@ class TokenPipeline(BasePipeline):
         logger.debug(
             f"[{context.unique_id}] 完整对话构建完成: "
             f"total_tokens={len(context.full_conversation_token_ids) if context.full_conversation_token_ids else len(context.full_conversation_text)}"
-        )
-
-        # 构建最终响应
-        context.raw_response = self.response_builder.build(
-            context.response_text, context
-        )
-
-        logger.debug(
-            f"[{context.unique_id}] OpenAI Response 构建完成: "
-            f"has_response={context.raw_response is not None}"
         )
 
         return context
@@ -608,18 +602,7 @@ class TokenPipeline(BasePipeline):
             f"stream_buffer_ids 长度: {len(context.stream_buffer_ids)}"
         )
 
-        context.full_conversation_text = context.prompt_text + context.response_text
-
-        if context.token_ids and context.response_ids:
-            context.full_conversation_token_ids = context.token_ids + context.response_ids
-
-        # 构建文本推理响应
-        context.text_response = {
-            "response_text": context.response_text,
-            "response_ids": context.response_ids
-        }
-
-        # 统计信息
+        # 统计信息（在 re-decode 前计算，使用原始 token 数量）
         if context.stream_buffer_ids:
             context.completion_tokens = len(context.stream_buffer_ids)
             logger.debug(
@@ -644,10 +627,6 @@ class TokenPipeline(BasePipeline):
         self._update_timing(context)
 
         # 统一构建 token_response，保持流式与非流式语义一致
-        # 非流式 token_response 结构: {"id", "object", "created", "model",
-        #   "choices": [{"index", "text", "token_ids", "logprobs", "prompt_token_ids", ...}],
-        #   "usage": {...}}
-        # 流式场景需要构建相同结构，确保下游代码和轨迹数据行为一致
         if context.token_response is None:
             context.token_response = {}
 
@@ -659,14 +638,14 @@ class TokenPipeline(BasePipeline):
                 "total_tokens": context.total_tokens,
             }
 
-        # 补全 choices 结构，与非流式格式对齐
+        # 1. 先构建 choices 和用户响应（response_text 仍为 skip_special_tokens=True 的结果，不含 EOS）
+        user_text = context.response_text or ""
         if "choices" not in context.token_response:
             choice = {
-                "text": context.response_text or "",
+                "text": user_text,
                 "index": 0,
                 "finish_reason": "stop",
             }
-            # token_response 用于数据库存储，总是包含 token_ids 和 logprobs
             if context.response_ids is not None:
                 choice["token_ids"] = context.response_ids
             if context.stream_logprobs:
@@ -685,17 +664,38 @@ class TokenPipeline(BasePipeline):
         if "model" not in context.token_response:
             context.token_response["model"] = self.model
 
-        # 构建最终响应
-        context.raw_response = self.response_builder.build(
-            context.response_text, context
-        )
+        # 构建用户响应（不含 EOS）
+        context.raw_response = self.response_builder.build(user_text, context)
+
+        # 2. re-decode response，保留 EOS，与 response_ids 一致
+        if context.response_ids:
+            context.response_text = self.token_converter.tokenizer.decode(
+                context.response_ids, skip_special_tokens=False
+            )
+
+        # 3. full_conversation 自然一致（text 和 token_ids 都含 EOS）
+        context.full_conversation_text = context.prompt_text + context.response_text
+        if context.token_ids and context.response_ids:
+            context.full_conversation_token_ids = context.token_ids + context.response_ids
+
+        # 更新 text_response（使用 re-decode 后的 response_text，含 EOS，与 response_ids 一致）
+        context.text_response = {
+            "response_text": context.response_text,
+            "response_ids": context.response_ids
+        }
 
         ttft_str = f"{context.ttft_ms:.2f}" if context.ttft_ms else "N/A"
         inference_str = f"{context.inference_duration_ms:.2f}" if context.inference_duration_ms else "N/A"
+        transform_str = f"{context.transform_duration_ms:.2f}" if context.transform_duration_ms else "N/A"
+        encode_str = f"{context.encode_duration_ms:.2f}" if context.encode_duration_ms else "N/A"
+        cache_db = f"{context.cache_db_query_ms:.2f}" if context.cache_db_query_ms else "N/A"
+        cache_match = f"{context.cache_prefix_match_ms:.2f}" if context.cache_prefix_match_ms else "N/A"
         logger.info(
             f"[{context.unique_id}] 流式处理完成: "
             f"chunks={context.stream_chunk_count}, "
             f"duration_ms={context.processing_duration_ms:.2f}, "
+            f"transform_ms={transform_str}, encode_ms={encode_str} "
+            f"(cache_db={cache_db}ms, match={cache_match}ms), "
             f"ttft_ms={ttft_str}, inference_ms={inference_str}"
         )
 
