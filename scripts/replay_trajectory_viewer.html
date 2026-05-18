@@ -1029,12 +1029,12 @@ function showToast(msg, type = 'info') {
 function formatTime(ts) {
     if (!ts) return '-';
     try {
-        const d = new Date(ts);
-        // 服务器时间为 UTC，前端统一 +8 展示
-        const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-        const cst = new Date(utc + 8 * 3600000);
+        const s = typeof ts === 'string' ? ts : new Date(ts).toISOString();
+        // 服务器时间为 UTC，强制按 UTC 解析后 +8 展示
+        const d = new Date(s.endsWith('Z') ? s : s + 'Z');
+        d.setUTCHours(d.getUTCHours() + 8);
         const pad = (n) => n.toString().padStart(2, '0');
-        return `${cst.getFullYear()}-${pad(cst.getMonth()+1)}-${pad(cst.getDate())} ${pad(cst.getHours())}:${pad(cst.getMinutes())}:${pad(cst.getSeconds())}`;
+        return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
     } catch { return ts; }
 }
 
