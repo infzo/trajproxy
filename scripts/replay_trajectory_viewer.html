@@ -247,6 +247,7 @@
 
     .nav-controls { display: flex; align-items: center; gap: 12px; }
     .nav-info { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 12px; font-weight: 500; }
+    .tz-hint { color: var(--text-dim); font-size: 10px; opacity: 0.7; }
 
     /* Content Body: 左侧记录卡片 + 右侧轨迹视图 */
     .content-body { flex: 1; display: flex; overflow: hidden; }
@@ -841,6 +842,7 @@
                 <button class="btn-secondary" id="btnNext" onclick="navigateRecord(1)">下一条 →</button>
             </div>
             <div class="nav-controls">
+                <span class="tz-hint">时间显示 UTC+8</span>
                 <button class="btn-secondary" onclick="toggleAllRecords()" title="折叠/展开所有卡片">全部折叠/展开</button>
                 <button class="btn-secondary" onclick="expandAllFields()">展开字段</button>
                 <button class="btn-secondary" onclick="collapseAllFields()">收起字段</button>
@@ -1028,8 +1030,11 @@ function formatTime(ts) {
     if (!ts) return '-';
     try {
         const d = new Date(ts);
+        // 服务器时间为 UTC，前端统一 +8 展示
+        const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+        const cst = new Date(utc + 8 * 3600000);
         const pad = (n) => n.toString().padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        return `${cst.getFullYear()}-${pad(cst.getMonth()+1)}-${pad(cst.getDate())} ${pad(cst.getHours())}:${pad(cst.getMinutes())}:${pad(cst.getSeconds())}`;
     } catch { return ts; }
 }
 
@@ -1344,7 +1349,7 @@ function renderRecords() {
                     <div class="rh-stats">
                         <span title="Prompt Tokens">P:${r.prompt_tokens ?? '-'}</span>
                         <span title="Completion Tokens">C:${r.completion_tokens ?? '-'}</span>
-                        <span title="Duration">${r.processing_duration_ms ? r.processing_duration_ms + 'ms' : '-'}</span>
+                        <span title="Duration">${r.processing_duration_ms ? Number(r.processing_duration_ms).toFixed(2) + 'ms' : '-'}</span>
                     </div>
                     <button class="btn-copy" onclick="event.stopPropagation(); copyRecordJson(${i})" title="复制 JSON">复制</button>
                     <button class="btn-traj${trajActive}" onclick="event.stopPropagation(); openTrajectory(${i})" title="轨迹视图">轨迹</button>
