@@ -4,7 +4,7 @@ TrajectoryProvider - 转录提供者
 负责处理轨迹记录查询的业务逻辑
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from traj_proxy.store.request_repository import RequestRepository
 
 
@@ -63,17 +63,19 @@ class TrajectoryProvider:
 
     async def get_trajectories(
         self,
-        session_id: str
+        session_id: str,
+        fields: Optional[str] = None
     ) -> Dict[str, Any]:
         """查询指定 session 的所有轨迹记录
 
         Args:
             session_id: 会话ID
+            fields: 逗号分隔的字段名，None 返回全部
 
         Returns:
             包含 session_id 和记录列表的字典
         """
-        records = await self.request_repository.get_all_by_session(session_id)
+        records = await self.request_repository.get_all_by_session(session_id, fields=fields)
         return {
             "session_id": session_id,
             "records": records

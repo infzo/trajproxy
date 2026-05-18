@@ -185,9 +185,6 @@ class DirectPipeline(BasePipeline):
                 if not first_chunk_received:
                     context.ttft_ms = (time.perf_counter() - infer_start_time) * 1000
                     first_chunk_received = True
-                    logger.info(
-                        f"[{context.unique_id}] TTFT: {context.ttft_ms:.2f}ms"
-                    )
 
                 # 累积流式响应中的所有字段
                 self._accumulate_stream_fields(context, chunk)

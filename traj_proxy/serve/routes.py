@@ -12,8 +12,14 @@ from fastapi.responses import StreamingResponse, Response
 from typing import Dict, Any, Optional
 import asyncio
 import json
+import time
 import traceback
 import uuid
+
+# 轨迹查询超时配置（秒）
+TRAJECTORY_DB_TIMEOUT = 30
+TRAJECTORY_SERIALIZE_TIMEOUT = 30
+TRAJECTORY_SEMAPHORE_ACQUIRE_TIMEOUT = 5.0
 
 try:
     import orjson
@@ -490,7 +496,8 @@ async def list_models_openai(request: Request):
 async def get_trajectory(
     request: Request,
     session_id: str,
-    limit: int = 10000
+    limit: int = 10000,
+    fields: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     根据 session_id 获取所有轨迹记录（旧接口，保持向后兼容）
@@ -499,6 +506,8 @@ async def get_trajectory(
         request: FastAPI Request 对象
         session_id: 会话ID (格式: app_id,sample_id,task_id)
         limit: 最多返回的记录数，默认为10000
+        fields: 逗号分隔的字段名，不传返回全部；
+                支持 field_name（包含）和 -field_name（排除）
 
     返回:
         包含session_id、记录数量和记录列表的字典
@@ -513,23 +522,73 @@ async def get_trajectory(
     if not valid:
         raise HTTPException(status_code=422, detail=msg)
 
+    t_start = time.perf_counter()
+
+    # 并发限流
+    semaphore = getattr(request.app.state, "request_semaphore", None)
+    acquired = False
+    if semaphore:
+        try:
+            await asyncio.wait_for(semaphore.acquire(), timeout=TRAJECTORY_SEMAPHORE_ACQUIRE_TIMEOUT)
+            acquired = True
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
+
     try:
+        # DB 查询超时保护
+        t_db_start = time.perf_counter()
         provider = get_provider(request)
-        # 使用新方法查询，然后转换为旧格式
-        result = await provider.get_trajectories(session_id)
+        try:
+            result = await asyncio.wait_for(
+                provider.get_trajectories(session_id, fields=fields),
+                timeout=TRAJECTORY_DB_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            t_db_elapsed = (time.perf_counter() - t_db_start) * 1000
+            logger.warning(f"[{session_id}] DB查询超时 ({TRAJECTORY_DB_TIMEOUT}s), 已耗时={t_db_elapsed:.1f}ms")
+            raise
+        t_db_end = time.perf_counter()
+
         records = result["records"][:limit]
         result_data = {
             "session_id": session_id,
             "count": len(records),
             "records": records
         }
-        # 在线程池中序列化大 JSON，避免阻塞事件循环导致连接重置
-        json_bytes = await asyncio.to_thread(_serialize_json, result_data)
+
+        # 序列化（在线程池中执行，避免阻塞事件循环）
+        t_ser_start = time.perf_counter()
+        try:
+            json_bytes = await asyncio.wait_for(
+                asyncio.to_thread(_serialize_json, result_data),
+                timeout=TRAJECTORY_SERIALIZE_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            t_ser_elapsed = (time.perf_counter() - t_ser_start) * 1000
+            logger.warning(f"[{session_id}] 序列化超时 ({TRAJECTORY_SERIALIZE_TIMEOUT}s), 已耗时={t_ser_elapsed:.1f}ms")
+            raise
+        t_end = time.perf_counter()
+
+        # 一次性打印各步骤耗时
+        t_db_elapsed = (t_db_end - t_db_start) * 1000
+        t_ser_elapsed = (t_end - t_db_end) * 1000
+        t_total = (t_end - t_start) * 1000
+        response_size_kb = len(json_bytes) / 1024
+        logger.info(
+            f"[{session_id}] 轨迹查询完成: {len(records)}条记录, "
+            f"{response_size_kb:.1f}KB, fields={fields or '全部'}, "
+            f"DB查询={t_db_elapsed:.1f}ms, 序列化={t_ser_elapsed:.1f}ms, 总耗时={t_total:.1f}ms"
+        )
         return Response(content=json_bytes, media_type="application/json")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="轨迹查询超时")
     except Exception as e:
         logger.exception(f"轨迹查询失败: {str(e)}")
         error_detail, status_code = build_error_response("trajectory_query", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
+    finally:
+        if acquired:
+            semaphore.release()
 
 
 # ========== 轨迹查询接口（新版） ==========
@@ -556,7 +615,12 @@ async def list_trajectories(
 
     try:
         provider = get_provider(request)
-        return await provider.list_trajectories(run_id)
+        return await asyncio.wait_for(
+            provider.list_trajectories(run_id),
+            timeout=TRAJECTORY_DB_TIMEOUT
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="轨迹列表查询超时")
     except Exception as e:
         logger.exception(f"查询轨迹列表失败: {str(e)}")
         error_detail, status_code = build_error_response("list_trajectories", e)
@@ -567,7 +631,8 @@ async def list_trajectories(
 async def get_trajectory_detail(
     request: Request,
     session_id: str,
-    limit: int = 10000
+    limit: int = 10000,
+    fields: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     查询指定轨迹的完整数据（详情）
@@ -576,6 +641,8 @@ async def get_trajectory_detail(
         request: FastAPI Request 对象
         session_id: 会话ID
         limit: 最多返回的记录数，默认为10000
+        fields: 逗号分隔的字段名，不传返回全部；
+                支持 field_name（包含）和 -field_name（排除）
 
     返回:
         包含 session_id 和记录列表的字典
@@ -585,16 +652,68 @@ async def get_trajectory_detail(
     """
     from traj_proxy.workers.worker import get_transcript_provider as get_provider
 
+    t_start = time.perf_counter()
+
+    # 并发限流
+    semaphore = getattr(request.app.state, "request_semaphore", None)
+    acquired = False
+    if semaphore:
+        try:
+            await asyncio.wait_for(semaphore.acquire(), timeout=TRAJECTORY_SEMAPHORE_ACQUIRE_TIMEOUT)
+            acquired = True
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
+
     try:
+        # DB 查询超时保护
+        t_db_start = time.perf_counter()
         provider = get_provider(request)
-        result = await provider.get_trajectories(session_id)
+        try:
+            result = await asyncio.wait_for(
+                provider.get_trajectories(session_id, fields=fields),
+                timeout=TRAJECTORY_DB_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            t_db_elapsed = (time.perf_counter() - t_db_start) * 1000
+            logger.warning(f"[{session_id}] DB查询超时 ({TRAJECTORY_DB_TIMEOUT}s), 已耗时={t_db_elapsed:.1f}ms")
+            raise
+        t_db_end = time.perf_counter()
+
         # 应用 limit 限制
-        if limit and len(result["records"]) > limit:
+        record_count = len(result.get("records", []))
+        if limit and record_count > limit:
             result["records"] = result["records"][:limit]
-        # 在线程池中序列化大 JSON，避免阻塞事件循环导致连接重置
-        json_bytes = await asyncio.to_thread(_serialize_json, result)
+
+        # 序列化（在线程池中执行，避免阻塞事件循环）
+        t_ser_start = time.perf_counter()
+        try:
+            json_bytes = await asyncio.wait_for(
+                asyncio.to_thread(_serialize_json, result),
+                timeout=TRAJECTORY_SERIALIZE_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            t_ser_elapsed = (time.perf_counter() - t_ser_start) * 1000
+            logger.warning(f"[{session_id}] 序列化超时 ({TRAJECTORY_SERIALIZE_TIMEOUT}s), 已耗时={t_ser_elapsed:.1f}ms")
+            raise
+        t_end = time.perf_counter()
+
+        # 一次性打印各步骤耗时
+        t_db_elapsed = (t_db_end - t_db_start) * 1000
+        t_ser_elapsed = (t_end - t_db_end) * 1000
+        t_total = (t_end - t_start) * 1000
+        response_size_kb = len(json_bytes) / 1024
+        logger.info(
+            f"[{session_id}] 轨迹详情查询完成: {min(record_count, limit) if limit else record_count}条记录, "
+            f"{response_size_kb:.1f}KB, fields={fields or '全部'}, "
+            f"DB查询={t_db_elapsed:.1f}ms, 序列化={t_ser_elapsed:.1f}ms, 总耗时={t_total:.1f}ms"
+        )
         return Response(content=json_bytes, media_type="application/json")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="轨迹查询超时")
     except Exception as e:
         logger.exception(f"查询轨迹详情失败: {str(e)}")
         error_detail, status_code = build_error_response("get_trajectory_detail", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
+    finally:
+        if acquired:
+            semaphore.release()

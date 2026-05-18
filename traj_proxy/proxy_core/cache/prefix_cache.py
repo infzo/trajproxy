@@ -5,6 +5,7 @@ PrefixMatchCache - 前缀匹配缓存策略
 """
 
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
+import time
 
 from traj_proxy.proxy_core.cache.base import BaseCacheStrategy
 from traj_proxy.utils.logger import get_logger
@@ -62,10 +63,14 @@ class PrefixMatchCache(BaseCacheStrategy):
             return token_ids
 
         # 查询该 session 的所有历史请求（仅取前缀匹配所需字段）
+        t_db_start = time.perf_counter()
         history = await self.request_repository.get_prefix_candidates(context.session_id)
+        context.cache_db_query_ms = (time.perf_counter() - t_db_start) * 1000
 
         # 找到最长前缀匹配（匹配完整对话文本）
+        t_match_start = time.perf_counter()
         matched_trajectory = self._find_longest_prefix_match(text, history)
+        context.cache_prefix_match_ms = (time.perf_counter() - t_match_start) * 1000
 
         if matched_trajectory:
             # 使用缓存的完整对话 token_ids

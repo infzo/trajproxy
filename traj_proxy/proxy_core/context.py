@@ -74,7 +74,9 @@ class ProcessContext:
 
     # 分阶段耗时（毫秒）
     transform_duration_ms: Optional[float] = None    # 消息转换耗时
-    encode_duration_ms: Optional[float] = None       # Token编码耗时
+    encode_duration_ms: Optional[float] = None       # Token编码总耗时
+    cache_db_query_ms: Optional[float] = None        # 缓存DB查询耗时
+    cache_prefix_match_ms: Optional[float] = None    # 前缀匹配耗时
     inference_duration_ms: Optional[float] = None    # 推理请求耗时
     decode_duration_ms: Optional[float] = None       # Token解码耗时
 
