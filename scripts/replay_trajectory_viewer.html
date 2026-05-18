@@ -312,6 +312,20 @@
     .btn-traj:hover { background: rgba(99, 102, 241, 0.25); border-color: rgba(99, 102, 241, 0.5); }
     .btn-traj.active { background: var(--primary); color: white; border-color: var(--primary); }
 
+    .btn-copy {
+        background: rgba(110, 231, 183, 0.12);
+        border: 1px solid rgba(110, 231, 183, 0.3);
+        color: #6ee7b7;
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+    }
+    .btn-copy:hover { background: rgba(110, 231, 183, 0.22); border-color: rgba(110, 231, 183, 0.5); }
+    .btn-copy.copied { background: #6ee7b7; color: #0f172a; border-color: #6ee7b7; }
+
     /* JSON Tree Styles */
     .record-body {
         max-height: 0;
@@ -1332,6 +1346,7 @@ function renderRecords() {
                         <span title="Completion Tokens">C:${r.completion_tokens ?? '-'}</span>
                         <span title="Duration">${r.processing_duration_ms ? r.processing_duration_ms + 'ms' : '-'}</span>
                     </div>
+                    <button class="btn-copy" onclick="event.stopPropagation(); copyRecordJson(${i})" title="复制 JSON">复制</button>
                     <button class="btn-traj${trajActive}" onclick="event.stopPropagation(); openTrajectory(${i})" title="轨迹视图">轨迹</button>
                     <span class="rh-arrow">&#9654;</span>
                 </div>
@@ -1504,6 +1519,21 @@ function toggleString(el) {
 }
 
 // ==================== Interaction Logic ====================
+function copyRecordJson(idx) {
+    const record = currentRecords[idx];
+    const jsonStr = JSON.stringify(record, null, 2);
+    navigator.clipboard.writeText(jsonStr).then(() => {
+        const btn = document.querySelector(`#card-${idx} .btn-copy`);
+        btn.classList.add('copied');
+        btn.textContent = '已复制';
+        setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.textContent = '复制';
+        }, 1500);
+    }).catch(() => {
+        showToast('复制失败', 'error');
+    });
+}
 function toggleRecord(idx) {
     const card = document.getElementById(`card-${idx}`);
     const isOpen = card.classList.toggle('open');
