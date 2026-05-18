@@ -1024,13 +1024,24 @@ function showToast(msg, type = 'info') {
     }, 3000);
 }
 
+// 服务器时间中时间部分实际是 UTC，但被错误标注为 +08:00
+// 剥离偏移后按 UTC 解析，显示时加 8 小时
+function parseServerTime(ts) {
+    if (!ts) return null;
+    const cleanTs = ts.replace(/[+-]\d{2}:\d{2}$/, '');
+    return new Date(cleanTs + 'Z');
+}
+
 function formatTime(ts) {
     if (!ts) return '-';
     try {
-        const d = new Date(ts);
+        const d = parseServerTime(ts);
+        if (!d || isNaN(d.getTime())) return ts;
         const pad = (n) => n.toString().padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+        const utc8 = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+        return `${utc8.getUTCFullYear()}-${pad(utc8.getUTCMonth()+1)}-${pad(utc8.getUTCDate())} ${pad(utc8.getUTCHours())}:${pad(utc8.getUTCMinutes())}:${pad(utc8.getUTCSeconds())}`;
     } catch { return ts; }
+}
 }
 
 function escapeHtml(s) {
@@ -1123,15 +1134,16 @@ async function loadRunIdOptions() {
             const runId = m.run_id;
             if (runId) {
                 if (!runIdMap.has(runId)) {
-                    runIdMap.set(runId, { count: 0, latest_updated_at: null });
+                    runIdMap.set(runId, { count: 0, latest_updated_at: null, latest_updated_at_str: null });
                 }
                 const info = runIdMap.get(runId);
                 info.count++;
                 // 取最新的 updated_at
                 if (m.updated_at) {
-                    const updateTime = new Date(m.updated_at);
+                    const updateTime = parseServerTime(m.updated_at);
                     if (!info.latest_updated_at || updateTime > info.latest_updated_at) {
                         info.latest_updated_at = updateTime;
+                        info.latest_updated_at_str = m.updated_at;
                     }
                 }
             }
@@ -1180,7 +1192,7 @@ function renderRunIdDropdown(data, filterKeyword = '') {
 
     dropdown.innerHTML = filteredIds.map(id => {
         const info = runIdMap.get(id);
-        const timeStr = info.latest_updated_at ? info.latest_updated_at.toLocaleString() : '无时间';
+        const timeStr = info.latest_updated_at_str ? formatTime(info.latest_updated_at_str) : '无时间';
         return `<div class="dropdown-item" onclick="selectRunId('${escapeHtml(id)}')">
             <div class="dropdown-item-value">${escapeHtml(id)}</div>
             <div class="dropdown-item-meta">${info.count} 模型, ${timeStr}</div>
