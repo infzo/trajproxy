@@ -316,10 +316,12 @@
     .record-body {
         max-height: 0;
         overflow: hidden;
-        transition: max-height 0.3s ease-in-out;
         background: #161e2e;
     }
-    .record-card.open .record-body { max-height: 2000px; overflow: visible; }
+    .record-card.open .record-body {
+        max-height: 80vh;
+        overflow-y: auto;
+    }
 
     .json-tree { padding: 16px; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; }
 
@@ -896,10 +898,14 @@ let currentRecordIdx = 0;
 let windowAllExpanded = true;
 let serverUrl = '';
 let trajRecordIdx = -1; // 当前轨迹视图显示的 record 索引
+let renderedBodySet = new Set(); // 已渲染 body 的 record 索引集合
 
 const MAX_STRING_LEN = 200;
 const MAX_ARRAY_RENDER = 200; // 大数组最多渲染条目数
 const CHAT_COLLAPSE_LEN = 800; // 聊天消息超过此长度折叠
+
+const stringStore = new Map(); // 存储 long string / array 引用，避免 DOM 属性膨胀
+let stringStoreId = 0;
 
 // ==================== 预设服务器列表 ====================
 const PRESET_SERVERS = [
@@ -1281,6 +1287,9 @@ async function selectSession(idx) {
         currentRecords = records;
         currentRecordIdx = 0;
         windowAllExpanded = true;
+        renderedBodySet = new Set();
+        stringStore.clear();
+        stringStoreId = 0;
 
         if (records.length === 0) {
             recordList.innerHTML = `
@@ -1292,6 +1301,7 @@ async function selectSession(idx) {
         }
 
         renderRecords();
+        observeCards();
         document.getElementById('recordNav').style.display = 'flex';
         updateNav();
     } catch (e) {
@@ -1308,7 +1318,7 @@ function renderRecords() {
         const trajActive = trajRecordIdx === i ? ' active' : '';
 
         return `
-        <div class="record-card ${errorClass} open" data-ridx="${i}" id="card-${i}">
+        <div class="record-card ${errorClass}" data-ridx="${i}" id="card-${i}">
             <div class="record-header" onclick="toggleRecord(${i})">
                 <div class="rh-left">
                     <span class="rh-idx">#${i + 1}</span>
@@ -1326,11 +1336,7 @@ function renderRecords() {
                     <span class="rh-arrow">&#9654;</span>
                 </div>
             </div>
-            <div class="record-body" id="body-${i}">
-                <div class="json-tree">
-                    ${renderJsonTree(r, '', 0)}
-                </div>
-            </div>
+            <div class="record-body" id="body-${i}"></div>
         </div>`;
     }).join('');
 }
@@ -1343,10 +1349,11 @@ function renderJsonTree(obj, path, depth) {
 
     if (typeof obj === 'string') {
         if (obj.length > MAX_STRING_LEN) {
-            // 存储原文和截断文的 encodeURIComponent 编码，解决展开/收起问题
-            const encodedFull = encodeURIComponent(obj);
-            const encodedShort = encodeURIComponent(truncate(obj, MAX_STRING_LEN));
-            return `<span class="tree-string tree-string-expandable" data-full="${encodedFull}" data-short="${encodedShort}" data-expanded="false" onclick="toggleString(this)">"${escapeHtml(truncate(obj, MAX_STRING_LEN))}"</span>`;
+            const fullId = '__ss_' + (stringStoreId++);
+            stringStore.set(fullId, obj);
+            const shortId = '__ss_' + (stringStoreId++);
+            stringStore.set(shortId, truncate(obj, MAX_STRING_LEN));
+            return `<span class="tree-string tree-string-expandable" data-full-id="${fullId}" data-short-id="${shortId}" data-expanded="false" onclick="toggleString(this)">"${escapeHtml(truncate(obj, MAX_STRING_LEN))}"</span>`;
         }
         return `<span class="tree-string">"${escapeHtml(obj)}"</span>`;
     }
@@ -1354,11 +1361,35 @@ function renderJsonTree(obj, path, depth) {
     if (Array.isArray(obj)) {
         if (obj.length === 0) return '<span class="tree-bracket">[]</span>';
 
-        const isLarge = obj.length > MAX_ARRAY_RENDER;
-        const displayItems = isLarge ? obj.slice(0, MAX_ARRAY_RENDER) : obj;
+        const BATCH_SIZE = 50;
+        const INITIAL_RENDER = 50;
+
+        // 小数组：一次性渲染
+        if (obj.length <= INITIAL_RENDER) {
+            let childrenHtml = '';
+            obj.forEach((item, idx) => {
+                const isPrimitive = item === null || typeof item !== 'object';
+                childrenHtml += `<div class="tree-row">
+                    ${isPrimitive
+                        ? '<span class="tree-toggle-spacer"></span>'
+                        : `<span class="tree-toggle" onclick="toggleNode(this)">▶</span>`}
+                    ${renderJsonTree(item, `${path}[${idx}]`, depth + 1)}
+                </div>`;
+            });
+            return `<div>
+                <span class="tree-bracket">[</span><span class="tree-array-count">${obj.length}</span>
+                <div>${childrenHtml}</div>
+                <span class="tree-bracket">]</span>
+            </div>`;
+        }
+
+        // 大数组：初始渲染首批 + "加载更多"按钮
+        const arrId = '__arr_' + (stringStoreId++);
+        stringStore.set(arrId, obj);
 
         let childrenHtml = '';
-        displayItems.forEach((item, idx) => {
+        const firstBatch = obj.slice(0, INITIAL_RENDER);
+        firstBatch.forEach((item, idx) => {
             const isPrimitive = item === null || typeof item !== 'object';
             childrenHtml += `<div class="tree-row">
                 ${isPrimitive
@@ -1368,29 +1399,21 @@ function renderJsonTree(obj, path, depth) {
             </div>`;
         });
 
-        if (isLarge) {
-            childrenHtml += `<div style="margin-left:18px;color:var(--text-dim);font-style:italic;font-size:11px;padding:4px 0;">... 显示前 ${MAX_ARRAY_RENDER} 条，共 ${obj.length} 条</div>`;
-        }
-
-        const scrollClass = obj.length > 50 ? ' tree-array-scroll' : '';
-
-        // 数组内部内容始终可见，由父级 .tree-children 统一控制显隐
-        return `
-            <div>
-                <span class="tree-bracket">[</span><span class="tree-array-count">${obj.length}</span>
-                <div class="${scrollClass}">
-                    ${childrenHtml}
-                </div>
-                <span class="tree-bracket">]</span>
+        return `<div>
+            <span class="tree-bracket">[</span><span class="tree-array-count">${obj.length}</span>
+            <div class="tree-array-scroll" data-array-id="${arrId}" data-offset="${INITIAL_RENDER}" data-batch="${BATCH_SIZE}">
+                ${childrenHtml}
+                <div class="tree-load-more" style="margin-left:18px;color:var(--text-dim);font-style:italic;font-size:11px;padding:4px 0;cursor:pointer;" onclick="loadMoreArrayItems(this)">... 显示 ${INITIAL_RENDER}/${obj.length}，点击加载更多</div>
             </div>
-        `;
+            <span class="tree-bracket">]</span>
+        </div>`;
     }
 
     // Object
     const keys = Object.keys(obj);
     if (keys.length === 0) return '<span class="tree-bracket">{}</span>';
 
-    const isOpen = depth < 1;
+    const isOpen = false;
 
     let entriesHtml = '';
     keys.forEach(k => {
@@ -1434,18 +1457,47 @@ function toggleNode(el) {
     el.textContent = isHidden ? '▼' : '▶';
 }
 
+function loadMoreArrayItems(el) {
+    const container = el.parentElement;
+    const arrId = container.getAttribute('data-array-id');
+    const arr = stringStore.get(arrId);
+    const offset = parseInt(container.getAttribute('data-offset'));
+    const batch = parseInt(container.getAttribute('data-batch'));
+
+    const nextBatch = arr.slice(offset, offset + batch);
+    let html = '';
+    nextBatch.forEach((item, idx) => {
+        const i = offset + idx;
+        const isPrimitive = item === null || typeof item !== 'object';
+        html += `<div class="tree-row">
+            ${isPrimitive
+                ? '<span class="tree-toggle-spacer"></span>'
+                : `<span class="tree-toggle" onclick="toggleNode(this)">▶</span>`}
+            ${renderJsonTree(item, `[${i}]`, 0)}
+        </div>`;
+    });
+
+    el.insertAdjacentHTML('beforebegin', html);
+    const newOffset = offset + batch;
+
+    if (newOffset >= arr.length) {
+        el.remove();
+    } else {
+        container.setAttribute('data-offset', newOffset);
+        el.textContent = `... 显示 ${newOffset}/${arr.length}，点击加载更多`;
+    }
+}
+
 function toggleString(el) {
     const isExpanded = el.getAttribute('data-expanded') === 'true';
     if (isExpanded) {
-        // 收起
-        const shortDecoded = decodeURIComponent(el.getAttribute('data-short'));
-        el.innerHTML = '"' + escapeHtml(shortDecoded) + '"';
+        const shortStr = stringStore.get(el.getAttribute('data-short-id'));
+        el.innerHTML = '"' + escapeHtml(shortStr) + '"';
         el.setAttribute('data-expanded', 'false');
         el.title = '点击展开全文';
     } else {
-        // 展开
-        const fullDecoded = decodeURIComponent(el.getAttribute('data-full'));
-        el.innerHTML = '"' + escapeHtml(fullDecoded) + '"';
+        const fullStr = stringStore.get(el.getAttribute('data-full-id'));
+        el.innerHTML = '"' + escapeHtml(fullStr) + '"';
         el.setAttribute('data-expanded', 'true');
         el.title = '点击收起';
     }
@@ -1454,15 +1506,66 @@ function toggleString(el) {
 // ==================== Interaction Logic ====================
 function toggleRecord(idx) {
     const card = document.getElementById(`card-${idx}`);
-    card.classList.toggle('open');
+    const isOpen = card.classList.toggle('open');
+    if (isOpen && !renderedBodySet.has(idx)) {
+        renderedBodySet.add(idx);
+        const body = document.getElementById(`body-${idx}`);
+        requestAnimationFrame(() => {
+            body.innerHTML = `<div class="json-tree">${renderJsonTree(currentRecords[idx], '', 0)}</div>`;
+        });
+    }
 }
 
 function toggleAllRecords() {
     windowAllExpanded = !windowAllExpanded;
     currentRecords.forEach((_, i) => {
         const card = document.getElementById(`card-${i}`);
-        if (windowAllExpanded) card.classList.add('open');
-        else card.classList.remove('open');
+        if (windowAllExpanded) {
+            card.classList.add('open');
+            if (!renderedBodySet.has(i) && isInViewport(card)) {
+                renderedBodySet.add(i);
+                const body = document.getElementById(`body-${i}`);
+                requestAnimationFrame(() => {
+                    body.innerHTML = `<div class="json-tree">${renderJsonTree(currentRecords[i], '', 0)}</div>`;
+                });
+            }
+        } else {
+            card.classList.remove('open');
+        }
+    });
+}
+
+function isInViewport(el) {
+    const rect = el.getBoundingClientRect();
+    return rect.top < window.innerHeight && rect.bottom > 0;
+}
+
+// IntersectionObserver: 滚动到可见区域时自动渲染未加载的卡片 body
+let bodyObserver = null;
+function setupBodyObserver() {
+    if (bodyObserver) return;
+    bodyObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const idx = parseInt(entry.target.dataset.ridx);
+                const card = entry.target;
+                if (card.classList.contains('open') && !renderedBodySet.has(idx)) {
+                    renderedBodySet.add(idx);
+                    const body = document.getElementById(`body-${idx}`);
+                    requestAnimationFrame(() => {
+                        body.innerHTML = `<div class="json-tree">${renderJsonTree(currentRecords[idx], '', 0)}</div>`;
+                    });
+                }
+                bodyObserver.unobserve(entry.target);
+            }
+        });
+    }, { rootMargin: '200px' });
+}
+
+function observeCards() {
+    if (!bodyObserver) setupBodyObserver();
+    document.querySelectorAll('.record-card').forEach(card => {
+        bodyObserver.observe(card);
     });
 }
 
@@ -1504,6 +1607,13 @@ function scrollToRecord(idx) {
         card.classList.add('active');
         card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         if (!card.classList.contains('open')) card.classList.add('open');
+        if (!renderedBodySet.has(idx)) {
+            renderedBodySet.add(idx);
+            const body = document.getElementById(`body-${idx}`);
+            requestAnimationFrame(() => {
+                body.innerHTML = `<div class="json-tree">${renderJsonTree(currentRecords[idx], '', 0)}</div>`;
+            });
+        }
     }
 }
 
@@ -1520,6 +1630,9 @@ function clearAll() {
     closeTrajectory();
     window._sessions = [];
     currentRecords = [];
+    renderedBodySet = new Set();
+    stringStore.clear();
+    stringStoreId = 0;
     showToast('已重置', 'info');
 }
 
