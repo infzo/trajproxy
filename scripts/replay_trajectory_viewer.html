@@ -247,7 +247,6 @@
 
     .nav-controls { display: flex; align-items: center; gap: 12px; }
     .nav-info { font-variant-numeric: tabular-nums; color: var(--text-dim); font-size: 12px; font-weight: 500; }
-    .tz-hint { color: var(--text-dim); font-size: 10px; opacity: 0.7; }
 
     /* Content Body: 左侧记录卡片 + 右侧轨迹视图 */
     .content-body { flex: 1; display: flex; overflow: hidden; }
@@ -842,7 +841,6 @@
                 <button class="btn-secondary" id="btnNext" onclick="navigateRecord(1)">下一条 →</button>
             </div>
             <div class="nav-controls">
-                <span class="tz-hint">时间显示 UTC+8</span>
                 <button class="btn-secondary" onclick="toggleAllRecords()" title="折叠/展开所有卡片">全部折叠/展开</button>
                 <button class="btn-secondary" onclick="expandAllFields()">展开字段</button>
                 <button class="btn-secondary" onclick="collapseAllFields()">收起字段</button>
@@ -1029,12 +1027,9 @@ function showToast(msg, type = 'info') {
 function formatTime(ts) {
     if (!ts) return '-';
     try {
-        const s = typeof ts === 'string' ? ts : new Date(ts).toISOString();
-        // 服务器时间为 UTC，强制按 UTC 解析后 +8 展示
-        const d = new Date(s.endsWith('Z') ? s : s + 'Z');
-        d.setUTCHours(d.getUTCHours() + 8);
+        const d = new Date(ts);
         const pad = (n) => n.toString().padStart(2, '0');
-        return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     } catch { return ts; }
 }
 
@@ -1185,7 +1180,7 @@ function renderRunIdDropdown(data, filterKeyword = '') {
 
     dropdown.innerHTML = filteredIds.map(id => {
         const info = runIdMap.get(id);
-        const timeStr = info.latest_updated_at ? formatTime(info.latest_updated_at.toISOString()) : '无时间';
+        const timeStr = info.latest_updated_at ? info.latest_updated_at.toLocaleString() : '无时间';
         return `<div class="dropdown-item" onclick="selectRunId('${escapeHtml(id)}')">
             <div class="dropdown-item-value">${escapeHtml(id)}</div>
             <div class="dropdown-item-meta">${info.count} 模型, ${timeStr}</div>
