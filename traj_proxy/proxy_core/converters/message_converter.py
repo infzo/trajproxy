@@ -111,22 +111,22 @@ class MessageConverter(BaseConverter):
         Returns:
             渲染后的 prompt 文本
         """
-        template_kwargs = {
-            "messages": messages,
-            "add_generation_prompt": True,
-        }
+        # 1. 以 chat_template_kwargs 为基准（参照 vllm merge_kwargs 语义）
+        chat_template_kwargs = context.request_params.get("chat_template_kwargs")
+        template_kwargs = dict(chat_template_kwargs) if isinstance(chat_template_kwargs, dict) else {}
 
-        # 从 request_params 提取 tools 相关参数
+        # 2. 显式字段覆盖（优先级高于 chat_template_kwargs）
+        template_kwargs["messages"] = messages
+        template_kwargs["add_generation_prompt"] = True
+
         tools = context.request_params.get("tools")
         if tools:
             template_kwargs["tools"] = tools
 
-        # 从 request_params 提取 documents 参数（RAG 场景）
         documents = context.request_params.get("documents")
         if documents:
             template_kwargs["documents"] = documents
 
-        # 从 request_params 提取 tool_choice 参数
         tool_choice = context.request_params.get("tool_choice")
         if tool_choice:
             template_kwargs["tool_choice"] = tool_choice
@@ -147,24 +147,22 @@ class MessageConverter(BaseConverter):
         Returns:
             渲染后的 prompt 文本
         """
-        # 构建 apply_chat_template 参数
-        template_kwargs = {
-            "tokenize": False,
-            "add_generation_prompt": True
-        }
+        # 1. 以 chat_template_kwargs 为基准（参照 vllm merge_kwargs 语义）
+        chat_template_kwargs = context.request_params.get("chat_template_kwargs")
+        template_kwargs = dict(chat_template_kwargs) if isinstance(chat_template_kwargs, dict) else {}
 
-        # 从 request_params 提取 tools 相关参数
+        # 2. 显式字段覆盖（优先级高于 chat_template_kwargs）
+        template_kwargs["tokenize"] = False
+        template_kwargs["add_generation_prompt"] = True
+
         tools = context.request_params.get("tools")
         if tools:
             template_kwargs["tools"] = tools
 
-        # 从 request_params 提取 documents 参数（RAG 场景）
         documents = context.request_params.get("documents")
         if documents:
             template_kwargs["documents"] = documents
 
-        # 从 request_params 提取 tool_choice 参数
-        # 简单传递策略：依赖模型的 chat template 处理
         tool_choice = context.request_params.get("tool_choice")
         if tool_choice:
             template_kwargs["tool_choice"] = tool_choice
