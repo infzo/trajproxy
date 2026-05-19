@@ -27,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
 
+from traj_proxy.utils import utcnow
+
 
 async def archive_details(
     pool: AsyncConnectionPool,
@@ -44,7 +46,7 @@ async def archive_details(
         retention_days: 活跃数据保留天数
         dry_run: 试运行模式，不修改数据库
     """
-    threshold = datetime.now() - timedelta(days=retention_days)
+    threshold = utcnow() - timedelta(days=retention_days)
     archive_dir.mkdir(parents=True, exist_ok=True)
 
     async with pool.connection() as conn:
@@ -180,7 +182,7 @@ async def ensure_current_partition(pool: AsyncConnectionPool):
     Args:
         pool: 数据库连接池
     """
-    now = datetime.now()
+    now = utcnow()
     next_month = now.month + 1 if now.month < 12 else 1
     next_year = now.year if now.month < 12 else now.year + 1
 

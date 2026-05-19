@@ -5,9 +5,11 @@
 """
 
 import asyncio
+import zoneinfo
 from datetime import datetime
 from typing import Optional, Dict, Any
 
+from traj_proxy.utils import utcnow
 from traj_proxy.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -86,7 +88,7 @@ class ArchiveScheduler:
             return
 
         self._running = True
-        self._started_at = datetime.now()
+        self._started_at = utcnow()
         self._task = asyncio.create_task(self._run_loop())
         logger.info(f"ArchiveScheduler 已启动")
         logger.info(f"  schedule: {self.schedule}")
@@ -117,7 +119,7 @@ class ArchiveScheduler:
         """
         logger.info("手动触发归档任务...")
         result = await self._execute_archive()
-        self._last_run = datetime.now()
+        self._last_run = utcnow()
         self._total_runs += 1
         self._last_result = result
         return result
@@ -144,7 +146,8 @@ class ArchiveScheduler:
         """主循环：计算下次执行时间并等待"""
         try:
             croniter = _get_croniter()
-            self._croniter = croniter(self.schedule)
+            tz = zoneinfo.ZoneInfo(self.timezone)
+            self._croniter = croniter(self.schedule, utcnow(), tz)
         except Exception as e:
             logger.error(f"无法解析 cron 表达式 '{self.schedule}': {e}")
             return
@@ -153,7 +156,7 @@ class ArchiveScheduler:
             try:
                 # 计算下次执行时间
                 next_run = self._croniter.get_next(datetime)
-                now = datetime.now()
+                now = utcnow()
                 wait_seconds = (next_run - now).total_seconds()
 
                 if wait_seconds > 0:
@@ -172,7 +175,7 @@ class ArchiveScheduler:
 
                 if self._running:
                     await self._execute_archive()
-                    self._last_run = datetime.now()
+                    self._last_run = utcnow()
                     self._total_runs += 1
 
             except asyncio.CancelledError:
@@ -202,7 +205,7 @@ class ArchiveScheduler:
             f"已运行次数: {self._total_runs} | "
             f"已归档记录: {self._total_records_archived}"
         )
-        self._last_heartbeat = datetime.now()
+        self._last_heartbeat = utcnow()
 
     async def _execute_archive(self) -> Dict[str, Any]:
         """执行归档任务

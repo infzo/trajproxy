@@ -14,6 +14,8 @@ import logging
 
 from psycopg.rows import dict_row
 
+from traj_proxy.utils import utcnow
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +40,7 @@ async def archive_details(
     Returns:
         归档结果统计
     """
-    threshold = datetime.now() - timedelta(days=retention_days)
+    threshold = utcnow() - timedelta(days=retention_days)
     archive_path = Path(archive_dir)
     archive_path.mkdir(parents=True, exist_ok=True)
 
@@ -163,7 +165,7 @@ async def ensure_current_partition(conn):
     Args:
         conn: 数据库连接
     """
-    now = datetime.now()
+    now = utcnow()
     next_month = now.month + 1 if now.month < 12 else 1
     next_year = now.year if now.month < 12 else now.year + 1
 

@@ -18,6 +18,8 @@ from datetime import datetime
 import os
 import traceback
 
+from traj_proxy.utils import utcnow
+
 from traj_proxy.proxy_core.processor import Processor
 from traj_proxy.proxy_core.infer_client import InferClient
 from traj_proxy.store.database_manager import DatabaseManager
@@ -382,7 +384,7 @@ class ProcessorManager:
             run_id=run_id,
             tool_parser=tool_parser,
             reasoning_parser=reasoning_parser,
-            updated_at=datetime.now()
+            updated_at=utcnow()
         )
         self._config_configs[key] = config
         logger.info(f"[{model_name}] 注册预置模型成功: run_id={run_id}")
@@ -446,7 +448,7 @@ class ProcessorManager:
             run_id=run_id,
             tool_parser=tool_parser,
             reasoning_parser=reasoning_parser,
-            updated_at=datetime.now()
+            updated_at=utcnow()
         )
 
         # 存储配置

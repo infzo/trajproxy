@@ -11,6 +11,7 @@ import traceback
 
 from traj_proxy.proxy_core.context import ProcessContext
 from traj_proxy.exceptions import DatabaseError
+from traj_proxy.utils import utcnow
 from traj_proxy.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -117,7 +118,7 @@ class BasePipeline(ABC):
             is_stream=is_stream,
             forward_headers=forward_headers or {}
         )
-        context.start_time = datetime.now()
+        context.start_time = utcnow()
 
         # 构建原始请求
         context.raw_request = {
@@ -157,7 +158,7 @@ class BasePipeline(ABC):
         Args:
             context: 处理上下文
         """
-        context.end_time = datetime.now()
+        context.end_time = utcnow()
         context.processing_duration_ms = (
             context.end_time - context.start_time
         ).total_seconds() * 1000
@@ -175,7 +176,7 @@ class BasePipeline(ABC):
         """
         context.error = str(error)
         context.error_traceback = traceback.format_exc()
-        context.end_time = datetime.now()
+        context.end_time = utcnow()
         logger.error(
             f"[{context.unique_id}] 处理异常: {str(error)}\n{traceback.format_exc()}"
         )

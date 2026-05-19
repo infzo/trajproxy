@@ -12,6 +12,7 @@ import traceback
 from psycopg import errors as pg_errors
 from psycopg.rows import dict_row
 
+from traj_proxy.utils import utcnow
 from traj_proxy.store.models import ModelConfig
 from traj_proxy.store.notification_listener import CHANNEL
 from traj_proxy.exceptions import DatabaseError
@@ -65,7 +66,7 @@ class ModelRepository:
         """
         try:
             async with self.pool.connection() as conn:
-                now = datetime.now()
+                now = utcnow()
                 await conn.execute("""
                     INSERT INTO public.model_registry
                     (run_id, model_name, url, api_key, tokenizer_path, token_in_token_out,

@@ -1024,18 +1024,10 @@ function showToast(msg, type = 'info') {
     }, 3000);
 }
 
-// 服务器时间中时间部分实际是 UTC，但被错误标注为 +08:00
-// 剥离偏移后按 UTC 解析，显示时加 8 小时
-function parseServerTime(ts) {
-    if (!ts) return null;
-    const cleanTs = ts.replace(/[+-]\d{2}:\d{2}$/, '');
-    return new Date(cleanTs + 'Z');
-}
-
 function formatTime(ts) {
     if (!ts) return '-';
     try {
-        const d = parseServerTime(ts);
+        const d = new Date(ts);
         if (!d || isNaN(d.getTime())) return ts;
         const pad = (n) => n.toString().padStart(2, '0');
         const utc8 = new Date(d.getTime() + 8 * 60 * 60 * 1000);
