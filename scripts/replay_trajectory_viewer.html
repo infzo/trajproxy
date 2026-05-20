@@ -844,6 +844,7 @@
                 <button class="btn-secondary" onclick="toggleAllRecords()" title="折叠/展开所有卡片">全部折叠/展开</button>
                 <button class="btn-secondary" onclick="expandAllFields()">展开字段</button>
                 <button class="btn-secondary" onclick="collapseAllFields()">收起字段</button>
+                <button class="btn-secondary" onclick="copyAllRecords()" title="复制当前 Session 所有记录的 JSON">轨迹复制</button>
                 <button class="btn-secondary" onclick="analyzeTrajectory()" title="分析记录关联关系">轨迹分析</button>
             </div>
         </div>
@@ -1131,7 +1132,7 @@ async function loadRunIdOptions() {
                 info.count++;
                 // 取最新的 updated_at
                 if (m.updated_at) {
-                    const updateTime = parseServerTime(m.updated_at);
+                    const updateTime = new Date(m.updated_at);
                     if (!info.latest_updated_at || updateTime > info.latest_updated_at) {
                         info.latest_updated_at = updateTime;
                         info.latest_updated_at_str = m.updated_at;
@@ -1537,6 +1538,19 @@ function copyRecordJson(idx) {
         showToast('复制失败', 'error');
     });
 }
+function copyAllRecords() {
+    if (!currentRecords || currentRecords.length === 0) {
+        showToast('没有可复制的记录', 'error');
+        return;
+    }
+    const jsonStr = JSON.stringify(currentRecords, null, 2);
+    navigator.clipboard.writeText(jsonStr).then(() => {
+        showToast(`已复制 ${currentRecords.length} 条记录`, 'success');
+    }).catch(() => {
+        showToast('复制失败', 'error');
+    });
+}
+
 function toggleRecord(idx) {
     const card = document.getElementById(`card-${idx}`);
     const isOpen = card.classList.toggle('open');

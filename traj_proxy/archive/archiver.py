@@ -7,7 +7,7 @@
 import gzip
 import json
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import logging
@@ -170,11 +170,12 @@ async def ensure_current_partition(conn):
     next_year = now.year if now.month < 12 else now.year + 1
 
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    next_month_start = datetime(next_year, next_month, 1)
+    next_month_start = datetime(next_year, next_month, 1, tzinfo=timezone.utc)
     next_next_month_start = datetime(
         next_year + (1 if next_month == 12 else 0),
         next_month + 1 if next_month < 12 else 1,
         1,
+        tzinfo=timezone.utc,
     )
 
     partition_name = f"request_details_active_{now.strftime('%Y_%m')}"
@@ -256,11 +257,11 @@ def _parse_partition_name(partition_name: str) -> Optional[tuple]:
 
     year_str, month_str = parts[-2], parts[-1]
     try:
-        month_start = datetime(int(year_str), int(month_str), 1)
+        month_start = datetime(int(year_str), int(month_str), 1, tzinfo=timezone.utc)
         if month_str == "12":
-            month_end = datetime(int(year_str) + 1, 1, 1)
+            month_end = datetime(int(year_str) + 1, 1, 1, tzinfo=timezone.utc)
         else:
-            month_end = datetime(int(year_str), int(month_str) + 1, 1)
+            month_end = datetime(int(year_str), int(month_str) + 1, 1, tzinfo=timezone.utc)
         return month_start, month_end
     except ValueError:
         return None

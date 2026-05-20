@@ -18,7 +18,7 @@ import json
 import os
 import sys
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # 添加项目根目录到 sys.path
@@ -82,11 +82,11 @@ async def archive_details(
 
             year_str, month_str = parts[-2], parts[-1]
             try:
-                month_start = datetime(int(year_str), int(month_str), 1)
+                month_start = datetime(int(year_str), int(month_str), 1, tzinfo=timezone.utc)
                 if month_str == '12':
-                    month_end = datetime(int(year_str) + 1, 1, 1)
+                    month_end = datetime(int(year_str) + 1, 1, 1, tzinfo=timezone.utc)
                 else:
-                    month_end = datetime(int(year_str), int(month_str) + 1, 1)
+                    month_end = datetime(int(year_str), int(month_str) + 1, 1, tzinfo=timezone.utc)
             except ValueError:
                 print(f"  跳过无法解析的分区: {partition_name}")
                 continue
@@ -190,11 +190,12 @@ async def ensure_current_partition(pool: AsyncConnectionPool):
     next_partition_name = f"request_details_active_{next_year:04d}_{next_month:02d}"
 
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    next_month_start = datetime(next_year, next_month, 1)
+    next_month_start = datetime(next_year, next_month, 1, tzinfo=timezone.utc)
     next_next_month_start = datetime(
         next_year + (1 if next_month == 12 else 0),
         next_month + 1 if next_month < 12 else 1,
-        1
+        1,
+        tzinfo=timezone.utc
     )
 
     async with pool.connection() as conn:
