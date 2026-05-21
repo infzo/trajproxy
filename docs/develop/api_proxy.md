@@ -45,6 +45,8 @@ TrajProxy 提供模型管理、轨迹查询和聊天补全接口。直接访问 
 
 处理 OpenAI 格式的聊天补全请求。
 
+> **并发限流**: 当并发请求数达到上限时，返回 `429` 状态码，`Retry-After: 3`。
+
 ### ID 提取优先级
 
 #### run_id 提取优先级
@@ -305,6 +307,17 @@ Body:
 |------|------|------|--------|------|
 | session_id | string | 是 | - | 会话 ID（原始值，不含 run_id 前缀） |
 | limit | integer | 否 | 10000 | 最大返回记录数 |
+| fields | string | 否 | - | 字段过滤，逗号分隔。支持 `field_name`（包含）和 `-field_name`（排除） |
+
+**fields 参数示例**:
+
+```bash
+# 只返回指定字段
+curl "http://localhost:12300/trajectory?session_id=task-123&fields=id,model,messages"
+
+# 排除大字段以加速查询
+curl "http://localhost:12300/trajectory?session_id=task-123&fields=-raw_request,-raw_response,-token_ids"
+```
 
 **响应**:
 
@@ -402,6 +415,17 @@ Body:
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | limit | integer | 否 | 10000 | 最大返回记录数 |
+| fields | string | 否 | - | 字段过滤，逗号分隔。支持 `field_name`（包含）和 `-field_name`（排除） |
+
+**fields 参数示例**:
+
+```bash
+# 只返回指定字段
+curl "http://localhost:12300/trajectories/task-123?fields=id,model,messages"
+
+# 排除大字段以加速查询
+curl "http://localhost:12300/trajectories/task-123?fields=-raw_request,-raw_response,-token_ids"
+```
 
 **响应**:
 
@@ -464,7 +488,9 @@ Body:
 | 400 | 请求参数错误 |
 | 404 | 资源不存在（如模型未注册） |
 | 422 | 参数验证失败 |
+| 429 | 并发限流，服务繁忙（Retry-After: 3） |
 | 500 | 服务器内部错误 |
+| 504 | 轨迹查询超时（DB 查询或序列化阶段超时） |
 
 ### 常见错误示例
 
