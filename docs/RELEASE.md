@@ -4,6 +4,51 @@
 
 ---
 
+## [0.2.2] - 2026-05-21
+
+**类型**: Bug 修复 + 功能增强
+
+### Bug 修复
+- **UTC 时区一致性**: 统一使用 UTC 时区感知时间 (`datetime.now(timezone.utc)`)，修复时间存储偏移问题。归档脚本、调度器、ProcessorManager、ModelRepository 全链路对齐 UTC，消除本地时区与 UTC 混用导致的 8 小时偏差
+- **轨迹查看器时间显示**: 修复浏览器本地时区抵消问题。`formatTime` 强制 UTC 解析再 +8 显示，Run ID 下拉框时间统一走 `formatTime`，修正服务器时间解析中错误 +08:00 偏移的剥离逻辑
+- **TokenPipeline chat_template_kwargs**: 修复 `MessageConverter` 重构时 `chat_template_kwargs` 参数丢失问题，恢复 `add_generation_prompt` / `tokenize` 透传
+- **filterRunIdDropdown 未定义**: 移除多余闭合大括号，修复 JS 语法报错
+
+### 新增功能
+- **轨迹查询 fields 过滤**: `/trajectory` 和 `/trajectories/{session_id}` 接口新增 `fields` 查询参数，支持 `field_name`（包含）和 `-field_name`（排除），可按需过滤大字段以减少响应体积
+- **轨迹查询超时保护**: 轨迹查询接口新增分段超时保护（DB 查询 30s、序列化 30s、信号量获取 5s），超时返回 504
+- **轨迹查询分阶段耗时埋点**: 查询完成后单行日志输出 DB 查询、序列化、总耗时及响应大小，便于性能可观测
+- **轨迹复制按钮**: 轨迹查看器新增「复制 JSON」按钮（记录卡片级 + 会话级），一键复制原始数据到剪贴板
+
+### 优化改进
+- **轨迹查看器性能**: 滚动修复与大数据性能优化，渲染逻辑重构，大轨迹数据滚动不再卡顿
+- **归档脚本 UTC**: `scripts/archive_records.py` 和 `traj_proxy/archive/` 时间比较统一使用 UTC
+
+### 文档更新
+- **API 文档刷新**: 补充 `fields` 参数、并发限流 429、查询超时 504 说明
+
+### 测试
+- **F220**: 新增 `chat_template_kwargs` e2e 测试，覆盖 `add_generation_prompt` 和 `tokenize` 参数透传
+
+### 影响范围
+- `traj_proxy/serve/routes.py` - fields 过滤、超时保护、分阶段耗时埋点
+- `traj_proxy/proxy_core/provider.py` - fields 参数透传
+- `traj_proxy/proxy_core/pipeline/base.py` - UTC 时区
+- `traj_proxy/proxy_core/processor_manager.py` - UTC 时区
+- `traj_proxy/proxy_core/cache/prefix_cache.py` - 适配字段过滤
+- `traj_proxy/proxy_core/converters/message_converter.py` - chat_template_kwargs 修复
+- `traj_proxy/archive/archiver.py` - UTC 时区
+- `traj_proxy/archive/scheduler.py` - UTC 时区
+- `traj_proxy/store/request_repository.py` - fields 过滤查询
+- `traj_proxy/store/model_repository.py` - UTC 时区
+- `traj_proxy/utils/__init__.py` - 新增 `utc_now()` 工具函数
+- `scripts/archive_records.py` - UTC 时区
+- `scripts/replay_trajectory_viewer.html` - 时间修复、复制按钮、性能优化
+- `docs/develop/api_proxy.md` - API 文档刷新
+- `tests/e2e/layers/proxy/scenarios/F220_chat_template_kwargs.sh` - 新增测试
+
+---
+
 ## [0.2.1] - 2026-05-16
 
 **类型**: Bug 修复
