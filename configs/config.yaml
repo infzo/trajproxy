@@ -60,5 +60,3 @@ infer_client:
   read_timeout: 600         # 读取超时（秒）
   max_connections: 1000     # 最大连接数
   max_retries: 2            # 请求失败重试次数（针对 502/503/504 错误）
-
-# 归档配置已迁移到 configs/archiver.yaml，由独立的 traj_archiver 进程管理
