@@ -92,8 +92,9 @@ class S3Storage(Storage):
                 "request-created.s3.*", _inject_csb_token
             )
 
-        # 确保 bucket 存在
-        self._ensure_bucket()
+        # 确保 bucket 存在（CSB 网关模式跳过，网关自行管理 bucket）
+        if not app_token:
+            self._ensure_bucket()
 
         auth_info = "CSB-token" if app_token else ("AK/SK" if access_key else "boto3-default-chain")
         logger.info(
