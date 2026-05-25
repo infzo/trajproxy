@@ -11,17 +11,15 @@ CSB 网关不是标准 S3 协议，boto3 无法可靠对接。
 """
 
 import base64
+import json
 import logging
 import ssl
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
 from urllib import request as urllib_request
 
 import requests
-
-from traj_archiver.storage import Storage
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +29,7 @@ MAX_RETRIES = 3
 REQUEST_TIMEOUT = 120
 
 
-class CSBStorage(Storage):
+class CSBStorage:
     """华为云 CSB 网关存储操作封装
 
     使用 CSB 原生 REST API，不走 boto3。
@@ -81,8 +79,6 @@ class CSBStorage(Storage):
         req = urllib_request.Request(url=url)
         resp = urllib_request.urlopen(req, context=ctx, timeout=60)
         result = resp.read().decode("utf-8")
-
-        import json
         result_dict = json.loads(result)
         if not result_dict.get("success"):
             raise RuntimeError(f"CSB endpoint 解析失败: {result_dict.get('msg')}")

@@ -19,8 +19,6 @@ from typing import Any, Dict, List, Tuple
 
 from psycopg.rows import dict_row
 
-from traj_archiver.storage import Storage
-
 logger = logging.getLogger(__name__)
 
 # 同时打开的最大文件句柄数
@@ -152,23 +150,6 @@ async def _is_partition_empty(conn, partition_name: str) -> bool:
         return await cur.fetchone() is None
 
 
-async def _cleanup_empty_partitions(conn, processed_runs: int):
-    """归档完成后，清理变空的分区"""
-    if processed_runs == 0:
-        return
-    partitions = await _find_partitions(conn)
-    for pn in partitions:
-        if await _is_partition_empty(conn, pn):
-            try:
-                await conn.execute(
-                    f"ALTER TABLE public.request_details_active DETACH PARTITION public.{pn}"
-                )
-                await conn.execute(f"DROP TABLE public.{pn}")
-                logger.info(f"已清理空分区: {pn}")
-            except Exception as e:
-                logger.warning(f"清理空分区 {pn} 失败: {e}")
-
-
 # ============================================================
 # 归档判定：按 run_id 粒度
 # ============================================================
@@ -211,7 +192,7 @@ async def _find_expired_null_sessions(conn, threshold: datetime) -> List[str]:
 
 async def archive_details(
     pool,
-    storage: Storage,
+    storage,
     local_temp_path: str,
     retention_days: int,
 ) -> Dict[str, Any]:
@@ -287,14 +268,14 @@ async def archive_details(
                     result["errors"].append(msg)
 
         # 清理空分区
-        cleaned = await _cleanup_empty_partitions_verbose(conn, result["runs_processed"] + len(expired_null))
+        cleaned = await _cleanup_empty_partitions(conn, result["runs_processed"] + len(expired_null))
         result["partitions_cleaned"] = cleaned
 
     return result
 
 
-async def _cleanup_empty_partitions_verbose(conn, processed: int) -> int:
-    """清理空分区并返回清理数量"""
+async def _cleanup_empty_partitions(conn, processed: int) -> int:
+    """归档完成后清理变空的分区"""
     if processed == 0:
         return 0
     partitions = await _find_partitions(conn)
@@ -314,7 +295,7 @@ async def _cleanup_empty_partitions_verbose(conn, processed: int) -> int:
 
 
 async def _archive_run(
-    conn, storage: Storage, temp_root: Path, run_id: str,
+    conn, storage, temp_root: Path, run_id: str,
 ) -> Dict[str, Any]:
     """归档一个 run 下的所有 session
 
@@ -444,7 +425,7 @@ async def _archive_run(
 
 
 async def _archive_null_session(
-    conn, storage: Storage, temp_root: Path, session_id: str,
+    conn, storage, temp_root: Path, session_id: str,
 ) -> Dict[str, Any]:
     """归档一个 run_id=NULL 的 session"""
     safe_session = _safe_path(session_id)
@@ -494,7 +475,7 @@ async def _archive_null_session(
     return {"records": len(uids), "file": loc}
 
 
-def _finalize_file(storage: Storage, local_path: Path, key: str) -> str:
+def _finalize_file(storage, local_path: Path, key: str) -> str:
     """上传文件并清理本地副本"""
     loc = storage.upload(local_path, key)
     local_path.unlink(missing_ok=True)

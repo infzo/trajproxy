@@ -1,7 +1,5 @@
 """
 轮询调度器 - 固定间隔执行归档任务
-
-替代原有的 cron 定时调度，更简单可靠。
 """
 
 import asyncio
@@ -12,22 +10,21 @@ from typing import Any, Dict, Optional
 from psycopg_pool import AsyncConnectionPool
 
 from traj_archiver.archiver import archive_details
-from traj_archiver.storage import Storage
-from traj_archiver.utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 
-class ArchiveScheduler:
-    """归档轮询调度器
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
-    按固定间隔执行归档任务，失败后自动重试。
-    """
+
+class ArchiveScheduler:
+    """归档轮询调度器，按固定间隔执行归档任务，失败后 5 分钟重试"""
 
     def __init__(
         self,
         pool: AsyncConnectionPool,
-        storage: Storage,
+        storage,
         retention_days: int,
         poll_interval: int = 3600,
         local_temp_path: str = "/tmp/archives",
@@ -52,17 +49,13 @@ class ArchiveScheduler:
             return
 
         self._running = True
-        self._started_at = utcnow()
+        self._started_at = _utcnow()
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("ArchiveScheduler 已启动")
-        logger.info(f"  poll_interval: {self.poll_interval}s")
-        logger.info(f"  retention_days: {self.retention_days}")
-        logger.info(f"  local_temp_path: {self.local_temp_path}")
+        logger.info(f"ArchiveScheduler 已启动 (interval={self.poll_interval}s, retention={self.retention_days}d)")
 
     async def stop(self):
         if not self._running:
             return
-
         self._running = False
         if self._task:
             self._task.cancel()
@@ -76,7 +69,7 @@ class ArchiveScheduler:
     async def trigger_now(self) -> Dict[str, Any]:
         logger.info("手动触发归档任务...")
         result = await self._execute_archive()
-        self._last_run = utcnow()
+        self._last_run = _utcnow()
         self._total_runs += 1
         self._last_result = result
         return result
@@ -97,7 +90,7 @@ class ArchiveScheduler:
         while self._running:
             try:
                 await self._execute_archive()
-                self._last_run = utcnow()
+                self._last_run = _utcnow()
                 self._total_runs += 1
             except asyncio.CancelledError:
                 break
@@ -120,7 +113,6 @@ class ArchiveScheduler:
     async def _execute_archive(self) -> Dict[str, Any]:
         logger.info("=" * 50)
         logger.info("开始执行归档任务...")
-        logger.info("=" * 50)
 
         result = await archive_details(
             pool=self.pool,
@@ -132,38 +124,20 @@ class ArchiveScheduler:
         records_archived = result.get("records_archived", 0)
         self._total_records_archived += records_archived
 
-        logger.info("=" * 50)
-        logger.info("归档任务完成")
-        logger.info(f"  处理 run 数: {result.get('runs_processed', 0)}")
-        logger.info(f"  归档 session 数: {result.get('sessions_archived', 0)}")
-        logger.info(f"  归档记录数: {result.get('records_archived', 0)}")
-        logger.info(f"  累计归档记录数: {self._total_records_archived}")
-        logger.info(f"  清理空分区数: {result.get('partitions_cleaned', 0)}")
+        logger.info(f"归档完成: {result.get('runs_processed', 0)} runs, "
+                     f"{result.get('sessions_archived', 0)} sessions, "
+                     f"{records_archived} records")
 
-        # 打印每个 run 的详细统计
-        details = result.get("details", [])
-        if details:
-            logger.info("--- 各 run 归档明细 ---")
-            for d in details:
-                logger.info(
-                    f"  run_id={d['run_id']}: "
-                    f"{d['sessions']} sessions, {d['records']} records"
-                )
+        for d in result.get("details", []):
+            logger.info(f"  run_id={d['run_id']}: {d['sessions']} sessions, {d['records']} records")
 
-        # 打印归档文件列表
-        archive_files = result.get("archive_files", [])
-        if archive_files:
-            logger.info(f"--- 归档文件 ({len(archive_files)} 个) ---")
-            for f in archive_files:
-                logger.info(f"  {f}")
-        elif result.get("records_archived", 0) == 0:
-            logger.info("  本次无过期数据需要归档")
+        for f in result.get("archive_files", []):
+            logger.info(f"  文件: {f}")
 
         if result.get("errors"):
-            logger.warning(f"--- 错误 ({len(result['errors'])} 个) ---")
             for err in result["errors"]:
-                logger.warning(f"  {err}")
-        logger.info("=" * 50)
+                logger.warning(f"  错误: {err}")
 
+        logger.info("=" * 50)
         self._last_result = result
         return result

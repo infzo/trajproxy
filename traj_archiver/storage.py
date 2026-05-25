@@ -1,46 +1,27 @@
 """
-存储抽象层 - 统一本地文件系统、S3 和 CSB 存储接口
+存储后端工厂 - 根据配置创建存储实例
 
-根据配置自动选择存储后端：
-- s3.app_token 非空 → CSB 网关模式（华为云 CSB 原生 REST API）
-- s3.bucket 非空 → 标准 S3 模式（boto3）
-- 否则 → 本地模式，archive_location 为文件名
+三种模式：
+  1. app_token 非空 → CSB 网关（原生 REST API）
+  2. bucket 非空   → 标准 S3（boto3）
+  3. 否则          → 本地文件系统
 """
 
 import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-class Storage:
-    """存储操作统一接口"""
-
-    def upload(self, local_path: Path, key: str) -> str:
-        """上传文件，返回 archive_location 标识"""
-        raise NotImplementedError
-
-    def download(self, key: str, local_path: Path) -> Path:
-        """下载文件到本地路径"""
-        raise NotImplementedError
-
-    def exists(self, key: str) -> bool:
-        """检查文件是否存在"""
-        raise NotImplementedError
-
-    def validate(self) -> None:
-        """验证存储可用性：上传一个探测文件再删除，失败则抛出异常"""
-        raise NotImplementedError
+# ============================================================
+# 本地文件系统存储
+# ============================================================
 
 
-class LocalStorage(Storage):
-    """本地文件系统存储
-
-    文件直接保存到 storage_path 目录，archive_location 为文件名。
-    """
+class LocalStorage:
+    """本地文件系统存储，archive_location 为相对路径 key"""
 
     def __init__(self, storage_path: str):
         self.storage_path = Path(storage_path)
@@ -71,7 +52,6 @@ class LocalStorage(Storage):
         probe_path.write_text("archiver startup probe")
         try:
             self.upload(probe_path, probe_key)
-            # 清理探测文件
             dest = self.storage_path / probe_key
             if dest.exists():
                 dest.unlink()
@@ -80,30 +60,26 @@ class LocalStorage(Storage):
         logger.info("LocalStorage 验证通过")
 
 
-def create_storage(config: dict) -> Storage:
+# ============================================================
+# 工厂函数
+# ============================================================
+
+
+def create_storage(config: dict):
     """根据配置创建存储实例
 
-    Args:
-        config: archive 配置字典，包含 s3 子配置和 storage_path
-
-    Returns:
-        Storage 实例（CSBStorage / S3Storage / LocalStorage）
-
-    存储后端优先级:
-      1. s3.app_token / CSB_APP_TOKEN 非空 → CSB 网关模式（原生 REST API）
-      2. s3.bucket 非空 → 标准 S3 模式（boto3）
-      3. 否则 → 本地文件系统模式
+    优先级:
+      1. s3.app_token / CSB_APP_TOKEN → CSB 网关
+      2. s3.bucket → 标准 S3
+      3. 无 s3 配置 → 本地文件系统
     """
     s3_config = config.get("s3")
 
     if s3_config and s3_config.get("bucket"):
-        # app_token: YAML 显式配置优先，其次环境变量 CSB_APP_TOKEN
         app_token = s3_config.get("app_token") or os.environ.get("CSB_APP_TOKEN")
 
         if app_token:
-            # CSB 网关模式：使用原生 REST API
             from traj_archiver.csb_storage import CSBStorage
-
             return CSBStorage(
                 bucket=s3_config["bucket"],
                 prefix=s3_config.get("prefix", ""),
@@ -113,9 +89,7 @@ def create_storage(config: dict) -> Storage:
                 region=s3_config.get("region", ""),
             )
 
-        # 标准 S3 模式：使用 boto3
         from traj_archiver.s3_storage import S3Storage
-
         return S3Storage(
             bucket=s3_config["bucket"],
             prefix=s3_config.get("prefix", ""),
@@ -127,6 +101,5 @@ def create_storage(config: dict) -> Storage:
             verify_ssl=s3_config.get("verify_ssl", True),
         )
 
-    # 本地模式
     storage_path = config.get("storage_path", "/data/archives")
     return LocalStorage(storage_path=storage_path)
