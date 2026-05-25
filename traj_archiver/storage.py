@@ -30,6 +30,10 @@ class Storage:
         """检查文件是否存在"""
         raise NotImplementedError
 
+    def validate(self) -> None:
+        """验证存储可用性：上传一个探测文件再删除，失败则抛出异常"""
+        raise NotImplementedError
+
 
 class LocalStorage(Storage):
     """本地文件系统存储
@@ -58,6 +62,21 @@ class LocalStorage(Storage):
 
     def exists(self, key: str) -> bool:
         return (self.storage_path / key).exists()
+
+    def validate(self) -> None:
+        probe_key = ".probe/archiver_startup_check"
+        probe_path = self.storage_path / ".probe_tmp"
+        probe_path.parent.mkdir(parents=True, exist_ok=True)
+        probe_path.write_text("archiver startup probe")
+        try:
+            self.upload(probe_path, probe_key)
+            # 清理探测文件
+            dest = self.storage_path / probe_key
+            if dest.exists():
+                dest.unlink()
+        finally:
+            probe_path.unlink(missing_ok=True)
+        logger.info("LocalStorage 验证通过")
 
 
 def create_storage(config: dict) -> Storage:

@@ -53,6 +53,16 @@ async def main():
     # 根据配置自动选择存储后端（本地 / S3）
     storage = create_storage(archive_config)
 
+    # 验证存储可用性
+    try:
+        storage.validate()
+        logger.info("存储后端验证通过")
+    except Exception as e:
+        logger.error(f"存储后端验证失败: {e}")
+        logger.error("请检查存储配置是否正确，归档进程无法启动")
+        await pool.close()
+        sys.exit(1)
+
     # 创建并启动调度器
     scheduler = ArchiveScheduler(
         pool=pool,

@@ -157,3 +157,21 @@ class S3Storage(Storage):
             for obj in page.get("Contents", []):
                 keys.append(obj["Key"])
         return keys
+
+    def validate(self) -> None:
+        """上传探测文件验证 S3 可写，成功后删除探测文件"""
+        import tempfile
+        probe_key = f"{self.prefix}.probe/archiver_startup_check"
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w") as f:
+            f.write("archiver s3 startup probe")
+            probe_path = Path(f.name)
+        try:
+            self.client.upload_file(str(probe_path), self.bucket, probe_key)
+            logger.info(f"S3 上传验证成功: s3://{self.bucket}/{probe_key}")
+            # 清理探测文件
+            try:
+                self.client.delete_object(Bucket=self.bucket, Key=probe_key)
+            except Exception:
+                logger.warning(f"清理探测文件失败（不影响运行）: {probe_key}")
+        finally:
+            probe_path.unlink(missing_ok=True)

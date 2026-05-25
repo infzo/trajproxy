@@ -410,7 +410,11 @@ async def _archive_run(
     async with conn.cursor() as cur:
         await cur.execute(f'CLOSE "{cursor_name}"')
 
-    # 关闭剩余文件并上传
+    if record_count == 0:
+        logger.info(f"  run '{run_id}' 无记录，跳过")
+        return {"sessions": 0, "records": 0, "files": []}
+
+    # 关闭剩余文件并上传（全部上传成功后才删除 DB 记录）
     for safe_session, (fh, file_path, uid_list) in session_files.items():
         fh.close()
         key = f"{safe_run}/{safe_session}.jsonl.gz"
@@ -418,8 +422,9 @@ async def _archive_run(
         for uid in uid_list:
             archive_map[uid] = loc
         uploaded_files.append(loc)
+    logger.info(f"  全部文件上传完成: {len(uploaded_files)} 个文件, {record_count} 条记录")
 
-    # 分批 DELETE + UPDATE
+    # 分批 DELETE + UPDATE（仅当所有上传成功后才执行）
     uid_pairs = list(archive_map.items())
     for i in range(0, len(uid_pairs), BATCH_SIZE):
         batch = uid_pairs[i : i + BATCH_SIZE]
