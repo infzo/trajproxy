@@ -43,6 +43,7 @@ class S3Storage(Storage):
         session_token: Optional[str] = None,
         app_token: Optional[str] = None,
         region: Optional[str] = None,
+        verify_ssl: bool = True,
     ):
         self.bucket = bucket
         self.prefix = prefix.rstrip("/") + "/" if prefix else ""
@@ -50,6 +51,9 @@ class S3Storage(Storage):
         self.app_token = app_token
 
         client_kwargs = {}
+        boto_config_kwargs = {
+            "retries": {"max_attempts": 3, "mode": "standard"},
+        }
 
         if endpoint_url:
             client_kwargs["endpoint_url"] = endpoint_url
@@ -60,22 +64,21 @@ class S3Storage(Storage):
             client_kwargs["aws_session_token"] = session_token
         if region:
             client_kwargs["region_name"] = region
+        if not verify_ssl:
+            client_kwargs["verify"] = False
+            boto_config_kwargs["signature_version"] = UNSIGNED  # https + verify=False 组合要求
+            # 禁用 SSL 警告
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            logger.info("SSL 证书校验已关闭")
 
         # 构造 botocore config
         if app_token:
-            # CSB 网关模式：跳过 SigV4 签名
-            boto_config = BotoConfig(
-                signature_version=UNSIGNED,
-                retries={"max_attempts": 3, "mode": "standard"},
-            )
-        else:
-            boto_config = BotoConfig(
-                retries={"max_attempts": 3, "mode": "standard"},
-            )
+            boto_config_kwargs["signature_version"] = UNSIGNED
 
         self.client = boto3.client(
             "s3",
-            config=boto_config,
+            config=BotoConfig(**boto_config_kwargs),
             **client_kwargs,
         )
 

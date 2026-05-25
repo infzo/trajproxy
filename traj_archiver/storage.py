@@ -92,6 +92,7 @@ def create_storage(config: dict) -> Storage:
             session_token=s3_config.get("session_token"),
             app_token=app_token,
             region=s3_config.get("region"),
+            verify_ssl=s3_config.get("verify_ssl", True),
         )
 
     # 本地模式
