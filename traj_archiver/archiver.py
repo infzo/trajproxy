@@ -9,6 +9,7 @@
   5. 顺手清理空的月分区
 """
 
+import asyncio
 import gzip
 import json
 import logging
@@ -392,11 +393,14 @@ async def _archive_run(
     t_write = time.monotonic()
     logger.info(f"  写入完成: {len(pending_uploads)} 个文件, {record_count} 条记录, 耗时 {t_write - t_start:.1f}s")
 
-    # ---- 上传阶段：并发上传所有 session 文件 ----
+    # ---- 上传阶段：在线程池执行，不阻塞事件循环 ----
+    upload_results = await asyncio.to_thread(
+        _upload_pending, storage, pending_uploads, upload_concurrency
+    )
+
     archive_map: Dict[str, str] = {}
     uploaded_files = []
-
-    for loc, uid_list in _upload_pending(storage, pending_uploads, upload_concurrency):
+    for loc, uid_list in upload_results:
         for uid in uid_list:
             archive_map[uid] = loc
         uploaded_files.append(loc)
