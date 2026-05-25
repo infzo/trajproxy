@@ -12,6 +12,7 @@
 import gzip
 import json
 import logging
+import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -331,8 +332,9 @@ async def _archive_run(
         """, (run_id,))
 
     logger.info(f"  归档 run '{run_id}'...")
+    t_start = time.monotonic()
 
-    # ---- 写入阶段：流式读取，按 session 分组写 gzip ----
+    # ---- 写入阶段：流式读取 + 按 session 写 gzip ----
     session_files: Dict[str, tuple] = {}
     pending_uploads = []  # [(file_path, upload_key, uid_list)]
     record_count = 0
@@ -384,7 +386,8 @@ async def _archive_run(
         fh.close()
         pending_uploads.append((file_path, f"{safe_run}/{safe_session}.jsonl.gz", uid_list))
 
-    logger.info(f"  写入完成: {len(pending_uploads)} 个文件, 开始上传 (并发={upload_concurrency})...")
+    t_write = time.monotonic()
+    logger.info(f"  写入完成: {len(pending_uploads)} 个文件, {record_count} 条记录, 耗时 {t_write - t_start:.1f}s")
 
     # ---- 上传阶段：并发上传所有 session 文件 ----
     archive_map: Dict[str, str] = {}
@@ -395,23 +398,20 @@ async def _archive_run(
             archive_map[uid] = loc
         uploaded_files.append(loc)
 
-    logger.info(f"  全部文件上传完成: {len(uploaded_files)} 个文件, {record_count} 条记录")
+    t_upload = time.monotonic()
+    logger.info(f"  上传完成: {len(uploaded_files)} 个文件, 耗时 {t_upload - t_write:.1f}s")
 
     # ---- 删除阶段：全部上传成功后才执行 ----
     uid_pairs = list(archive_map.items())
     for i in range(0, len(uid_pairs), BATCH_SIZE):
         await _delete_and_update(conn, uid_pairs[i:i + BATCH_SIZE])
 
-    # 清理临时目录
-    run_dir = temp_root / safe_run
-    for f in run_dir.glob("*.jsonl.gz"):
-        f.unlink(missing_ok=True)
-    try:
-        run_dir.rmdir()
-    except OSError:
-        pass
-
-    logger.info(f"  归档 run '{run_id}' 完成: {len(uploaded_files)} 个文件, {record_count} 条记录")
+    t_delete = time.monotonic()
+    logger.info(
+        f"  归档 run '{run_id}' 完成: {len(uploaded_files)} 个文件, {record_count} 条记录, "
+        f"总耗时 {t_delete - t_start:.1f}s "
+        f"(读取+压缩 {t_write - t_start:.1f}s / 上传 {t_upload - t_write:.1f}s / 删除 {t_delete - t_upload:.1f}s)"
+    )
     return {"sessions": len(uploaded_files), "records": record_count, "files": uploaded_files}
 
 
