@@ -13,6 +13,7 @@ database:
 archive:
   retention_days: 30             # 活跃详情保留天数
   poll_interval: 3600            # 轮询间隔（秒），每小时检查一次
+  upload_concurrency: 1          # session 文件并发上传数，默认 1（顺序）
   storage_path: "/data/archives" # 本地模式：归档文件保存目录
   local_temp_path: "/tmp/archives"  # S3 模式：本地临时导出目录
 

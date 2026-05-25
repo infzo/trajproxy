@@ -195,15 +195,9 @@ async def archive_details(
     storage,
     local_temp_path: str,
     retention_days: int,
+    upload_concurrency: int = 1,
 ) -> Dict[str, Any]:
-    """按 run_id 粒度归档过期数据
-
-    Args:
-        pool: 数据库连接池
-        storage: 存储实例
-        local_temp_path: 本地临时目录
-        retention_days: 留存天数
-    """
+    """按 run_id 粒度归档过期数据"""
     threshold = _utcnow() - timedelta(days=retention_days)
     temp_root = Path(local_temp_path)
     temp_root.mkdir(parents=True, exist_ok=True)
@@ -232,7 +226,7 @@ async def archive_details(
         for idx, run_id in enumerate(expired_runs, 1):
             logger.info(f"[{idx}/{total}] 开始归档 run '{run_id}'...")
             try:
-                stats = await _archive_run(conn, storage, temp_root, run_id)
+                stats = await _archive_run(conn, storage, temp_root, run_id, upload_concurrency)
                 result["runs_processed"] += 1
                 result["sessions_archived"] += stats["sessions"]
                 result["records_archived"] += stats["records"]
@@ -296,18 +290,18 @@ async def _cleanup_empty_partitions(conn, processed: int) -> int:
 
 async def _archive_run(
     conn, storage, temp_root: Path, run_id: str,
+    upload_concurrency: int = 1,
 ) -> Dict[str, Any]:
     """归档一个 run 下的所有 session
 
     流程:
-      1. 查询该 run 的全部记录（JOIN metadata 获取 session_id）
-      2. 按 session_id 分组，写入临时文件
-      3. 每个 session 文件写完立即上传，删除临时文件
-      4. 分批 DELETE + UPDATE metadata
+      1. server-side cursor 流式读取记录
+      2. 按 session_id 分组写入 gzip 文件
+      3. 并发上传所有 session 文件
+      4. 全部上传成功后 DELETE + UPDATE metadata
     """
     safe_run = _safe_path(run_id)
 
-    # 流式查询（server-side cursor，避免一次性加载全部记录）
     _columns = [
         "unique_id", "tokenizer_path", "messages",
         "raw_request", "raw_response", "text_request", "text_response",
@@ -338,13 +332,11 @@ async def _archive_run(
 
     logger.info(f"  归档 run '{run_id}'...")
 
-    # 按 session_id 分组写入
+    # ---- 写入阶段：流式读取，按 session 分组写 gzip ----
     session_files: Dict[str, tuple] = {}
-    archive_map: Dict[str, str] = {}  # unique_id → archive_location
-    uploaded_files = []
+    pending_uploads = []  # [(file_path, upload_key, uid_list)]
     record_count = 0
 
-    # 流式读取：每次 FETCH 一批，避免单 run 大量数据撑爆内存
     while True:
         async with conn.cursor() as cur:
             await cur.execute(f'FETCH {BATCH_SIZE} FROM "{cursor_name}"')
@@ -357,17 +349,12 @@ async def _archive_run(
             session_id = rec.pop("session_id")
             safe_session = _safe_path(session_id)
 
-            # 打开或获取 session 文件
             if safe_session not in session_files:
                 if len(session_files) >= MAX_OPEN_FILES:
-                    # 关闭最久未使用的文件
                     old_key = next(iter(session_files))
-                    old_file, old_path, old_ids = session_files.pop(old_key)
-                    old_file.close()
-                    loc = _finalize_file(storage, old_path, f"{safe_run}/{old_key}.jsonl.gz")
-                    for uid in old_ids:
-                        archive_map[uid] = loc
-                    uploaded_files.append(loc)
+                    old_fh, old_path, old_ids = session_files.pop(old_key)
+                    old_fh.close()
+                    pending_uploads.append((old_path, f"{safe_run}/{old_key}.jsonl.gz", old_ids))
 
                 run_dir = temp_root / safe_run
                 run_dir.mkdir(parents=True, exist_ok=True)
@@ -375,19 +362,16 @@ async def _archive_run(
                 fh = gzip.open(file_path, "wt", encoding="utf-8")
                 session_files[safe_session] = (fh, file_path, [])
 
-            fh, path, uid_list = session_files[safe_session]
-
-            # 写 JSONL
-            for key, val in rec.items():
-                if isinstance(val, datetime):
-                    rec[key] = val.isoformat()
+            fh, _, uid_list = session_files[safe_session]
+            for k, v in rec.items():
+                if isinstance(v, datetime):
+                    rec[k] = v.isoformat()
             fh.write(json.dumps(rec, default=str) + "\n")
             uid_list.append(rec["unique_id"])
             record_count += 1
 
         logger.info(f"  已处理 {record_count} 条记录...")
 
-    # 关闭 server-side cursor
     async with conn.cursor() as cur:
         await cur.execute(f'CLOSE "{cursor_name}"')
 
@@ -395,21 +379,28 @@ async def _archive_run(
         logger.info(f"  run '{run_id}' 无记录，跳过")
         return {"sessions": 0, "records": 0, "files": []}
 
-    # 关闭剩余文件并上传（全部上传成功后才删除 DB 记录）
+    # 关闭剩余文件，加入待上传队列
     for safe_session, (fh, file_path, uid_list) in session_files.items():
         fh.close()
-        key = f"{safe_run}/{safe_session}.jsonl.gz"
-        loc = _finalize_file(storage, file_path, key)
+        pending_uploads.append((file_path, f"{safe_run}/{safe_session}.jsonl.gz", uid_list))
+
+    logger.info(f"  写入完成: {len(pending_uploads)} 个文件, 开始上传 (并发={upload_concurrency})...")
+
+    # ---- 上传阶段：并发上传所有 session 文件 ----
+    archive_map: Dict[str, str] = {}
+    uploaded_files = []
+
+    for loc, uid_list in _upload_pending(storage, pending_uploads, upload_concurrency):
         for uid in uid_list:
             archive_map[uid] = loc
         uploaded_files.append(loc)
+
     logger.info(f"  全部文件上传完成: {len(uploaded_files)} 个文件, {record_count} 条记录")
 
-    # 分批 DELETE + UPDATE（仅当所有上传成功后才执行）
+    # ---- 删除阶段：全部上传成功后才执行 ----
     uid_pairs = list(archive_map.items())
     for i in range(0, len(uid_pairs), BATCH_SIZE):
-        batch = uid_pairs[i : i + BATCH_SIZE]
-        await _delete_and_update(conn, batch)
+        await _delete_and_update(conn, uid_pairs[i:i + BATCH_SIZE])
 
     # 清理临时目录
     run_dir = temp_root / safe_run
@@ -473,6 +464,39 @@ async def _archive_null_session(
 
     logger.info(f"  归档 NULL-run session '{session_id}': {len(uids)} 条记录")
     return {"records": len(uids), "file": loc}
+
+
+def _upload_pending(storage, pending_uploads, concurrency):
+    """并发上传待处理文件，返回 [(location, uid_list)]"""
+    if not pending_uploads:
+        return []
+
+    if concurrency <= 1:
+        results = []
+        for file_path, key, uid_list in pending_uploads:
+            loc = storage.upload(file_path, key)
+            file_path.unlink(missing_ok=True)
+            results.append((loc, uid_list))
+        return results
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _upload_one(file_path, key):
+        loc = storage.upload(file_path, key)
+        file_path.unlink(missing_ok=True)
+        return loc
+
+    results = []
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = {}
+        for file_path, key, uid_list in pending_uploads:
+            f = pool.submit(_upload_one, file_path, key)
+            futures[f] = uid_list
+
+        for f in as_completed(futures):
+            results.append((f.result(), futures[f]))
+
+    return results
 
 
 def _finalize_file(storage, local_path: Path, key: str) -> str:

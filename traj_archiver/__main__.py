@@ -70,6 +70,7 @@ async def main():
         retention_days=archive_config.get("retention_days", 30),
         poll_interval=archive_config.get("poll_interval", 3600),
         local_temp_path=archive_config.get("local_temp_path", "/tmp/archives"),
+        upload_concurrency=archive_config.get("upload_concurrency", 1),
     )
     await scheduler.start()
 

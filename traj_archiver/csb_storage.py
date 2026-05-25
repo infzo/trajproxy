@@ -124,13 +124,16 @@ class CSBStorage:
             "csb-token": self.app_token,
             "Connection": "close",
         }
+        # 禁用代理（等价于 session.trust_env=False，但线程安全）
+        no_proxy = {"http": None, "https": None}
 
         last_error = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 with open(local_path, "rb") as f:
-                    resp = self.session.put(
-                        url, data=f, headers=headers, timeout=REQUEST_TIMEOUT, verify=False,
+                    resp = requests.put(
+                        url, data=f, headers=headers,
+                        timeout=REQUEST_TIMEOUT, verify=False, proxies=no_proxy,
                     )
                 if resp.status_code == 200:
                     location = f"csb://{self.bucket}/{full_key}"
