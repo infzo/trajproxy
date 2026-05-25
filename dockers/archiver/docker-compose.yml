@@ -1,0 +1,33 @@
+# 归档进程独立部署
+# 1个数据库实例对应1个归档容器
+#
+# 用法:
+#   docker-compose -f dockers/archiver/docker-compose.yml up -d
+#
+# 前提: 需要先构建业务镜像（归档代码打包在同一镜像中）
+#   docker-compose -f dockers/compose/docker-compose.yml build traj_proxy
+
+services:
+  traj_archiver:
+    image: traj_proxy:latest
+    container_name: traj-archiver
+    restart: always
+    volumes:
+      - ./configs/archiver.yaml:/app/configs/archiver.yaml
+    environment:
+      - DATABASE_URL=postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy
+      - ARCHIVER_CONFIG=/app/configs/archiver.yaml
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      # S3 凭证（根据实际存储服务配置）
+      # - AWS_ACCESS_KEY_ID=your-access-key
+      # - AWS_SECRET_ACCESS_KEY=your-secret-key
+      # - AWS_DEFAULT_REGION=us-east-1
+    command: python -m traj_archiver
+    networks:
+      - traj-proxy-network
+
+networks:
+  traj-proxy-network:
+    external: true
+    name: traj-proxy-network

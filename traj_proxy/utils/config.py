@@ -174,23 +174,6 @@ def get_max_concurrent_requests() -> int:
     return get_proxy_workers_config().get("max_concurrent_requests", 128)
 
 
-def get_archive_config() -> Dict:
-    """
-    获取归档配置
-
-    返回:
-        archive 配置字典，包含 enabled, retention_days, storage_path, batch_size, schedule, timezone
-    """
-    return get_config().get("archive", {
-        "enabled": False,
-        "retention_days": 30,
-        "storage_path": "/data/archives",
-        "batch_size": 1000,
-        "schedule": "0 2 * * *",
-        "timezone": "UTC",
-    })
-
-
 def get_processor_cache_max_size() -> int:
     """
     获取 LRU 缓存最大 Processor 数量

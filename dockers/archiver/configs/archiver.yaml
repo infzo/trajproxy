@@ -1,0 +1,22 @@
+# 归档进程独立配置（Docker 部署专用）
+# 与核心业务完全独立，归档进程独享此配置文件
+
+# 数据库配置（通过环境变量 DATABASE_URL 覆盖）
+database:
+  url: "postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy"
+  pool:
+    min_size: 2
+    max_size: 10
+    timeout: 30
+
+# 归档配置
+archive:
+  retention_days: 30             # 活跃详情保留天数
+  poll_interval: 3600            # 轮询间隔（秒），每小时检查一次
+  local_temp_path: "/tmp/archives"  # 本地临时导出目录
+
+  # S3 存储配置
+  s3:
+    bucket: "my-archive-bucket"
+    prefix: "trajproxy-archives/"
+    endpoint_url: null           # null = AWS S3；URL = MinIO/Ceph

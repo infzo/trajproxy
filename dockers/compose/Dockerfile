@@ -15,7 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.tuna.tsing
 # 复制脚本
 RUN mkdir -p ./scripts
 COPY scripts/download_tokenizer.py ./scripts/download_tokenizer.py
-COPY scripts/archive_records.py ./scripts/archive_records.py
 COPY dockers/compose/scripts/entrypoint.sh ./scripts/entrypoint.sh
 
 # 复制 models 目录（如果存在）
@@ -24,6 +23,10 @@ COPY models/ ./models/
 
 # 复制项目文件，保持 traj_proxy/ 包结构
 COPY traj_proxy/ ./traj_proxy/
+
+# 复制归档进程独立包（与核心业务共享镜像，独立部署）
+COPY traj_archiver/ ./traj_archiver/
+COPY configs/archiver.yaml ./configs/archiver.yaml
 
 # 暴露端口
 EXPOSE 12300-12320

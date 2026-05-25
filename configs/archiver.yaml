@@ -1,0 +1,26 @@
+# 归档进程独立配置
+# 与核心业务完全独立，归档进程独享此配置文件
+
+# 数据库配置
+database:
+  url: "postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy"
+  pool:
+    min_size: 2
+    max_size: 10
+    timeout: 30
+
+# 归档配置
+archive:
+  retention_days: 30             # 活跃详情保留天数
+  poll_interval: 3600            # 轮询间隔（秒），每小时检查一次
+  local_temp_path: "/tmp/archives"  # 本地临时导出目录（上传 S3 后自动清理）
+
+  # S3 存储配置（兼容 AWS S3 / MinIO / Ceph）
+  s3:
+    bucket: "my-archive-bucket"
+    prefix: "trajproxy-archives/"
+    endpoint_url: null           # null = AWS S3；设为 URL 则兼容 MinIO/Ceph
+    # 凭证通过标准 AWS 环境变量配置：
+    #   AWS_ACCESS_KEY_ID
+    #   AWS_SECRET_ACCESS_KEY
+    #   AWS_DEFAULT_REGION
