@@ -116,9 +116,20 @@ class S3Storage(Storage):
 
     def upload(self, local_path: Path, key: str) -> str:
         full_key = f"{self.prefix}{key}"
-        self.client.upload_file(str(local_path), self.bucket, full_key)
+        file_size = local_path.stat().st_size
         s3_uri = f"s3://{self.bucket}/{full_key}"
-        logger.info(f"已上传: {local_path.name} → {s3_uri}")
+
+        if self.app_token:
+            # CSB 网关不支持 multipart upload，用 put_object 单次上传
+            with open(local_path, "rb") as f:
+                self.client.put_object(
+                    Bucket=self.bucket, Key=full_key, Body=f,
+                    ContentLength=file_size,
+                )
+        else:
+            self.client.upload_file(str(local_path), self.bucket, full_key)
+
+        logger.info(f"已上传: {local_path.name} ({file_size} bytes) → {s3_uri}")
         return s3_uri
 
     def _parse_key(self, key: str) -> tuple:
