@@ -43,6 +43,7 @@ class LocalStorage(Storage):
 
     def upload(self, local_path: Path, key: str) -> str:
         dest = self.storage_path / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(local_path), str(dest))
         logger.info(f"已保存: {local_path.name} → {dest}")
         return key

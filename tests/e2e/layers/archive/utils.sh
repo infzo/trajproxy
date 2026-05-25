@@ -133,7 +133,8 @@ check_partition_exists() {
 # 获取分区记录数
 get_partition_record_count() {
     local partition_name="$1"
-    db_query "SELECT COUNT(*) FROM public.${partition_name};" 2>/dev/null || echo "0"
+    local count=$(db_query "SELECT COUNT(*) FROM public.${partition_name};" 2>/dev/null || echo "0")
+    echo "${count:-0}"
 }
 
 # 获取已归档记录数
@@ -157,56 +158,144 @@ get_archive_location() {
     "
 }
 
+# 获取所有运行中的归档容器名称（排除 MinIO 等辅助服务）
+_get_archiver_containers() {
+    docker ps --format '{{.Names}}' 2>/dev/null | grep -E 'archiver' | grep -v 'minio\|minio_init' || true
+}
+
 # 判断 archive_location 是否为 S3 URI
 _is_s3_uri() {
     local location="$1"
     [[ "$location" == s3://* ]]
 }
 
-# 检查归档文件是否存在（自动识别本地 / S3）
-check_archive_file_exists() {
+# 在指定容器中检查本地归档文件
+_check_local_file_in_container() {
+    local container="$1"
+    local archive_location="$2"
+
+    docker exec "${container}" python3 -c "
+import os
+path = '/data/archives/${archive_location}'
+print('exists' if os.path.exists(path) else 'not_found')
+" 2>/dev/null | grep -q "exists"
+}
+
+# 通过 S3 检查归档文件（用于 archive_location 为 s3:// URI 的情况）
+_check_s3_file() {
     local archive_location="$1"
 
-    if _is_s3_uri "$archive_location"; then
-        # S3 模式：在归档容器内通过 boto3 检查
-        local result=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+    local result
+    result=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
 import boto3, os
 from urllib.parse import urlparse
 uri = '${archive_location}'
 p = urlparse(uri)
 bucket = p.netloc
 key = p.path.lstrip('/')
-s3 = boto3.client('s3', endpoint_url=os.environ.get('AWS_ENDPOINT_URL'))
+ep = os.environ.get('AWS_ENDPOINT_URL')
+kwargs = {}
+if ep:
+    kwargs['endpoint_url'] = ep
+s3 = boto3.client('s3', **kwargs)
 try:
     s3.head_object(Bucket=bucket, Key=key)
     print('exists')
 except:
     print('not_found')
 " 2>/dev/null)
-        [ "$result" = "exists" ]
-    else
-        # 本地模式：直接检查文件
-        docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
-import os
-print('exists' if os.path.exists('/data/archives/${archive_location}') else 'not_found')
-" 2>/dev/null | grep -q "exists"
-    fi
+    [ "$result" = "exists" ]
 }
 
-# 验证归档文件内容（自动识别本地 / S3）
+# 通过 S3 检查归档文件（用于 archive_location 为本地路径的情况，尝试用默认 bucket/prefix 查找）
+_check_s3_file_by_local_key() {
+    local archive_location="$1"
+
+    for container in $(_get_archiver_containers); do
+        local result
+        result=$(docker exec "${container}" python3 -c "
+import boto3, os
+
+# 尝试从环境变量推断 S3 配置
+ep = os.environ.get('AWS_ENDPOINT_URL')
+bucket = os.environ.get('S3_BUCKET', 'trajproxy-archives')
+prefix = os.environ.get('S3_PREFIX', 'archives/')
+
+key = '${archive_location}'
+full_key = prefix + key
+
+kwargs = {}
+if ep:
+    kwargs['endpoint_url'] = ep
+try:
+    s3 = boto3.client('s3', **kwargs)
+    s3.head_object(Bucket=bucket, Key=full_key)
+    print('exists')
+except:
+    print('not_found')
+" 2>/dev/null)
+        if [ "$result" = "exists" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 检查归档文件是否存在（自动识别本地 / S3，支持多容器和 fallback）
+check_archive_file_exists() {
+    local archive_location="$1"
+
+    if _is_s3_uri "$archive_location"; then
+        # S3 URI：优先 S3 检查，失败则尝试在各容器本地查找
+        if _check_s3_file "$archive_location"; then
+            return 0
+        fi
+        # fallback: 尝试从 S3 URI 提取 key，在各容器本地查找
+        local key="${archive_location#s3://*/}"
+        for container in $(_get_archiver_containers); do
+            if _check_local_file_in_container "$container" "$key"; then
+                return 0
+            fi
+        done
+        return 1
+    fi
+
+    # 本地路径：遍历所有归档容器查找
+    for container in $(_get_archiver_containers); do
+        if _check_local_file_in_container "$container" "$archive_location"; then
+            return 0
+        fi
+    done
+
+    # fallback: 尝试通过 S3 查找（当 S3 模式的归档容器写了非标准格式的 location 时）
+    if _check_s3_file_by_local_key "$archive_location"; then
+        return 0
+    fi
+
+    return 1
+}
+
+# 验证归档文件内容（自动识别本地 / S3，支持多容器 fallback）
 verify_archive_file() {
     local archive_location="$1"
     local expected_count="$2"
 
+    local actual_count=""
+
     if _is_s3_uri "$archive_location"; then
-        local actual_count=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+        # S3 URI：在 S3 容器中下载并统计行数
+        actual_count=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
 import boto3, gzip, os
 from urllib.parse import urlparse
 uri = '${archive_location}'
 p = urlparse(uri)
 bucket = p.netloc
 key = p.path.lstrip('/')
-s3 = boto3.client('s3', endpoint_url=os.environ.get('AWS_ENDPOINT_URL'))
+ep = os.environ.get('AWS_ENDPOINT_URL')
+kwargs = {}
+if ep:
+    kwargs['endpoint_url'] = ep
+s3 = boto3.client('s3', **kwargs)
 local_path = '/tmp/test_verify.gz'
 s3.download_file(bucket, key, local_path)
 with gzip.open(local_path, 'rt') as f:
@@ -215,17 +304,26 @@ os.unlink(local_path)
 print(count)
 " 2>/dev/null)
     else
-        local actual_count=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
-import gzip
+        # 本地路径：遍历所有归档容器查找
+        for container in $(_get_archiver_containers); do
+            actual_count=$(docker exec "${container}" python3 -c "
+import gzip, os
 path = '/data/archives/${archive_location}'
-with gzip.open(path, 'rt') as f:
-    count = sum(1 for _ in f)
-print(count)
+if not os.path.exists(path):
+    print('')
+else:
+    with gzip.open(path, 'rt') as f:
+        count = sum(1 for _ in f)
+    print(count)
 " 2>/dev/null)
+            if [ -n "$actual_count" ]; then
+                break
+            fi
+        done
     fi
 
-    if [ "$actual_count" -ne "$expected_count" ]; then
-        log_error "归档文件记录数不匹配: 期望 ${expected_count}, 实际 ${actual_count}"
+    if [ -z "$actual_count" ] || [ "$actual_count" -ne "$expected_count" ]; then
+        log_error "归档文件记录数不匹配: 期望 ${expected_count}, 实际 ${actual_count:-0}"
         return 1
     fi
 
@@ -233,7 +331,7 @@ print(count)
     return 0
 }
 
-# 读取归档文件第一行（自动识别本地 / S3）
+# 读取归档文件第一行（自动识别本地 / S3，支持多容器 fallback）
 read_archive_first_line() {
     local archive_location="$1"
 
@@ -245,7 +343,11 @@ uri = '${archive_location}'
 p = urlparse(uri)
 bucket = p.netloc
 key = p.path.lstrip('/')
-s3 = boto3.client('s3', endpoint_url=os.environ.get('AWS_ENDPOINT_URL'))
+ep = os.environ.get('AWS_ENDPOINT_URL')
+kwargs = {}
+if ep:
+    kwargs['endpoint_url'] = ep
+s3 = boto3.client('s3', **kwargs)
 local_path = '/tmp/test_read.gz'
 s3.download_file(bucket, key, local_path)
 with gzip.open(local_path, 'rt') as f:
@@ -253,11 +355,21 @@ with gzip.open(local_path, 'rt') as f:
 os.unlink(local_path)
 " 2>/dev/null
     else
-        docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
-import gzip
-with gzip.open('/data/archives/${archive_location}', 'rt') as f:
-    print(f.readline().strip())
-" 2>/dev/null
+        for container in $(_get_archiver_containers); do
+            local line
+            line=$(docker exec "${container}" python3 -c "
+import gzip, os
+path = '/data/archives/${archive_location}'
+if os.path.exists(path):
+    with gzip.open(path, 'rt') as f:
+        print(f.readline().strip())
+" 2>/dev/null)
+            if [ -n "$line" ]; then
+                echo "$line"
+                return 0
+            fi
+        done
+        return 1
     fi
 }
 

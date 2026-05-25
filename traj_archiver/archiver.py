@@ -234,6 +234,7 @@ async def archive_details(
         "partitions_cleaned": 0,
         "archive_files": [],
         "errors": [],
+        "details": [],
     }
 
     async with pool.connection() as conn:
@@ -253,6 +254,11 @@ async def archive_details(
                 result["sessions_archived"] += stats["sessions"]
                 result["records_archived"] += stats["records"]
                 result["archive_files"].extend(stats["files"])
+                result["details"].append({
+                    "run_id": run_id,
+                    "sessions": stats["sessions"],
+                    "records": stats["records"],
+                })
             except Exception as e:
                 msg = f"归档 run '{run_id}' 失败: {e}"
                 logger.error(msg)

@@ -134,12 +134,35 @@ class ArchiveScheduler:
 
         logger.info("=" * 50)
         logger.info("归档任务完成")
-        logger.info(f"  处理分区数: {result.get('partitions_processed', 0)}")
-        logger.info(f"  本次归档记录数: {records_archived}")
+        logger.info(f"  处理 run 数: {result.get('runs_processed', 0)}")
+        logger.info(f"  归档 session 数: {result.get('sessions_archived', 0)}")
+        logger.info(f"  归档记录数: {result.get('records_archived', 0)}")
         logger.info(f"  累计归档记录数: {self._total_records_archived}")
-        logger.info(f"  删除分区数: {result.get('partitions_dropped', 0)}")
+        logger.info(f"  清理空分区数: {result.get('partitions_cleaned', 0)}")
+
+        # 打印每个 run 的详细统计
+        details = result.get("details", [])
+        if details:
+            logger.info("--- 各 run 归档明细 ---")
+            for d in details:
+                logger.info(
+                    f"  run_id={d['run_id']}: "
+                    f"{d['sessions']} sessions, {d['records']} records"
+                )
+
+        # 打印归档文件列表
+        archive_files = result.get("archive_files", [])
+        if archive_files:
+            logger.info(f"--- 归档文件 ({len(archive_files)} 个) ---")
+            for f in archive_files:
+                logger.info(f"  {f}")
+        elif result.get("records_archived", 0) == 0:
+            logger.info("  本次无过期数据需要归档")
+
         if result.get("errors"):
-            logger.warning(f"  错误数: {len(result['errors'])}")
+            logger.warning(f"--- 错误 ({len(result['errors'])} 个) ---")
+            for err in result["errors"]:
+                logger.warning(f"  {err}")
         logger.info("=" * 50)
 
         self._last_result = result

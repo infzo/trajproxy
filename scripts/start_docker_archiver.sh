@@ -26,10 +26,10 @@ cd "$PROJECT_ROOT"
 if [ "$MODE" = "test" ]; then
     docker compose -f dockers/archiver/docker-compose-test.yml up -d
     echo ""
-    echo "归档容器 + MinIO 已启动"
+    echo "归档容器 + MinIO 已启动（仅 S3 模式）"
     echo "  MinIO API:     http://localhost:9000"
     echo "  MinIO Console: http://localhost:9001 (minioadmin/minioadmin)"
-    echo "  查看日志:      docker logs -f traj-archiver-test"
+    echo "  查看日志:      docker logs -f traj-archiver-test-s3"
 else
     docker compose -f dockers/archiver/docker-compose.yml up -d
     echo ""

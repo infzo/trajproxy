@@ -19,10 +19,19 @@ ARCHIVE_RETENTION_DAYS="${ARCHIVE_RETENTION_DAYS:-30}"
 TEST_SESSION_PREFIX="test_archive_$(date +%s)"
 TEST_MODEL_NAME="test-archive-model"
 
-# 容器配置（自动检测）
-# 归档容器：独立的 traj-archiver 容器（docker-compose archiver 部署）
+# 容器配置（自动检测归档容器）
+ARCHIVER_CONTAINERS=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E 'archiver' || true)
+ARCHIVER_CONTAINER_COUNT=$(echo "$ARCHIVER_CONTAINERS" | grep -c . 2>/dev/null || echo "0")
+
+if [ "${ARCHIVER_CONTAINER_COUNT}" -gt 1 ]; then
+    echo "[WARN] 检测到 ${ARCHIVER_CONTAINER_COUNT} 个归档容器运行中: $(echo "$ARCHIVER_CONTAINERS" | tr '\n' ' ')"
+    echo "       建议只保留 1 个归档容器，避免多个归档进程竞争同一数据库"
+fi
+
 if [ -z "${ARCHIVER_CONTAINER_NAME}" ]; then
-    if docker ps --format '{{.Names}}' | grep -q '^traj-archiver$'; then
+    if docker ps --format '{{.Names}}' | grep -q '^traj-archiver-test-s3$'; then
+        ARCHIVER_CONTAINER_NAME="traj-archiver-test-s3"
+    elif docker ps --format '{{.Names}}' | grep -q '^traj-archiver$'; then
         ARCHIVER_CONTAINER_NAME="traj-archiver"
     else
         ARCHIVER_CONTAINER_NAME="traj-archiver"

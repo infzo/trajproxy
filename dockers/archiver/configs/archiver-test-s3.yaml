@@ -10,7 +10,7 @@ database:
 
 archive:
   retention_days: 30
-  poll_interval: 3600
+  poll_interval: 60
   storage_path: "/data/archives"     # S3 模式下作为临时目录
   local_temp_path: "/tmp/archives"
   s3:

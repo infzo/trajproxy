@@ -46,10 +46,10 @@ services:
 
   traj_archiver:
     image: traj_proxy:latest
-    container_name: traj-archiver-test
+    container_name: traj-archiver-test-s3
     restart: always
     volumes:
-      - ./configs/archiver-test.yaml:/app/configs/archiver.yaml
+      - ./configs/archiver-test-s3.yaml:/app/configs/archiver.yaml
     environment:
       - DATABASE_URL=postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy
       - ARCHIVER_CONFIG=/app/configs/archiver.yaml
@@ -59,6 +59,7 @@ services:
       - AWS_ACCESS_KEY_ID=minioadmin
       - AWS_SECRET_ACCESS_KEY=minioadmin
       - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://minio:9000
     command: python -m traj_archiver
     depends_on:
       minio_init:
