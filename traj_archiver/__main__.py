@@ -71,6 +71,7 @@ async def main():
         poll_interval=archive_config.get("poll_interval", 3600),
         local_temp_path=archive_config.get("local_temp_path", "/tmp/archives"),
         upload_concurrency=archive_config.get("upload_concurrency", 1),
+        compress=archive_config.get("compress", True),
     )
     await scheduler.start()
 

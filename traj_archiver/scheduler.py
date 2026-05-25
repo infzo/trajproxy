@@ -29,6 +29,7 @@ class ArchiveScheduler:
         poll_interval: int = 3600,
         local_temp_path: str = "/tmp/archives",
         upload_concurrency: int = 1,
+        compress: bool = True,
     ):
         self.pool = pool
         self.storage = storage
@@ -36,6 +37,7 @@ class ArchiveScheduler:
         self.poll_interval = poll_interval
         self.local_temp_path = local_temp_path
         self.upload_concurrency = upload_concurrency
+        self.compress = compress
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -122,6 +124,7 @@ class ArchiveScheduler:
             local_temp_path=self.local_temp_path,
             retention_days=self.retention_days,
             upload_concurrency=self.upload_concurrency,
+            compress=self.compress,
         )
 
         records_archived = result.get("records_archived", 0)

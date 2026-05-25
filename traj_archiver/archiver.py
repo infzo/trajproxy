@@ -197,6 +197,7 @@ async def archive_details(
     local_temp_path: str,
     retention_days: int,
     upload_concurrency: int = 1,
+    compress: bool = True,
 ) -> Dict[str, Any]:
     """按 run_id 粒度归档过期数据"""
     threshold = _utcnow() - timedelta(days=retention_days)
@@ -227,7 +228,7 @@ async def archive_details(
         for idx, run_id in enumerate(expired_runs, 1):
             logger.info(f"[{idx}/{total}] 开始归档 run '{run_id}'...")
             try:
-                stats = await _archive_run(conn, storage, temp_root, run_id, upload_concurrency)
+                stats = await _archive_run(conn, storage, temp_root, run_id, upload_concurrency, compress)
                 result["runs_processed"] += 1
                 result["sessions_archived"] += stats["sessions"]
                 result["records_archived"] += stats["records"]
@@ -250,7 +251,7 @@ async def archive_details(
             for session_id in expired_null:
                 try:
                     stats = await _archive_null_session(
-                        conn, storage, temp_root, session_id
+                        conn, storage, temp_root, session_id, compress
                     )
                     result["sessions_archived"] += 1
                     result["records_archived"] += stats["records"]
@@ -292,6 +293,7 @@ async def _cleanup_empty_partitions(conn, processed: int) -> int:
 async def _archive_run(
     conn, storage, temp_root: Path, run_id: str,
     upload_concurrency: int = 1,
+    compress: bool = True,
 ) -> Dict[str, Any]:
     """归档一个 run 下的所有 session
 
@@ -334,9 +336,10 @@ async def _archive_run(
     logger.info(f"  归档 run '{run_id}'...")
     t_start = time.monotonic()
 
-    # ---- 写入阶段：流式读取 + 按 session 写 gzip ----
+    # ---- 写入阶段：流式读取 + 按 session 写文件 ----
+    suffix = ".jsonl.gz" if compress else ".jsonl"
     session_files: Dict[str, tuple] = {}
-    pending_uploads = []  # [(file_path, upload_key, uid_list)]
+    pending_uploads = []
     record_count = 0
 
     while True:
@@ -356,12 +359,12 @@ async def _archive_run(
                     old_key = next(iter(session_files))
                     old_fh, old_path, old_ids = session_files.pop(old_key)
                     old_fh.close()
-                    pending_uploads.append((old_path, f"{safe_run}/{old_key}.jsonl.gz", old_ids))
+                    pending_uploads.append((old_path, f"{safe_run}/{old_key}{suffix}", old_ids))
 
                 run_dir = temp_root / safe_run
                 run_dir.mkdir(parents=True, exist_ok=True)
-                file_path = run_dir / f"{safe_session}.jsonl.gz"
-                fh = gzip.open(file_path, "wt", encoding="utf-8")
+                file_path = run_dir / f"{safe_session}{suffix}"
+                fh = gzip.open(file_path, "wt", encoding="utf-8") if compress else open(file_path, "wt", encoding="utf-8")
                 session_files[safe_session] = (fh, file_path, [])
 
             fh, _, uid_list = session_files[safe_session]
@@ -384,7 +387,7 @@ async def _archive_run(
     # 关闭剩余文件，加入待上传队列
     for safe_session, (fh, file_path, uid_list) in session_files.items():
         fh.close()
-        pending_uploads.append((file_path, f"{safe_run}/{safe_session}.jsonl.gz", uid_list))
+        pending_uploads.append((file_path, f"{safe_run}/{safe_session}{suffix}", uid_list))
 
     t_write = time.monotonic()
     logger.info(f"  写入完成: {len(pending_uploads)} 个文件, {record_count} 条记录, 耗时 {t_write - t_start:.1f}s")
@@ -417,9 +420,11 @@ async def _archive_run(
 
 async def _archive_null_session(
     conn, storage, temp_root: Path, session_id: str,
+    compress: bool = True,
 ) -> Dict[str, Any]:
     """归档一个 run_id=NULL 的 session"""
     safe_session = _safe_path(session_id)
+    suffix = ".jsonl.gz" if compress else ".jsonl"
 
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute("""
@@ -441,12 +446,12 @@ async def _archive_null_session(
     if not records:
         return {"records": 0, "file": None}
 
-    # 写入文件
-    file_path = temp_root / f"{safe_session}.jsonl.gz"
+    file_path = temp_root / f"{safe_session}{suffix}"
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     uids = []
-    with gzip.open(file_path, "wt", encoding="utf-8") as f:
+    opener = gzip.open if compress else open
+    with opener(file_path, "wt", encoding="utf-8") as f:
         for rec in records:
             rec = dict(rec)
             for key, val in rec.items():
@@ -455,8 +460,7 @@ async def _archive_null_session(
             f.write(json.dumps(rec, default=str) + "\n")
             uids.append(rec["unique_id"])
 
-    # 上传
-    key = f"_unknown/{safe_session}.jsonl.gz"
+    key = f"_unknown/{safe_session}{suffix}"
     loc = _finalize_file(storage, file_path, key)
 
     # DELETE + UPDATE
