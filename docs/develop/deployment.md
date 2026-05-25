@@ -161,6 +161,61 @@ curl http://localhost:12300/health
 
 ---
 
+## 方式三：归档进程独立部署
+
+归档进程与核心业务独立部署，1 个数据库实例对应 1 个归档容器。
+
+### 1. 配置
+
+编辑 `configs/archiver.yaml`:
+```yaml
+database:
+  url: "postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy"
+
+archive:
+  retention_days: 30
+  poll_interval: 3600
+  storage_path: "/data/archives"
+  # S3 模式 (可选):
+  # s3:
+  #   bucket: "my-bucket"
+  #   prefix: "archives/"
+  #   endpoint_url: null
+```
+
+### 2. 启动
+
+```bash
+# 本地存储模式
+./scripts/start_docker_archiver.sh
+
+# MinIO S3 测试模式
+./scripts/start_docker_archiver.sh --test
+
+# 停止
+./scripts/stop_docker_archiver.sh [--test|--all]
+```
+
+### 3. 容器
+
+| 容器 | 说明 |
+|------|------|
+| traj-archiver | 归档进程 (生产) |
+| traj-archiver-minio | MinIO S3 服务 (仅测试) |
+
+### 4. 验证
+
+```bash
+# 查看归档日志
+docker logs -f traj-archiver
+
+# 检查归档状态 (日志关键字)
+docker logs traj-archiver | grep "归档任务完成"
+docker logs traj-archiver | grep "runs_processed"
+```
+
+---
+
 ## 常用运维命令
 
 ### 本地开发模式
