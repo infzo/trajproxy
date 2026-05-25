@@ -1,0 +1,19 @@
+# 归档进程测试配置（含 MinIO S3）
+# 用于 E2E 测试，与测试 compose 配套使用
+
+database:
+  url: "postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy"
+  pool:
+    min_size: 2
+    max_size: 10
+    timeout: 30
+
+archive:
+  retention_days: 30
+  poll_interval: 3600
+  storage_path: "/data/archives"     # S3 模式下作为临时目录
+  local_temp_path: "/tmp/archives"
+  s3:
+    bucket: "trajproxy-archives"
+    prefix: "archives/"
+    endpoint_url: "http://minio:9000"  # MinIO 内部地址

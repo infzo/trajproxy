@@ -12,11 +12,16 @@ from typing import List, Optional
 import boto3
 from botocore.config import Config as BotoConfig
 
+from traj_archiver.storage import Storage
+
 logger = logging.getLogger(__name__)
 
 
-class S3Storage:
-    """S3 存储操作封装"""
+class S3Storage(Storage):
+    """S3 存储操作封装
+
+    实现 Storage 统一接口，archive_location 为 s3:// URI。
+    """
 
     def __init__(
         self,
@@ -39,72 +44,66 @@ class S3Storage:
             ),
             **client_kwargs,
         )
+
+        # 确保 bucket 存在
+        self._ensure_bucket()
+
         logger.info(
             f"S3Storage 初始化: bucket={bucket}, prefix={self.prefix}, "
             f"endpoint={'AWS' if not endpoint_url else endpoint_url}"
         )
 
-    def upload_file(self, local_path: Path, s3_key: Optional[str] = None) -> str:
-        """上传文件到 S3
+    def _ensure_bucket(self):
+        """确保 bucket 存在，不存在则创建"""
+        try:
+            self.client.head_bucket(Bucket=self.bucket)
+        except Exception:
+            try:
+                self.client.create_bucket(Bucket=self.bucket)
+                logger.info(f"已创建 bucket: {self.bucket}")
+            except Exception as e:
+                logger.warning(f"创建 bucket 失败（可能已存在）: {e}")
 
-        Args:
-            local_path: 本地文件路径
-            s3_key: S3 对象键（不含前缀），默认使用文件名
-
-        Returns:
-            完整的 S3 URI
-        """
-        if s3_key is None:
-            s3_key = local_path.name
-
-        full_key = f"{self.prefix}{s3_key}"
+    def upload(self, local_path: Path, key: str) -> str:
+        full_key = f"{self.prefix}{key}"
         self.client.upload_file(str(local_path), self.bucket, full_key)
-
         s3_uri = f"s3://{self.bucket}/{full_key}"
         logger.info(f"已上传: {local_path.name} → {s3_uri}")
         return s3_uri
 
-    def download_file(self, s3_key: str, local_path: Path) -> Path:
-        """从 S3 下载文件
-
-        Args:
-            s3_key: S3 对象键（不含前缀）
-            local_path: 本地保存路径
+    def _parse_key(self, key: str) -> tuple:
+        """解析 key，支持 s3:// URI 或纯文件名
 
         Returns:
-            本地文件路径
+            (bucket, full_key)
         """
-        full_key = f"{self.prefix}{s3_key}"
+        if key.startswith("s3://"):
+            path = key[5:]  # 去掉 s3://
+            parts = path.split("/", 1)
+            bucket = parts[0]
+            full_key = parts[1] if len(parts) > 1 else ""
+            return bucket, full_key
+        return self.bucket, f"{self.prefix}{key}"
+
+    def download(self, key: str, local_path: Path) -> Path:
+        bucket, full_key = self._parse_key(key)
         local_path.parent.mkdir(parents=True, exist_ok=True)
-        self.client.download_file(self.bucket, full_key, str(local_path))
-        logger.info(f"已下载: s3://{self.bucket}/{full_key} → {local_path}")
+        self.client.download_file(bucket, full_key, str(local_path))
+        logger.info(f"已下载: s3://{bucket}/{full_key} → {local_path}")
         return local_path
 
-    def list_archives(self) -> List[str]:
-        """列出 S3 上的归档文件
+    def exists(self, key: str) -> bool:
+        bucket, full_key = self._parse_key(key)
+        try:
+            self.client.head_object(Bucket=bucket, Key=full_key)
+            return True
+        except Exception:
+            return False
 
-        Returns:
-            归档文件键名列表
-        """
+    def list_archives(self) -> List[str]:
         keys = []
         paginator = self.client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix):
             for obj in page.get("Contents", []):
                 keys.append(obj["Key"])
         return keys
-
-    def file_exists(self, s3_key: str) -> bool:
-        """检查 S3 上文件是否存在
-
-        Args:
-            s3_key: S3 对象键（不含前缀）
-
-        Returns:
-            是否存在
-        """
-        full_key = f"{self.prefix}{s3_key}"
-        try:
-            self.client.head_object(Bucket=self.bucket, Key=full_key)
-            return True
-        except Exception:
-            return False

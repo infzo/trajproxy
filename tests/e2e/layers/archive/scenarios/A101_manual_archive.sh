@@ -1,6 +1,6 @@
 #!/bin/bash
 # 场景 A101: 手动触发归档
-# 测试在归档容器内手动执行一次性归档的完整流程
+# 测试在归档容器内手动执行一次性归档的完整流程（本地 / S3 双模式）
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,8 +55,8 @@ else
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-# 步骤 5: 验证元数据已更新为 S3 URI
-log_step "步骤 5: 验证元数据 archive_location 为 S3 URI"
+# 步骤 5: 验证元数据 archive_location
+log_step "步骤 5: 验证元数据 archive_location"
 
 ARCHIVED_COUNT=$(get_archived_record_count "${TEST_SESSION}")
 log_info "已归档记录数: ${ARCHIVED_COUNT}"
@@ -65,25 +65,22 @@ ARCHIVE_LOCATION=$(get_archive_location "${TEST_SESSION}")
 log_info "archive_location: ${ARCHIVE_LOCATION}"
 
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
-if echo "$ARCHIVE_LOCATION" | grep -q "^s3://"; then
-    log_success "archive_location 为 S3 URI: ${ARCHIVE_LOCATION}"
+if [ -n "$ARCHIVE_LOCATION" ]; then
+    log_success "archive_location 已设置: ${ARCHIVE_LOCATION}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "archive_location 不是 S3 URI: ${ARCHIVE_LOCATION}"
+    log_error "archive_location 未设置"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
-# 步骤 6: 验证 S3 上的归档文件
-log_step "步骤 6: 验证 S3 归档文件"
+# 步骤 6: 验证归档文件存在
+log_step "步骤 6: 验证归档文件"
 
-ARCHIVE_FILE="${MONTH_LAST}.jsonl.gz"
-
-S3_EXISTS=$(check_s3_archive_exists "${ARCHIVE_FILE}")
-if [ "$S3_EXISTS" = "exists" ]; then
-    log_success "S3 归档文件存在: ${ARCHIVE_FILE}"
+if check_archive_file_exists "${ARCHIVE_LOCATION}"; then
+    log_success "归档文件存在"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "S3 归档文件不存在: ${ARCHIVE_FILE}"
+    log_error "归档文件不存在"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
@@ -91,7 +88,7 @@ TESTS_TOTAL=$((TESTS_TOTAL + 1))
 # 步骤 7: 验证归档文件内容
 log_step "步骤 7: 验证归档文件内容"
 
-verify_s3_archive_file "${ARCHIVE_FILE}" 10
+verify_archive_file "${ARCHIVE_LOCATION}" 10
 
 # 步骤 8: 清理测试数据
 log_step "步骤 8: 清理测试数据"

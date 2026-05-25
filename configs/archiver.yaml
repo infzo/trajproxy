@@ -13,14 +13,13 @@ database:
 archive:
   retention_days: 30             # 活跃详情保留天数
   poll_interval: 3600            # 轮询间隔（秒），每小时检查一次
-  local_temp_path: "/tmp/archives"  # 本地临时导出目录（上传 S3 后自动清理）
+  storage_path: "/data/archives" # 本地模式：归档文件保存目录
+  local_temp_path: "/tmp/archives"  # S3 模式：本地临时导出目录
 
-  # S3 存储配置（兼容 AWS S3 / MinIO / Ceph）
-  s3:
-    bucket: "my-archive-bucket"
-    prefix: "trajproxy-archives/"
-    endpoint_url: null           # null = AWS S3；设为 URL 则兼容 MinIO/Ceph
-    # 凭证通过标准 AWS 环境变量配置：
-    #   AWS_ACCESS_KEY_ID
-    #   AWS_SECRET_ACCESS_KEY
-    #   AWS_DEFAULT_REGION
+  # S3 存储配置（设为 null 或不设则使用本地文件系统模式）
+  # 启用 S3 时取消注释并填写 bucket：
+  # s3:
+  #   bucket: "my-archive-bucket"
+  #   prefix: "trajproxy-archives/"
+  #   endpoint_url: null           # null = AWS S3；URL = MinIO/Ceph
+  #   # 凭证通过标准 AWS 环境变量：AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY

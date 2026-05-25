@@ -1,6 +1,6 @@
 #!/bin/bash
 # Archive 层测试工具函数
-# 适配独立归档进程 traj_archiver + S3 存储
+# 适配独立归档进程 traj_archiver + 本地/ S3 双模式存储
 
 # 导入配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -115,7 +115,7 @@ cleanup_test_data() {
 }
 
 # ========================================
-# 归档验证函数
+# 归档验证函数（双模式：本地 / S3）
 # ========================================
 
 # 检查分区是否存在
@@ -156,67 +156,108 @@ get_archive_location() {
     "
 }
 
-# 检查 S3 上是否存在归档文件（通过归档容器执行）
-check_s3_archive_exists() {
-    local s3_key="$1"
-    docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+# 判断 archive_location 是否为 S3 URI
+_is_s3_uri() {
+    local location="$1"
+    [[ "$location" == s3://* ]]
+}
+
+# 检查归档文件是否存在（自动识别本地 / S3）
+check_archive_file_exists() {
+    local archive_location="$1"
+
+    if _is_s3_uri "$archive_location"; then
+        # S3 模式：在归档容器内通过 boto3 检查
+        local result=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
 import boto3, os
-s3 = boto3.client('s3',
-    endpoint_url=os.environ.get('AWS_ENDPOINT_URL'),
-)
-key = '${ARCHIVE_S3_PREFIX}${s3_key}'
+from urllib.parse import urlparse
+uri = '${archive_location}'
+p = urlparse(uri)
+bucket = p.netloc
+key = p.path.lstrip('/')
+s3 = boto3.client('s3', endpoint_url=os.environ.get('AWS_ENDPOINT_URL'))
 try:
-    s3.head_object(Bucket='${ARCHIVE_S3_BUCKET}', Key=key)
+    s3.head_object(Bucket=bucket, Key=key)
     print('exists')
 except:
     print('not_found')
-" 2>/dev/null
+" 2>/dev/null)
+        [ "$result" = "exists" ]
+    else
+        # 本地模式：直接检查文件
+        docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import os
+print('exists' if os.path.exists('/data/archives/${archive_location}') else 'not_found')
+" 2>/dev/null | grep -q "exists"
+    fi
 }
 
-# 从 S3 下载归档文件到归档容器的临时目录，并统计记录数
-verify_s3_archive_file() {
-    local s3_key="$1"
+# 验证归档文件内容（自动识别本地 / S3）
+verify_archive_file() {
+    local archive_location="$1"
     local expected_count="$2"
 
-    # 在归档容器内下载并统计
-    local actual_count=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
-import boto3, gzip, os, sys
-s3 = boto3.client('s3',
-    endpoint_url=os.environ.get('AWS_ENDPOINT_URL'),
-)
-key = '${ARCHIVE_S3_PREFIX}${s3_key}'
-local_path = '/tmp/test_verify_${s3_key}'
-s3.download_file('${ARCHIVE_S3_BUCKET}', key, local_path)
+    if _is_s3_uri "$archive_location"; then
+        local actual_count=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import boto3, gzip, os
+from urllib.parse import urlparse
+uri = '${archive_location}'
+p = urlparse(uri)
+bucket = p.netloc
+key = p.path.lstrip('/')
+s3 = boto3.client('s3', endpoint_url=os.environ.get('AWS_ENDPOINT_URL'))
+local_path = '/tmp/test_verify.gz'
+s3.download_file(bucket, key, local_path)
 with gzip.open(local_path, 'rt') as f:
     count = sum(1 for _ in f)
 os.unlink(local_path)
 print(count)
 " 2>/dev/null)
+    else
+        local actual_count=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import gzip
+path = '/data/archives/${archive_location}'
+with gzip.open(path, 'rt') as f:
+    count = sum(1 for _ in f)
+print(count)
+" 2>/dev/null)
+    fi
 
     if [ "$actual_count" -ne "$expected_count" ]; then
         log_error "归档文件记录数不匹配: 期望 ${expected_count}, 实际 ${actual_count}"
         return 1
     fi
 
-    log_success "归档文件验证通过: ${s3_key} (${actual_count} 条记录)"
+    log_success "归档文件验证通过: ${archive_location} (${actual_count} 条记录)"
     return 0
 }
 
-# 从 S3 下载归档文件并读取第一行
-read_s3_archive_first_line() {
-    local s3_key="$1"
-    docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
-import boto3, gzip, json, os
-s3 = boto3.client('s3',
-    endpoint_url=os.environ.get('AWS_ENDPOINT_URL'),
-)
-key = '${ARCHIVE_S3_PREFIX}${s3_key}'
-local_path = '/tmp/test_read_${s3_key}'
-s3.download_file('${ARCHIVE_S3_BUCKET}', key, local_path)
+# 读取归档文件第一行（自动识别本地 / S3）
+read_archive_first_line() {
+    local archive_location="$1"
+
+    if _is_s3_uri "$archive_location"; then
+        docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import boto3, gzip, os
+from urllib.parse import urlparse
+uri = '${archive_location}'
+p = urlparse(uri)
+bucket = p.netloc
+key = p.path.lstrip('/')
+s3 = boto3.client('s3', endpoint_url=os.environ.get('AWS_ENDPOINT_URL'))
+local_path = '/tmp/test_read.gz'
+s3.download_file(bucket, key, local_path)
 with gzip.open(local_path, 'rt') as f:
     print(f.readline().strip())
 os.unlink(local_path)
 " 2>/dev/null
+    else
+        docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import gzip
+with gzip.open('/data/archives/${archive_location}', 'rt') as f:
+    print(f.readline().strip())
+" 2>/dev/null
+    fi
 }
 
 # ========================================
@@ -232,28 +273,24 @@ import asyncio, sys
 sys.path.insert(0, '/app')
 
 from psycopg_pool import AsyncConnectionPool
-from traj_archiver.config import get_database_url, get_s3_config, get_archive_config, get_database_pool_config
-from traj_archiver.s3_storage import S3Storage
+from traj_archiver.config import get_database_url, get_archive_config, get_database_pool_config
+from traj_archiver.storage import create_storage
 from traj_archiver.archiver import archive_details
 
 async def main():
     db_url = get_database_url()
+    archive_config = get_archive_config()
     pool_config = get_database_pool_config()
-    s3_config = get_s3_config()
 
     pool = AsyncConnectionPool(conninfo=db_url, **pool_config)
     await pool.open()
 
-    s3 = S3Storage(
-        bucket=s3_config.get('bucket', ''),
-        prefix=s3_config.get('prefix', ''),
-        endpoint_url=s3_config.get('endpoint_url'),
-    )
+    storage = create_storage(archive_config)
 
     result = await archive_details(
         pool=pool,
-        s3_storage=s3,
-        local_temp_path='/tmp/archives',
+        storage=storage,
+        local_temp_path=archive_config.get('local_temp_path', '/tmp/archives'),
         retention_days=${retention_days},
     )
     await pool.close()

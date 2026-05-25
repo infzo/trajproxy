@@ -62,14 +62,13 @@ else
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-# 检查 S3 归档文件
-ARCHIVE_FILE="${MONTH_LAST}.jsonl.gz"
-S3_EXISTS=$(check_s3_archive_exists "${ARCHIVE_FILE}")
-if [ "$S3_EXISTS" = "exists" ]; then
-    log_success "S3 归档文件已生成: ${ARCHIVE_FILE}"
+# 检查归档文件
+ARCHIVE_LOCATION=$(get_archive_location "${TEST_SESSION}")
+if check_archive_file_exists "${ARCHIVE_LOCATION}"; then
+    log_success "归档文件已生成"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "S3 归档文件未生成"
+    log_error "归档文件未生成"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
@@ -79,12 +78,6 @@ log_step "步骤 5: 检查归档执行日志"
 
 if archiver_log_contains "归档任务完成"; then
     log_success "日志显示归档任务已完成"
-
-    PROCESSED=$(search_archiver_logs "处理分区数" | tail -1 | sed 's/.*处理分区数: //')
-    ARCHIVED=$(search_archiver_logs "本次归档记录数" | tail -1 | sed 's/.*本次归档记录数: //')
-    DROPPED=$(search_archiver_logs "删除分区数" | tail -1 | sed 's/.*删除分区数: //')
-
-    log_info "归档统计: 处理 ${PROCESSED:-N/A} 个分区, 归档 ${ARCHIVED:-N/A} 条记录, 删除 ${DROPPED:-N/A} 个分区"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_info "日志中无归档记录（手动触发场景）"

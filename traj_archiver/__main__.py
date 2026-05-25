@@ -15,9 +15,8 @@ from traj_archiver.config import (
     get_archive_config,
     get_database_pool_config,
     get_database_url,
-    get_s3_config,
 )
-from traj_archiver.s3_storage import S3Storage
+from traj_archiver.storage import create_storage
 from traj_archiver.scheduler import ArchiveScheduler
 
 logging.basicConfig(
@@ -39,7 +38,6 @@ async def main():
         sys.exit(1)
 
     archive_config = get_archive_config()
-    s3_config = get_s3_config()
     pool_config = get_database_pool_config()
 
     # 创建数据库连接池
@@ -52,17 +50,13 @@ async def main():
     await pool.open()
     logger.info("数据库连接池已创建")
 
-    # 创建 S3 存储
-    s3_storage = S3Storage(
-        bucket=s3_config.get("bucket", ""),
-        prefix=s3_config.get("prefix", ""),
-        endpoint_url=s3_config.get("endpoint_url"),
-    )
+    # 根据配置自动选择存储后端（本地 / S3）
+    storage = create_storage(archive_config)
 
     # 创建并启动调度器
     scheduler = ArchiveScheduler(
         pool=pool,
-        s3_storage=s3_storage,
+        storage=storage,
         retention_days=archive_config.get("retention_days", 30),
         poll_interval=archive_config.get("poll_interval", 3600),
         local_temp_path=archive_config.get("local_temp_path", "/tmp/archives"),

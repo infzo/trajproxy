@@ -57,18 +57,16 @@ def get_database_url() -> str:
 
 
 def get_archive_config() -> Dict:
-    """获取归档配置"""
+    """获取归档配置
+
+    返回完整的 archive 配置，storage 模块根据 s3 字段自动选择后端。
+    """
     return get_config().get("archive", {
         "retention_days": 30,
         "poll_interval": 3600,
+        "storage_path": "/data/archives",
         "local_temp_path": "/tmp/archives",
-        "s3": {},
     })
-
-
-def get_s3_config() -> Dict:
-    """获取 S3 配置"""
-    return get_archive_config().get("s3", {})
 
 
 def get_database_pool_config() -> Dict:

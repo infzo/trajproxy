@@ -1,8 +1,8 @@
 """
-核心归档逻辑 - 将过期的请求详情分区归档到 S3
+核心归档逻辑 - 将过期的请求详情分区归档到存储后端
 
-流程：查询过期分区 → 导出到本地临时文件 → 上传 S3
-      → 更新 metadata.archive_location → DETACH+DROP → 清理本地文件
+流程：查询过期分区 → 导出到本地临时文件 → 上传存储
+      → 更新 metadata.archive_location → DETACH+DROP → 清理临时文件
 """
 
 import gzip
@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from psycopg.rows import dict_row
 
-from traj_archiver.s3_storage import S3Storage
+from traj_archiver.storage import Storage
 
 logger = logging.getLogger(__name__)
 
@@ -161,15 +161,15 @@ def _parse_partition_name(partition_name: str) -> Optional[tuple]:
 
 async def archive_details(
     pool,
-    s3_storage: S3Storage,
+    storage: Storage,
     local_temp_path: str,
     retention_days: int,
 ) -> Dict[str, Any]:
-    """归档过期的详情分区到 S3
+    """归档过期的详情分区
 
     Args:
         pool: 数据库连接池
-        s3_storage: S3 存储实例
+        storage: 存储实例（本地或 S3）
         local_temp_path: 本地临时导出目录
         retention_days: 活跃数据保留天数
 
@@ -226,7 +226,7 @@ async def archive_details(
                     month_start=month_start,
                     month_end=month_end,
                     temp_path=temp_path,
-                    s3_storage=s3_storage,
+                    storage=storage,
                 )
 
                 result["partitions_processed"] += 1
@@ -251,9 +251,9 @@ async def _archive_partition(
     month_start: datetime,
     month_end: datetime,
     temp_path: Path,
-    s3_storage: S3Storage,
+    storage: Storage,
 ) -> Dict[str, Any]:
-    """归档单个分区：导出 → 上传 S3 → 更新 metadata → DETACH+DROP"""
+    """归档单个分区：导出 → 上传存储 → 更新 metadata → DETACH+DROP"""
     year_month = month_start.strftime("%Y_%m")
     archive_filename = f"{year_month}.jsonl.gz"
     local_file = temp_path / archive_filename
@@ -305,9 +305,9 @@ async def _archive_partition(
 
     logger.info(f"  已导出到 {archive_filename}（{len(records)} 条记录）")
 
-    # 3. 上传到 S3
-    s3_uri = s3_storage.upload_file(local_file, archive_filename)
-    logger.info(f"  已上传到 S3: {s3_uri}")
+    # 3. 上传到存储后端
+    archive_location = storage.upload(local_file, archive_filename)
+    logger.info(f"  已上传: {archive_location}")
 
     # 4. 更新 metadata 归档位置
     unique_ids = [r["unique_id"] for r in records]
@@ -318,7 +318,7 @@ async def _archive_partition(
             SET archive_location = %s, archived_at = NOW()
             WHERE unique_id = ANY(%s)
             """,
-            (s3_uri, unique_ids),
+            (archive_location, unique_ids),
         )
 
     # 5. DETACH + DROP 分区
@@ -328,9 +328,9 @@ async def _archive_partition(
     )
     await conn.execute(f"DROP TABLE public.{partition_name}")
 
-    # 6. 清理本地临时文件
+    # 6. 清理临时文件（S3 模式清理，本地模式文件已被 move）
     local_file.unlink(missing_ok=True)
 
     logger.info(f"  已归档 {len(unique_ids)} 条记录，分区 {partition_name} 已删除")
 
-    return {"records": len(records), "archive_file": s3_uri, "dropped": True}
+    return {"records": len(records), "archive_file": archive_location, "dropped": True}
