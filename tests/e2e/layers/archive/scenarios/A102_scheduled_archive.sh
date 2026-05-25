@@ -1,97 +1,60 @@
 #!/bin/bash
-# 场景 A102: 轮询归档触发
-# 验证归档调度器按固定间隔轮询执行归档任务
+# 场景 A102: 归档 — 未过期 run 不被归档
+# 验证 run 内有活跃记录时整个 run 保留不动
 
-# 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 A102: 轮询归档触发"
+echo "场景 A102: 未过期 run 不被归档"
 echo "========================================"
 echo ""
 
-# 生成测试 session ID
 TEST_SESSION="${TEST_SESSION_PREFIX}_A102"
-MONTH_LAST=$(date -d "last month" +%Y_%m 2>/dev/null || date -v-1m +%Y_%m 2>/dev/null || echo "2026_03")
+TEST_RUN="test-run-a102"
+# 使用当前月份，数据在 retention 期内
+MONTH_CURRENT=$(date +%Y_%m 2>/dev/null || echo "2026_05")
 
-log_step "步骤 1: 创建过期分区并插入测试数据"
+log_step "步骤 1: 创建当前月分区并插入测试数据"
 
-create_partition "${MONTH_LAST}"
-insert_test_data "${MONTH_LAST}" 5 "${TEST_SESSION}"
+create_partition "${MONTH_CURRENT}"
+insert_test_data "${MONTH_CURRENT}" 5 "${TEST_SESSION}" "${TEST_RUN}"
 
-log_info "已插入测试数据到分区 ${MONTH_LAST}"
+BEFORE=$(get_partition_record_count "request_details_active_${MONTH_CURRENT}")
+log_info "分区 ${MONTH_CURRENT} 包含 ${BEFORE} 条记录"
 
-# 步骤 2: 检查调度器状态
-log_step "步骤 2: 检查归档调度器状态"
+# 步骤 2: 执行归档（留存30天，当前数据不应被归档）
+log_step "步骤 2: 执行归档（retention_days=30）"
 
-if archiver_log_contains "ArchiveScheduler 已启动"; then
-    log_success "调度器已启动"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-else
-    log_error "调度器未启动"
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-fi
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-
-# 验证轮询间隔配置
-if archiver_log_contains "poll_interval"; then
-    POLL_INTERVAL=$(search_archiver_logs "poll_interval" | tail -1 | sed 's/.*poll_interval: //' | sed 's/[^0-9].*//')
-    log_info "轮询间隔: ${POLL_INTERVAL}s"
-fi
-
-# 步骤 3: 手动触发归档（模拟轮询触发）
-log_step "步骤 3: 执行归档"
-
-ARCHIVE_OUTPUT=$(run_archive_once 1 2>&1)
+ARCHIVE_OUTPUT=$(run_archive_once 30 2>&1)
 log_info "归档输出:"
 echo "$ARCHIVE_OUTPUT" | tail -5
 
-# 步骤 4: 验证归档结果
-log_step "步骤 4: 验证归档结果"
+# 步骤 3: 验证数据未被删除
+log_step "步骤 3: 验证活跃 run 未被归档"
 
-sleep 2
+sleep 1
 
-# 检查分区是否被删除
-if check_partition_exists "request_details_active_${MONTH_LAST}"; then
-    log_error "分区仍存在（应已被删除）"
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-else
-    log_success "分区已删除"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-fi
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
+AFTER=$(get_partition_record_count "request_details_active_${MONTH_CURRENT}")
+assert_eq "${BEFORE}" "${AFTER}" "活跃 run 的数据未被 DELETE"
 
-# 检查归档文件
+# 步骤 4: 验证 archive_location 为空
+log_step "步骤 4: 验证 archive_location 未设置"
+
 ARCHIVE_LOCATION=$(get_archive_location "${TEST_SESSION}")
-if check_archive_file_exists "${ARCHIVE_LOCATION}"; then
-    log_success "归档文件已生成"
+
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
+if [ -z "$ARCHIVE_LOCATION" ]; then
+    log_success "活跃 run 的 archive_location 为 NULL（未归档）"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "归档文件未生成"
+    log_error "archive_location 不应被设置: ${ARCHIVE_LOCATION}"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-# 步骤 5: 检查归档执行日志
-log_step "步骤 5: 检查归档执行日志"
-
-if archiver_log_contains "归档任务完成"; then
-    log_success "日志显示归档任务已完成"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-else
-    log_info "日志中无归档记录（手动触发场景）"
-    log_success "归档结果已通过步骤 4 验证"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-fi
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-
-# 步骤 6: 清理测试数据
-log_step "步骤 6: 清理测试数据"
-
+# 步骤 5: 清理
+log_step "步骤 5: 清理测试数据"
 cleanup_test_data "${TEST_SESSION}"
 
 echo ""
-
-# 打印测试摘要
 print_summary

@@ -69,6 +69,7 @@ insert_test_data() {
     local year_month="$1"
     local count="${2:-10}"
     local session_id="${3:-${TEST_SESSION_PREFIX}}"
+    local run_id="${4:-test-run-archive}"
 
     local year="${year_month:0:4}"
     local month="${year_month:5:2}"
@@ -80,11 +81,11 @@ insert_test_data() {
 
         db_execute "
             INSERT INTO request_metadata (
-                unique_id, request_id, session_id, model,
+                unique_id, request_id, session_id, run_id, model,
                 prompt_tokens, completion_tokens, total_tokens,
                 start_time, end_time, created_at
             ) VALUES (
-                '${unique_id}', '${request_id}', '${session_id}', '${TEST_MODEL_NAME}',
+                '${unique_id}', '${request_id}', '${session_id}', '${run_id}', '${TEST_MODEL_NAME}',
                 100, 50, 150,
                 '${created_at}', '${created_at}', '${created_at}'
             )
@@ -101,7 +102,7 @@ insert_test_data() {
         "
     done
 
-    log_info "已插入 ${count} 条测试数据到分区 ${year_month}"
+    log_info "已插入 ${count} 条测试数据到分区 ${year_month} (run=${run_id})"
 }
 
 # 清理测试数据
@@ -296,7 +297,7 @@ async def main():
     await pool.close()
 
     print(f'records_archived={result[\"records_archived\"]}')
-    print(f'partitions_dropped={result[\"partitions_dropped\"]}')
+    print(f'runs_processed={result[\"runs_processed\"]}')
     print(f'errors={len(result[\"errors\"])}')
 
 asyncio.run(main())

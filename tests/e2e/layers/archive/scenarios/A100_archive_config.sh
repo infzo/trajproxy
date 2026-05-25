@@ -1,8 +1,7 @@
 #!/bin/bash
 # 场景 A100: 归档进程配置验证
-# 验证独立归档进程正确启动、配置加载、S3 连接正常
+# 验证独立归档进程正确启动，核心业务与归档解耦
 
-# 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
@@ -34,16 +33,15 @@ elif archiver_log_contains "ArchiveScheduler 已启动"; then
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "归档进程未启动"
-    search_archiver_logs "TrajArchiver\|ArchiveScheduler\|Error\|error" | head -10
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-# 步骤 3: 验证调度器配置
+# 步骤 3: 验证轮询间隔和留存配置
 log_step "步骤 3: 验证调度器配置"
 
 if archiver_log_contains "poll_interval"; then
-    POLL_INTERVAL=$(search_archiver_logs "poll_interval" | tail -1 | sed 's/.*poll_interval: //' | sed 's/ .*//')
+    POLL_INTERVAL=$(search_archiver_logs "poll_interval" | tail -1 | sed 's/.*poll_interval: //' | sed 's/[^0-9].*//')
     log_success "轮询间隔: ${POLL_INTERVAL}s"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
@@ -61,10 +59,10 @@ fi
 log_step "步骤 4: 验证核心业务与归档解耦"
 
 if proxy_log_contains "ArchiveScheduler"; then
-    log_error "核心业务容器仍包含归档调度器代码（应已移除）"
+    log_error "核心业务容器仍包含归档调度器代码"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 else
-    log_success "核心业务容器不包含归档代码（解耦验证通过）"
+    log_success "核心业务容器不包含归档代码"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
@@ -87,6 +85,4 @@ else
 fi
 
 echo ""
-
-# 打印测试摘要
 print_summary
