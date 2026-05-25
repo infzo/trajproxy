@@ -20,9 +20,15 @@ services:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=INFO
       # 本地模式无需 S3 凭证，归档文件保存在 storage_path
-      # S3 模式下取消注释并配置：
+      # S3 模式下取消注释并配置（支持三种方式）：
+      #
+      # ---- 方式 1: CSB 网关 Token 认证 ----
+      # - CSB_APP_TOKEN=your-csb-token
+      #
+      # ---- 方式 2: 标准 AWS AK/SK ----
       # - AWS_ACCESS_KEY_ID=your-access-key
       # - AWS_SECRET_ACCESS_KEY=your-secret-key
+      # - AWS_SESSION_TOKEN=your-session-token   # STS 临时凭证（可选）
       # - AWS_DEFAULT_REGION=us-east-1
     command: python -m traj_archiver
     networks:

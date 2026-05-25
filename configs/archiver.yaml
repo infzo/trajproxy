@@ -22,4 +22,15 @@ archive:
   #   bucket: "my-archive-bucket"
   #   prefix: "trajproxy-archives/"
   #   endpoint_url: null           # null = AWS S3；URL = MinIO/Ceph
-  #   # 凭证通过标准 AWS 环境变量：AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+  #
+  #   # ---- 方式 1: CSB 网关 Token 认证（非标 S3 网关）----
+  #   app_token: null              # YAML 直接配置，或设环境变量 CSB_APP_TOKEN
+  #
+  #   # ---- 方式 2: 显式 AK/SK 认证（标准 S3）----
+  #   access_key: null
+  #   secret_key: null
+  #   session_token: null          # STS 临时凭证（可选）
+  #   region: null
+  #
+  #   # 不配任何凭证时，回退到 boto3 默认凭证链：
+  #   # 环境变量 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY → ~/.aws/credentials → IAM 角色

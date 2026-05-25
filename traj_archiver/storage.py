@@ -7,6 +7,7 @@
 """
 
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -67,6 +68,11 @@ def create_storage(config: dict) -> Storage:
 
     Returns:
         Storage 实例（LocalStorage 或 S3Storage）
+
+    凭证优先级:
+      1. s3.app_token / CSB_APP_TOKEN → CSB 网关模式（跳过签名）
+      2. s3.access_key / s3.secret_key → 显式 AK/SK
+      3. 环境变量 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY → boto3 默认链
     """
     s3_config = config.get("s3")
 
@@ -74,10 +80,18 @@ def create_storage(config: dict) -> Storage:
     if s3_config and s3_config.get("bucket"):
         from traj_archiver.s3_storage import S3Storage
 
+        # app_token: YAML 显式配置优先，其次环境变量 CSB_APP_TOKEN
+        app_token = s3_config.get("app_token") or os.environ.get("CSB_APP_TOKEN")
+
         return S3Storage(
             bucket=s3_config["bucket"],
             prefix=s3_config.get("prefix", ""),
             endpoint_url=s3_config.get("endpoint_url"),
+            access_key=s3_config.get("access_key"),
+            secret_key=s3_config.get("secret_key"),
+            session_token=s3_config.get("session_token"),
+            app_token=app_token,
+            region=s3_config.get("region"),
         )
 
     # 本地模式

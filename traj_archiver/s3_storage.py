@@ -1,8 +1,15 @@
 """
 S3 存储模块 - 归档文件上传/下载
 
-兼容 AWS S3 和 MinIO/Ceph 等 S3 协议存储。
-凭证通过标准 AWS 环境变量配置。
+兼容 AWS S3 / MinIO / Ceph 等标准 S3 协议存储，
+同时支持华为云 CSB 等非标 S3 网关的 token 认证。
+
+凭证方式（按优先级）：
+  1. YAML s3.app_token → CSB token 认证（unsigned + csb-token 头）
+  2. 环境变量 CSB_APP_TOKEN → 同上
+  3. YAML s3.access_key / s3.secret_key → 显式 AK/SK
+  4. 环境变量 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY → boto3 默认链
+  5. IAM 角色（EC2/ECS/EKS 自动获取）
 """
 
 import logging
@@ -11,6 +18,7 @@ from typing import List, Optional
 
 import boto3
 from botocore.config import Config as BotoConfig
+from botocore import UNSIGNED
 
 from traj_archiver.storage import Storage
 
@@ -21,6 +29,8 @@ class S3Storage(Storage):
     """S3 存储操作封装
 
     实现 Storage 统一接口，archive_location 为 s3:// URI。
+
+    app_token 非空时自动切换为 CSB 网关模式（跳过 SigV4，注入 csb-token 请求头）。
     """
 
     def __init__(
@@ -28,28 +38,64 @@ class S3Storage(Storage):
         bucket: str,
         prefix: str = "",
         endpoint_url: Optional[str] = None,
+        access_key: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        session_token: Optional[str] = None,
+        app_token: Optional[str] = None,
+        region: Optional[str] = None,
     ):
         self.bucket = bucket
         self.prefix = prefix.rstrip("/") + "/" if prefix else ""
         self.endpoint_url = endpoint_url
+        self.app_token = app_token
 
         client_kwargs = {}
+
         if endpoint_url:
             client_kwargs["endpoint_url"] = endpoint_url
+        if access_key:
+            client_kwargs["aws_access_key_id"] = access_key
+            client_kwargs["aws_secret_access_key"] = secret_key
+        if session_token:
+            client_kwargs["aws_session_token"] = session_token
+        if region:
+            client_kwargs["region_name"] = region
+
+        # 构造 botocore config
+        if app_token:
+            # CSB 网关模式：跳过 SigV4 签名
+            boto_config = BotoConfig(
+                signature_version=UNSIGNED,
+                retries={"max_attempts": 3, "mode": "standard"},
+            )
+        else:
+            boto_config = BotoConfig(
+                retries={"max_attempts": 3, "mode": "standard"},
+            )
 
         self.client = boto3.client(
             "s3",
-            config=BotoConfig(
-                retries={"max_attempts": 3, "mode": "standard"},
-            ),
+            config=boto_config,
             **client_kwargs,
         )
+
+        # CSB token 注入：所有请求自动附带 csb-token 头
+        if app_token:
+
+            def _inject_csb_token(request, **_kw):
+                request.headers["csb-token"] = app_token
+
+            self.client.meta.events.register(
+                "request-created.s3.*", _inject_csb_token
+            )
 
         # 确保 bucket 存在
         self._ensure_bucket()
 
+        auth_info = "CSB-token" if app_token else ("AK/SK" if access_key else "boto3-default-chain")
         logger.info(
             f"S3Storage 初始化: bucket={bucket}, prefix={self.prefix}, "
+            f"auth={auth_info}, "
             f"endpoint={'AWS' if not endpoint_url else endpoint_url}"
         )
 
