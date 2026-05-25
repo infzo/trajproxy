@@ -247,7 +247,9 @@ async def archive_details(
         )
 
         # 归档有 run_id 的
-        for run_id in expired_runs:
+        total = len(expired_runs)
+        for idx, run_id in enumerate(expired_runs, 1):
+            logger.info(f"[{idx}/{total}] 开始归档 run '{run_id}'...")
             try:
                 stats = await _archive_run(conn, storage, temp_root, run_id)
                 result["runs_processed"] += 1
@@ -324,9 +326,20 @@ async def _archive_run(
     """
     safe_run = _safe_path(run_id)
 
-    # 查询该 run 的所有记录
-    async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute("""
+    # 流式查询（server-side cursor，避免一次性加载全部记录）
+    _columns = [
+        "unique_id", "tokenizer_path", "messages",
+        "raw_request", "raw_response", "text_request", "text_response",
+        "prompt_text", "token_ids", "token_request", "token_response",
+        "response_text", "response_ids",
+        "full_conversation_text", "full_conversation_token_ids",
+        "error_traceback", "created_at", "session_id",
+    ]
+    cursor_name = f"arch_{safe_run}"
+
+    async with conn.cursor() as cur:
+        await cur.execute(f"""
+            DECLARE "{cursor_name}" CURSOR FOR
             SELECT d.unique_id, d.tokenizer_path, d.messages,
                    d.raw_request, d.raw_response,
                    d.text_request, d.text_response,
@@ -341,13 +354,8 @@ async def _archive_run(
             WHERE m.run_id = %s
             ORDER BY m.session_id, d.created_at
         """, (run_id,))
-        records = await cur.fetchall()
 
-    if not records:
-        logger.info(f"  run '{run_id}' 无记录，跳过")
-        return {"sessions": 0, "records": 0, "files": []}
-
-    logger.info(f"  归档 run '{run_id}': {len(records)} 条记录")
+    logger.info(f"  归档 run '{run_id}'...")
 
     # 按 session_id 分组写入
     session_files: Dict[str, tuple] = {}
@@ -355,38 +363,52 @@ async def _archive_run(
     uploaded_files = []
     record_count = 0
 
-    for rec in records:
-        rec = dict(rec)
-        session_id = rec.pop("session_id")
-        safe_session = _safe_path(session_id)
+    # 流式读取：每次 FETCH 一批，避免单 run 大量数据撑爆内存
+    while True:
+        async with conn.cursor() as cur:
+            await cur.execute(f'FETCH {BATCH_SIZE} FROM "{cursor_name}"')
+            batch = await cur.fetchall()
+        if not batch:
+            break
 
-        # 打开或获取 session 文件
-        if safe_session not in session_files:
-            if len(session_files) >= MAX_OPEN_FILES:
-                # 关闭最久未使用的文件
-                old_key = next(iter(session_files))
-                old_file, old_path, old_ids = session_files.pop(old_key)
-                old_file.close()
-                loc = _finalize_file(storage, old_path, f"{safe_run}/{old_key}.jsonl.gz")
-                for uid in old_ids:
-                    archive_map[uid] = loc
-                uploaded_files.append(loc)
+        for row in batch:
+            rec = dict(zip(_columns, row))
+            session_id = rec.pop("session_id")
+            safe_session = _safe_path(session_id)
 
-            run_dir = temp_root / safe_run
-            run_dir.mkdir(parents=True, exist_ok=True)
-            file_path = run_dir / f"{safe_session}.jsonl.gz"
-            fh = gzip.open(file_path, "wt", encoding="utf-8")
-            session_files[safe_session] = (fh, file_path, [])
+            # 打开或获取 session 文件
+            if safe_session not in session_files:
+                if len(session_files) >= MAX_OPEN_FILES:
+                    # 关闭最久未使用的文件
+                    old_key = next(iter(session_files))
+                    old_file, old_path, old_ids = session_files.pop(old_key)
+                    old_file.close()
+                    loc = _finalize_file(storage, old_path, f"{safe_run}/{old_key}.jsonl.gz")
+                    for uid in old_ids:
+                        archive_map[uid] = loc
+                    uploaded_files.append(loc)
 
-        fh, path, uid_list = session_files[safe_session]
+                run_dir = temp_root / safe_run
+                run_dir.mkdir(parents=True, exist_ok=True)
+                file_path = run_dir / f"{safe_session}.jsonl.gz"
+                fh = gzip.open(file_path, "wt", encoding="utf-8")
+                session_files[safe_session] = (fh, file_path, [])
 
-        # 写 JSONL
-        for key, val in rec.items():
-            if isinstance(val, datetime):
-                rec[key] = val.isoformat()
-        fh.write(json.dumps(rec, default=str) + "\n")
-        uid_list.append(rec["unique_id"])
-        record_count += 1
+            fh, path, uid_list = session_files[safe_session]
+
+            # 写 JSONL
+            for key, val in rec.items():
+                if isinstance(val, datetime):
+                    rec[key] = val.isoformat()
+            fh.write(json.dumps(rec, default=str) + "\n")
+            uid_list.append(rec["unique_id"])
+            record_count += 1
+
+        logger.info(f"  已处理 {record_count} 条记录...")
+
+    # 关闭 server-side cursor
+    async with conn.cursor() as cur:
+        await cur.execute(f'CLOSE "{cursor_name}"')
 
     # 关闭剩余文件并上传
     for safe_session, (fh, file_path, uid_list) in session_files.items():
