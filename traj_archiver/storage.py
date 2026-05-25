@@ -1,8 +1,9 @@
 """
-存储抽象层 - 统一本地文件系统和 S3 存储接口
+存储抽象层 - 统一本地文件系统、S3 和 CSB 存储接口
 
 根据配置自动选择存储后端：
-- 配置中有 s3.bucket → S3 模式，archive_location 为 s3:// URI
+- s3.app_token 非空 → CSB 网关模式（华为云 CSB 原生 REST API）
+- s3.bucket 非空 → 标准 S3 模式（boto3）
 - 否则 → 本地模式，archive_location 为文件名
 """
 
@@ -86,21 +87,34 @@ def create_storage(config: dict) -> Storage:
         config: archive 配置字典，包含 s3 子配置和 storage_path
 
     Returns:
-        Storage 实例（LocalStorage 或 S3Storage）
+        Storage 实例（CSBStorage / S3Storage / LocalStorage）
 
-    凭证优先级:
-      1. s3.app_token / CSB_APP_TOKEN → CSB 网关模式（跳过签名）
-      2. s3.access_key / s3.secret_key → 显式 AK/SK
-      3. 环境变量 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY → boto3 默认链
+    存储后端优先级:
+      1. s3.app_token / CSB_APP_TOKEN 非空 → CSB 网关模式（原生 REST API）
+      2. s3.bucket 非空 → 标准 S3 模式（boto3）
+      3. 否则 → 本地文件系统模式
     """
     s3_config = config.get("s3")
 
-    # S3 模式：s3 配置非空且有 bucket
     if s3_config and s3_config.get("bucket"):
-        from traj_archiver.s3_storage import S3Storage
-
         # app_token: YAML 显式配置优先，其次环境变量 CSB_APP_TOKEN
         app_token = s3_config.get("app_token") or os.environ.get("CSB_APP_TOKEN")
+
+        if app_token:
+            # CSB 网关模式：使用原生 REST API
+            from traj_archiver.csb_storage import CSBStorage
+
+            return CSBStorage(
+                bucket=s3_config["bucket"],
+                prefix=s3_config.get("prefix", ""),
+                endpoint_url=s3_config.get("endpoint_url", ""),
+                app_token=app_token,
+                vendor=s3_config.get("vendor", "HEC"),
+                region=s3_config.get("region", ""),
+            )
+
+        # 标准 S3 模式：使用 boto3
+        from traj_archiver.s3_storage import S3Storage
 
         return S3Storage(
             bucket=s3_config["bucket"],
@@ -109,7 +123,6 @@ def create_storage(config: dict) -> Storage:
             access_key=s3_config.get("access_key"),
             secret_key=s3_config.get("secret_key"),
             session_token=s3_config.get("session_token"),
-            app_token=app_token,
             region=s3_config.get("region"),
             verify_ssl=s3_config.get("verify_ssl", True),
         )

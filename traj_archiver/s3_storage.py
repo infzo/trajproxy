@@ -1,15 +1,14 @@
 """
 S3 存储模块 - 归档文件上传/下载
 
-兼容 AWS S3 / MinIO / Ceph 等标准 S3 协议存储，
-同时支持华为云 CSB 等非标 S3 网关的 token 认证。
+兼容 AWS S3 / MinIO / Ceph 等标准 S3 协议存储。
 
 凭证方式（按优先级）：
-  1. YAML s3.app_token → CSB token 认证（unsigned + csb-token 头）
-  2. 环境变量 CSB_APP_TOKEN → 同上
-  3. YAML s3.access_key / s3.secret_key → 显式 AK/SK
-  4. 环境变量 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY → boto3 默认链
-  5. IAM 角色（EC2/ECS/EKS 自动获取）
+  1. YAML s3.access_key / s3.secret_key → 显式 AK/SK
+  2. 环境变量 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY → boto3 默认链
+  3. IAM 角色（EC2/ECS/EKS 自动获取）
+
+注意：华为云 CSB 网关请使用 csb_storage.CSBStorage，不走 boto3。
 """
 
 import logging
@@ -18,7 +17,6 @@ from typing import List, Optional
 
 import boto3
 from botocore.config import Config as BotoConfig
-from botocore import UNSIGNED
 
 from traj_archiver.storage import Storage
 
@@ -26,11 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 class S3Storage(Storage):
-    """S3 存储操作封装
+    """标准 S3 存储操作封装
 
     实现 Storage 统一接口，archive_location 为 s3:// URI。
-
-    app_token 非空时自动切换为 CSB 网关模式（跳过 SigV4，注入 csb-token 请求头）。
     """
 
     def __init__(
@@ -41,14 +37,11 @@ class S3Storage(Storage):
         access_key: Optional[str] = None,
         secret_key: Optional[str] = None,
         session_token: Optional[str] = None,
-        app_token: Optional[str] = None,
         region: Optional[str] = None,
         verify_ssl: bool = True,
     ):
         self.bucket = bucket
         self.prefix = prefix.rstrip("/") + "/" if prefix else ""
-        self.endpoint_url = endpoint_url
-        self.app_token = app_token
 
         client_kwargs = {}
         boto_config_kwargs = {
@@ -66,15 +59,9 @@ class S3Storage(Storage):
             client_kwargs["region_name"] = region
         if not verify_ssl:
             client_kwargs["verify"] = False
-            boto_config_kwargs["signature_version"] = UNSIGNED  # https + verify=False 组合要求
-            # 禁用 SSL 警告
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             logger.info("SSL 证书校验已关闭")
-
-        # 构造 botocore config
-        if app_token:
-            boto_config_kwargs["signature_version"] = UNSIGNED
 
         self.client = boto3.client(
             "s3",
@@ -82,21 +69,9 @@ class S3Storage(Storage):
             **client_kwargs,
         )
 
-        # CSB token 注入：所有请求自动附带 csb-token 头
-        if app_token:
+        self._ensure_bucket()
 
-            def _inject_csb_token(request, **_kw):
-                request.headers["csb-token"] = app_token
-
-            self.client.meta.events.register(
-                "request-created.s3.*", _inject_csb_token
-            )
-
-        # 确保 bucket 存在（CSB 网关模式跳过，网关自行管理 bucket）
-        if not app_token:
-            self._ensure_bucket()
-
-        auth_info = "CSB-token" if app_token else ("AK/SK" if access_key else "boto3-default-chain")
+        auth_info = "AK/SK" if access_key else "boto3-default-chain"
         logger.info(
             f"S3Storage 初始化: bucket={bucket}, prefix={self.prefix}, "
             f"auth={auth_info}, "
@@ -116,20 +91,9 @@ class S3Storage(Storage):
 
     def upload(self, local_path: Path, key: str) -> str:
         full_key = f"{self.prefix}{key}"
-        file_size = local_path.stat().st_size
+        self.client.upload_file(str(local_path), self.bucket, full_key)
         s3_uri = f"s3://{self.bucket}/{full_key}"
-
-        if self.app_token:
-            # CSB 网关不支持 multipart upload，用 put_object 单次上传
-            with open(local_path, "rb") as f:
-                self.client.put_object(
-                    Bucket=self.bucket, Key=full_key, Body=f,
-                    ContentLength=file_size,
-                )
-        else:
-            self.client.upload_file(str(local_path), self.bucket, full_key)
-
-        logger.info(f"已上传: {local_path.name} ({file_size} bytes) → {s3_uri}")
+        logger.info(f"已上传: {local_path.name} → {s3_uri}")
         return s3_uri
 
     def _parse_key(self, key: str) -> tuple:
@@ -179,7 +143,6 @@ class S3Storage(Storage):
         try:
             self.client.upload_file(str(probe_path), self.bucket, probe_key)
             logger.info(f"S3 上传验证成功: s3://{self.bucket}/{probe_key}")
-            # 清理探测文件
             try:
                 self.client.delete_object(Bucket=self.bucket, Key=probe_key)
             except Exception:
