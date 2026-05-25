@@ -1,5 +1,6 @@
 #!/bin/bash
 # Archive 层测试工具函数
+# 适配独立归档进程 traj_archiver + S3 存储
 
 # 导入配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +13,7 @@ source "${SCRIPT_DIR}/../../utils.sh"
 # 数据库操作函数
 # ========================================
 
-# 执行 SQL 查询（在数据库容器内运行，通过 stdin 传递避免引号转义问题）
+# 执行 SQL 查询（在数据库容器内运行）
 db_query() {
     local sql="$1"
     echo "$sql" | docker exec -i "${DB_CONTAINER_NAME}" \
@@ -22,7 +23,7 @@ db_query() {
         -t -A
 }
 
-# 执行 SQL 命令（无输出，在数据库容器内运行）
+# 执行 SQL 命令（无输出）
 db_execute() {
     local sql="$1"
     echo "$sql" | docker exec -i "${DB_CONTAINER_NAME}" \
@@ -77,7 +78,6 @@ insert_test_data() {
         local unique_id="${session_id}_req_${i}"
         local request_id="req_${i}"
 
-        # 插入元数据
         db_execute "
             INSERT INTO request_metadata (
                 unique_id, request_id, session_id, model,
@@ -91,7 +91,6 @@ insert_test_data() {
             ON CONFLICT (unique_id) DO NOTHING;
         "
 
-        # 插入详情
         db_execute "
             INSERT INTO request_details_active (
                 unique_id, created_at, messages
@@ -130,13 +129,6 @@ check_partition_exists() {
     [ "$result" -gt 0 ]
 }
 
-# 检查归档文件是否存在（在容器内检查）
-check_archive_file_exists() {
-    local archive_file="${ARCHIVE_STORAGE_PATH}/${1}"
-    # 在应用容器内检查文件是否存在
-    docker exec "${CONTAINER_NAME}" test -f "${archive_file}" 2>/dev/null
-}
-
 # 获取分区记录数
 get_partition_record_count() {
     local partition_name="$1"
@@ -153,72 +145,155 @@ get_archived_record_count() {
     "
 }
 
-# 验证归档文件内容（在容器内检查）
-verify_archive_file() {
-    local archive_file="${ARCHIVE_STORAGE_PATH}/${1}"
+# 获取归档记录的 archive_location
+get_archive_location() {
+    local session_id="$1"
+    db_query "
+        SELECT archive_location FROM request_metadata
+        WHERE session_id LIKE '${session_id}%'
+        AND archive_location IS NOT NULL
+        LIMIT 1;
+    "
+}
+
+# 检查 S3 上是否存在归档文件（通过归档容器执行）
+check_s3_archive_exists() {
+    local s3_key="$1"
+    docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import boto3, os
+s3 = boto3.client('s3',
+    endpoint_url=os.environ.get('AWS_ENDPOINT_URL'),
+)
+key = '${ARCHIVE_S3_PREFIX}${s3_key}'
+try:
+    s3.head_object(Bucket='${ARCHIVE_S3_BUCKET}', Key=key)
+    print('exists')
+except:
+    print('not_found')
+" 2>/dev/null
+}
+
+# 从 S3 下载归档文件到归档容器的临时目录，并统计记录数
+verify_s3_archive_file() {
+    local s3_key="$1"
     local expected_count="$2"
 
-    # 检查文件是否存在于容器内
-    if ! docker exec "${CONTAINER_NAME}" test -f "${archive_file}" 2>/dev/null; then
-        log_error "归档文件不存在: ${archive_file}"
-        return 1
-    fi
+    # 在归档容器内下载并统计
+    local actual_count=$(docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import boto3, gzip, os, sys
+s3 = boto3.client('s3',
+    endpoint_url=os.environ.get('AWS_ENDPOINT_URL'),
+)
+key = '${ARCHIVE_S3_PREFIX}${s3_key}'
+local_path = '/tmp/test_verify_${s3_key}'
+s3.download_file('${ARCHIVE_S3_BUCKET}', key, local_path)
+with gzip.open(local_path, 'rt') as f:
+    count = sum(1 for _ in f)
+os.unlink(local_path)
+print(count)
+" 2>/dev/null)
 
-    # 在容器内统计记录数
-    local actual_count=$(docker exec "${CONTAINER_NAME}" bash -c "zcat '${archive_file}' | wc -l" 2>/dev/null)
     if [ "$actual_count" -ne "$expected_count" ]; then
         log_error "归档文件记录数不匹配: 期望 ${expected_count}, 实际 ${actual_count}"
         return 1
     fi
 
-    log_success "归档文件验证通过: ${archive_file} (${actual_count} 条记录)"
+    log_success "归档文件验证通过: ${s3_key} (${actual_count} 条记录)"
     return 0
+}
+
+# 从 S3 下载归档文件并读取第一行
+read_s3_archive_first_line() {
+    local s3_key="$1"
+    docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import boto3, gzip, json, os
+s3 = boto3.client('s3',
+    endpoint_url=os.environ.get('AWS_ENDPOINT_URL'),
+)
+key = '${ARCHIVE_S3_PREFIX}${s3_key}'
+local_path = '/tmp/test_read_${s3_key}'
+s3.download_file('${ARCHIVE_S3_BUCKET}', key, local_path)
+with gzip.open(local_path, 'rt') as f:
+    print(f.readline().strip())
+os.unlink(local_path)
+" 2>/dev/null
+}
+
+# ========================================
+# 归档执行函数
+# ========================================
+
+# 在归档容器内执行一次性归档（不启动调度器）
+run_archive_once() {
+    local retention_days="${1:-${ARCHIVE_RETENTION_DAYS}}"
+
+    docker exec "${ARCHIVER_CONTAINER_NAME}" python3 -c "
+import asyncio, sys
+sys.path.insert(0, '/app')
+
+from psycopg_pool import AsyncConnectionPool
+from traj_archiver.config import get_database_url, get_s3_config, get_archive_config, get_database_pool_config
+from traj_archiver.s3_storage import S3Storage
+from traj_archiver.archiver import archive_details
+
+async def main():
+    db_url = get_database_url()
+    pool_config = get_database_pool_config()
+    s3_config = get_s3_config()
+
+    pool = AsyncConnectionPool(conninfo=db_url, **pool_config)
+    await pool.open()
+
+    s3 = S3Storage(
+        bucket=s3_config.get('bucket', ''),
+        prefix=s3_config.get('prefix', ''),
+        endpoint_url=s3_config.get('endpoint_url'),
+    )
+
+    result = await archive_details(
+        pool=pool,
+        s3_storage=s3,
+        local_temp_path='/tmp/archives',
+        retention_days=${retention_days},
+    )
+    await pool.close()
+
+    print(f'records_archived={result[\"records_archived\"]}')
+    print(f'partitions_dropped={result[\"partitions_dropped\"]}')
+    print(f'errors={len(result[\"errors\"])}')
+
+asyncio.run(main())
+" 2>&1
 }
 
 # ========================================
 # 容器操作函数
 # ========================================
 
-# 在容器中执行命令
-exec_in_container() {
-    local cmd="$1"
-    docker exec "${CONTAINER_NAME}" bash -c "$cmd"
+# 获取归档容器日志
+get_archiver_logs() {
+    docker logs "${ARCHIVER_CONTAINER_NAME}" 2>&1
 }
 
-# 执行归档脚本
-run_archive_script() {
-    local retention_days="${1:-${ARCHIVE_RETENTION_DAYS}}"
-    local dry_run="${2:-false}"
-
-    local dry_run_flag=""
-    if [ "$dry_run" = "true" ]; then
-        dry_run_flag="--dry-run"
-    fi
-
-    exec_in_container "python /app/scripts/archive_records.py \
-        --retention-days ${retention_days} \
-        --archive-dir ${ARCHIVE_STORAGE_PATH} \
-        ${dry_run_flag}"
-}
-
-# 获取容器日志（获取全部日志，避免启动日志被挤出）
-get_container_logs() {
-    docker logs "${CONTAINER_NAME}" 2>&1
-}
-
-# 在容器日志中搜索特定模式
-search_container_logs() {
+# 在归档容器日志中搜索特定模式
+search_archiver_logs() {
     local pattern="$1"
-    docker logs "${CONTAINER_NAME}" 2>&1 | grep -E "$pattern"
+    docker logs "${ARCHIVER_CONTAINER_NAME}" 2>&1 | grep -E "$pattern"
 }
 
-# 检查日志中是否包含特定模式（支持扩展正则表达式）
-log_contains() {
+# 检查归档容器日志中是否包含特定模式
+archiver_log_contains() {
     local pattern="$1"
-    docker logs "${CONTAINER_NAME}" 2>&1 | grep -qE "$pattern"
+    docker logs "${ARCHIVER_CONTAINER_NAME}" 2>&1 | grep -qE "$pattern"
 }
 
-# 检查调度器是否启动
-check_scheduler_started() {
-    log_contains "ArchiveScheduler 已启动"
+# 获取业务容器日志（用于验证核心业务不包含归档代码）
+get_proxy_logs() {
+    docker logs "${PROXY_CONTAINER_NAME}" 2>&1
+}
+
+# 检查业务容器日志中是否包含归档相关内容
+proxy_log_contains() {
+    local pattern="$1"
+    docker logs "${PROXY_CONTAINER_NAME}" 2>&1 | grep -qE "$pattern"
 }

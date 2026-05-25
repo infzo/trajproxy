@@ -1,75 +1,76 @@
 #!/bin/bash
-# 场景 A100: 归档配置验证
-# 验证归档配置正确加载，调度器正常启动
+# 场景 A100: 归档进程配置验证
+# 验证独立归档进程正确启动、配置加载、S3 连接正常
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 A100: 归档配置验证"
+echo "场景 A100: 归档进程配置验证"
 echo "========================================"
 echo ""
 
-# 步骤 1: 检查调度器启动日志
-log_step "步骤 1: 检查归档调度器启动日志"
+# 步骤 1: 验证归档容器运行中
+log_step "步骤 1: 验证归档容器运行状态"
 
-# 直接在全部日志中搜索启动消息（避免启动日志被挤出）
-if log_contains "ArchiveScheduler 已启动"; then
+if docker ps --format '{{.Names}}' | grep -q "^${ARCHIVER_CONTAINER_NAME}$"; then
+    log_success "归档容器运行中: ${ARCHIVER_CONTAINER_NAME}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "归档容器未运行: ${ARCHIVER_CONTAINER_NAME}"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+# 步骤 2: 检查归档进程启动日志
+log_step "步骤 2: 检查归档进程启动日志"
+
+if archiver_log_contains "TrajArchiver 已启动"; then
+    log_success "归档进程已启动"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+elif archiver_log_contains "ArchiveScheduler 已启动"; then
     log_success "归档调度器已启动"
     TESTS_PASSED=$((TESTS_PASSED + 1))
-elif log_contains "归档调度器未启用"; then
-    log_error "归档调度器未启用（archive.enabled=false）"
-    TESTS_FAILED=$((TESTS_FAILED + 1))
 else
-    log_error "归档调度器未启动"
-    # 调试：显示相关日志行
-    log_info "查找 'scheduler' 相关日志:"
-    search_container_logs "scheduler" | head -10 || log_info "未找到 scheduler 相关日志"
-    echo "提示: 请确保 config.yaml 中 archive.enabled=true"
+    log_error "归档进程未启动"
+    search_archiver_logs "TrajArchiver\|ArchiveScheduler\|Error\|error" | head -10
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-# 步骤 2: 验证调度器配置
-log_step "步骤 2: 验证调度器配置"
+# 步骤 3: 验证调度器配置
+log_step "步骤 3: 验证调度器配置"
 
-SCHEDULER_FOUND=false
-if log_contains "schedule:"; then
-    SCHEDULE=$(search_container_logs "schedule:" | tail -1 | sed 's/.*schedule: //')
-    log_success "调度配置: $SCHEDULE"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-    SCHEDULER_FOUND=true
-else
-    log_error "未找到调度配置"
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-fi
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-
-if log_contains "retention_days:"; then
-    RETENTION=$(search_container_logs "retention_days:" | tail -1 | sed 's/.*retention_days: //')
-    log_success "保留天数: $RETENTION"
-fi
-
-if log_contains "storage_path:"; then
-    STORAGE=$(search_container_logs "storage_path:" | tail -1 | sed 's/.*storage_path: //')
-    log_success "存储路径: $STORAGE"
-fi
-
-# 步骤 3: 验证归档目录存在
-log_step "步骤 3: 验证归档目录"
-
-if exec_in_container "[ -d ${ARCHIVE_STORAGE_PATH} ]" 2>/dev/null; then
-    log_success "归档目录存在: ${ARCHIVE_STORAGE_PATH}"
+if archiver_log_contains "poll_interval"; then
+    POLL_INTERVAL=$(search_archiver_logs "poll_interval" | tail -1 | sed 's/.*poll_interval: //' | sed 's/ .*//')
+    log_success "轮询间隔: ${POLL_INTERVAL}s"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "归档目录不存在: ${ARCHIVE_STORAGE_PATH}"
+    log_error "未找到轮询间隔配置"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-# 步骤 4: 检查分区状态
-log_step "步骤 4: 检查数据库分区状态"
+if archiver_log_contains "retention_days"; then
+    RETENTION=$(search_archiver_logs "retention_days" | tail -1 | sed 's/.*retention_days: //')
+    log_success "保留天数: ${RETENTION}"
+fi
+
+# 步骤 4: 验证核心业务容器不包含归档代码
+log_step "步骤 4: 验证核心业务与归档解耦"
+
+if proxy_log_contains "ArchiveScheduler"; then
+    log_error "核心业务容器仍包含归档调度器代码（应已移除）"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+else
+    log_success "核心业务容器不包含归档代码（解耦验证通过）"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+fi
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+# 步骤 5: 检查数据库分区状态
+log_step "步骤 5: 检查数据库分区状态"
 
 PARTITIONS=$(db_query "
     SELECT COUNT(*) FROM pg_class pt
