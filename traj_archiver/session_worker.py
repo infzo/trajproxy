@@ -82,7 +82,6 @@ class SessionArchiveWorker:
         safe_run = _safe_path(run_id)
         safe_session = _safe_path(display)
         suffix = ".jsonl.gz" if self.compress else ".jsonl"
-        logger.info(f"Worker-{self.worker_id}: 开始归档 session '{display}' (run={run_id})")
         t_start = time.monotonic()
 
         run_dir = self.temp_root / safe_run
@@ -90,7 +89,6 @@ class SessionArchiveWorker:
         file_path = run_dir / f"{safe_session}{suffix}"
 
         try:
-            # 阶段 1: 读 DB + 写文件
             record_count = self._export_session(
                 run_id, session_id, file_path, safe_run, safe_session, suffix,
             )
@@ -101,21 +99,15 @@ class SessionArchiveWorker:
                 return {"records": 0, "file": None}
 
             file_size = file_path.stat().st_size
-            logger.info(
-                f"Worker-{self.worker_id}: session '{display}' "
-                f"导出完成 {record_count} 条 / {file_size / 1024 / 1024:.1f} MB, "
-                f"耗时 {t_export - t_start:.1f}s"
-            )
-
-            # 阶段 2: 上传
             key = f"{safe_run}/{safe_session}{suffix}"
             loc = self.storage.upload(file_path, key)
-            t_upload = time.monotonic()
+            t_done = time.monotonic()
 
             logger.info(
-                f"Worker-{self.worker_id}: session '{display}' "
-                f"归档完成 (读取+压缩 {t_export - t_start:.1f}s / 上传 {t_upload - t_export:.1f}s / "
-                f"总计 {t_upload - t_start:.1f}s)"
+                f"Worker-{self.worker_id}: session '{display}' 完成 — "
+                f"{record_count} 条 / {file_size / 1024 / 1024:.1f} MB, "
+                f"导出 {t_export - t_start:.1f}s / 上传 {t_done - t_export:.1f}s / "
+                f"总计 {t_done - t_start:.1f}s"
             )
             return {"records": record_count, "file": loc}
 
