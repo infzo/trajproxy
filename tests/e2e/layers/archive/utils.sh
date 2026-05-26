@@ -424,10 +424,12 @@ run_archive_once() {
 import asyncio, sys
 sys.path.insert(0, '/app')
 
+import ray
 from psycopg_pool import AsyncConnectionPool
 from traj_archiver.config import get_database_url, get_archive_config, get_database_pool_config
 from traj_archiver.storage import create_storage
 from traj_archiver.archiver import archive_details
+from traj_archiver.session_worker import SessionArchiveWorker
 
 async def main():
     db_url = get_database_url()
@@ -439,12 +441,28 @@ async def main():
 
     storage = create_storage(archive_config)
 
+    num_workers = archive_config.get('num_workers', 1)
+    compress = archive_config.get('compress', True)
+    local_temp_path = archive_config.get('local_temp_path', '/tmp/archives')
+
+    ray.init(num_cpus=num_workers, ignore_reinit_error=True, log_to_driver=False)
+
+    workers = []
+    for i in range(num_workers):
+        w = SessionArchiveWorker.remote(
+            worker_id=i, db_url=db_url,
+            storage_config=archive_config,
+            temp_root=local_temp_path, compress=compress,
+        )
+        workers.append(w)
+
     result = await archive_details(
-        pool=pool,
-        storage=storage,
-        local_temp_path=archive_config.get('local_temp_path', '/tmp/archives'),
+        pool=pool, workers=workers, storage=storage,
+        local_temp_path=local_temp_path,
         retention_days=${retention_days},
     )
+
+    ray.shutdown()
     await pool.close()
 
     print(f'records_archived={result[\"records_archived\"]}')
