@@ -5,7 +5,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -24,22 +24,18 @@ class ArchiveScheduler:
     def __init__(
         self,
         pool: AsyncConnectionPool,
+        workers: List,
         storage,
         retention_days: int,
         poll_interval: int = 3600,
         local_temp_path: str = "/tmp/archives",
-        upload_concurrency: int = 1,
-        compress: bool = True,
-        upload_queue_size: int = 3,
     ):
         self.pool = pool
+        self.workers = workers
         self.storage = storage
         self.retention_days = retention_days
         self.poll_interval = poll_interval
         self.local_temp_path = local_temp_path
-        self.upload_concurrency = upload_concurrency
-        self.compress = compress
-        self.upload_queue_size = upload_queue_size
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -83,6 +79,7 @@ class ArchiveScheduler:
     def get_status(self) -> Dict[str, Any]:
         return {
             "running": self._running,
+            "workers": len(self.workers),
             "poll_interval": self.poll_interval,
             "retention_days": self.retention_days,
             "started_at": self._started_at.isoformat() if self._started_at else None,
@@ -122,12 +119,10 @@ class ArchiveScheduler:
 
         result = await archive_details(
             pool=self.pool,
+            workers=self.workers,
             storage=self.storage,
             local_temp_path=self.local_temp_path,
             retention_days=self.retention_days,
-            upload_concurrency=self.upload_concurrency,
-            compress=self.compress,
-            upload_queue_size=self.upload_queue_size,
         )
 
         records_archived = result.get("records_archived", 0)

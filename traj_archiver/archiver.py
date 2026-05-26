@@ -1,39 +1,23 @@
 """
 核心归档逻辑 - 按 run_id 粒度将过期数据归档到存储后端
 
-流程:
+协调器模式：
   1. 查找全部记录已过期的 run_id (MAX(created_at) < threshold)
-  2. 按 run 导出所有 session → 每 session 一个 .jsonl.gz
-  3. 生产者-消费者 pipeline：写完一个 session 立即上传，释放本地磁盘
-  4. DELETE + UPDATE metadata 同事务
-  5. 顺手清理空的月分区
+  2. 逐 run 查询 session 列表
+  3. 将 session 分发给 Ray Worker 并发执行（读 DB → 写文件 → 上传）
+  4. 全部 session 完成后执行 DELETE + UPDATE
+  5. 清理空的月分区
 """
 
 import asyncio
-import gzip
-import json
 import logging
-import shutil
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
-
-# 每批处理的记录数
-BATCH_SIZE = 500
-
-# 归档查询的列名（与 DECLARE CURSOR SELECT 顺序一致）
-_ARCHIVE_COLUMNS = [
-    "unique_id", "tokenizer_path", "messages",
-    "raw_request", "raw_response", "text_request", "text_response",
-    "prompt_text", "token_ids", "token_request", "token_response",
-    "response_text", "response_ids",
-    "full_conversation_text", "full_conversation_token_ids",
-    "error_traceback", "created_at", "session_id",
-]
 
 
 def _utcnow() -> datetime:
@@ -45,7 +29,7 @@ def _safe_path(segment: str) -> str:
 
 
 # ============================================================
-# 分区管理（业务不变：30天月分区）
+# 分区管理
 # ============================================================
 
 
@@ -179,51 +163,16 @@ async def _find_expired_runs(conn, threshold: datetime) -> List[str]:
         return [r[0] for r in await cur.fetchall()]
 
 
-# ============================================================
-# 上传消费者协程
-# ============================================================
-
-# session_id 为 NULL 时使用的占位目录名
-_NULL_SESSION_DIR = "_null_session"
-
-
-class _ConsumerError:
-    """消费者异常容器，跨协程传递第一个上传失败"""
-    def __init__(self):
-        self.exception: Optional[Exception] = None
-
-    def check(self):
-        if self.exception is not None:
-            raise self.exception
-
-
-async def _upload_consumer(
-    queue: asyncio.Queue,
-    storage,
-    results: List[str],
-    error_holder: _ConsumerError,
-):
-    """从队列取文件，异步上传并删除本地临时文件
-
-    上传失败时存下异常到 error_holder 并继续消费，
-    避免 producer 因队列满而阻塞死锁。
-    """
-    while True:
-        item = await queue.get()
-        if item is None:
-            queue.task_done()
-            break
-
-        file_path, key = item
-        try:
-            loc = await asyncio.to_thread(storage.upload, file_path, key)
-            file_path.unlink(missing_ok=True)
-            results.append(loc)
-        except Exception as e:
-            if error_holder.exception is None:
-                error_holder.exception = e
-            file_path.unlink(missing_ok=True)
-        queue.task_done()
+async def _get_run_sessions(conn, run_id: str) -> List[Optional[str]]:
+    """查询 run 下的 session 列表（包含 NULL）"""
+    async with conn.cursor() as cur:
+        await cur.execute("""
+            SELECT DISTINCT m.session_id
+            FROM request_metadata m
+            JOIN request_details_active d ON d.unique_id = m.unique_id
+            WHERE m.run_id = %s
+        """, (run_id,))
+        return [r[0] for r in await cur.fetchall()]
 
 
 # ============================================================
@@ -233,14 +182,20 @@ async def _upload_consumer(
 
 async def archive_details(
     pool,
+    workers,
     storage,
     local_temp_path: str,
     retention_days: int,
-    upload_concurrency: int = 1,
-    compress: bool = True,
-    upload_queue_size: int = 3,
 ) -> Dict[str, Any]:
-    """按 run_id 粒度归档过期数据"""
+    """按 run_id 粒度归档过期数据
+
+    Args:
+        pool: 协调器 DB 连接池（仅用于查询和 cleanup）
+        workers: Ray Actor Worker 列表
+        storage: 存储后端（协调器用，获取 location_prefix）
+        local_temp_path: Worker 临时目录
+        retention_days: 保留天数
+    """
     threshold = _utcnow() - timedelta(days=retention_days)
     temp_root = Path(local_temp_path)
     temp_root.mkdir(parents=True, exist_ok=True)
@@ -255,242 +210,106 @@ async def archive_details(
         "details": [],
     }
 
+    # 阶段 1: 查找过期 run（短连接，立即释放）
     async with pool.connection() as conn:
         await ensure_current_partition(conn)
-
         expired_runs = await _find_expired_runs(conn, threshold)
-        logger.info(
-            f"阈值: {threshold.isoformat()}, "
-            f"找到 {len(expired_runs)} 个过期 run"
-        )
+        await conn.commit()
 
-        # 归档有 run_id 的
-        total = len(expired_runs)
-        for idx, run_id in enumerate(expired_runs, 1):
-            logger.info(f"[{idx}/{total}] 开始归档 run '{run_id}'...")
-            try:
-                stats = await _archive_run(
-                    conn, storage, temp_root, run_id,
-                    upload_concurrency, compress, upload_queue_size,
-                )
-                result["runs_processed"] += 1
-                result["sessions_archived"] += stats["sessions"]
-                result["records_archived"] += stats["records"]
-                result["archive_files"].extend(stats["files"])
-                result["details"].append({
-                    "run_id": run_id,
-                    "sessions": stats["sessions"],
-                    "records": stats["records"],
-                })
-            except Exception as e:
-                msg = f"归档 run '{run_id}' 失败: {e}"
-                logger.error(msg)
-                logger.debug(traceback.format_exc())
-                result["errors"].append(msg)
+    logger.info(
+        f"阈值: {threshold.isoformat()}, "
+        f"找到 {len(expired_runs)} 个过期 run"
+    )
 
-        # 清理空分区
-        cleaned = await _cleanup_empty_partitions(conn, result["runs_processed"])
-        result["partitions_cleaned"] = cleaned
+    # 阶段 2: 每个 run 使用独立连接，互不影响
+    total = len(expired_runs)
+    for idx, run_id in enumerate(expired_runs, 1):
+        logger.info(f"[{idx}/{total}] 开始归档 run '{run_id}'...")
+        try:
+            stats = await _archive_run(pool, workers, storage, run_id)
+            result["runs_processed"] += 1
+            result["sessions_archived"] += stats["sessions"]
+            result["records_archived"] += stats["records"]
+            result["archive_files"].extend(stats["files"])
+            result["details"].append({
+                "run_id": run_id,
+                "sessions": stats["sessions"],
+                "records": stats["records"],
+            })
+        except Exception as e:
+            msg = f"归档 run '{run_id}' 失败: {e}"
+            logger.error(msg)
+            logger.debug(traceback.format_exc())
+            result["errors"].append(msg)
+
+    # 阶段 3: 清理空分区（独立连接）
+    if result["runs_processed"] > 0:
+        try:
+            async with pool.connection() as conn:
+                cleaned = await _cleanup_empty_partitions(conn)
+                result["partitions_cleaned"] = cleaned
+        except Exception as e:
+            logger.warning(f"清理空分区失败: {e}")
 
     return result
 
 
-async def _cleanup_empty_partitions(conn, processed: int) -> int:
-    """归档完成后清理变空的分区"""
-    if processed == 0:
-        return 0
-    partitions = await _find_partitions(conn)
-    cleaned = 0
-    for pn in partitions:
-        if await _is_partition_empty(conn, pn):
-            try:
-                await conn.execute(
-                    f"ALTER TABLE public.request_details_active DETACH PARTITION public.{pn}"
-                )
-                await conn.execute(f"DROP TABLE public.{pn}")
-                logger.info(f"已清理空分区: {pn}")
-                cleaned += 1
-            except Exception as e:
-                logger.warning(f"清理空分区 {pn} 失败: {e}")
-    return cleaned
-
-
 async def _archive_run(
-    conn, storage, temp_root: Path, run_id: str,
-    upload_concurrency: int = 1,
-    compress: bool = True,
-    upload_queue_size: int = 3,
+    pool,
+    workers,
+    storage,
+    run_id: str,
 ) -> Dict[str, Any]:
-    """归档一个 run 下的所有 session（生产者-消费者 pipeline）
-
-    利用 ORDER BY session_id 的连续性，写完一个 session 立即提交上传。
-    有界队列提供背压，限制磁盘上同时存在的临时文件数量。
-    """
+    """归档一个 run：查询 session 列表 → 分发给 Workers → cleanup"""
     safe_run = _safe_path(run_id)
-
-    cursor_name = f"arch_{safe_run}"
-
-    async with conn.cursor() as cur:
-        await cur.execute(f"""
-            DECLARE "{cursor_name}" CURSOR FOR
-            SELECT d.unique_id, d.tokenizer_path, d.messages,
-                   d.raw_request, d.raw_response,
-                   d.text_request, d.text_response,
-                   d.prompt_text, d.token_ids,
-                   d.token_request, d.token_response,
-                   d.response_text, d.response_ids,
-                   d.full_conversation_text, d.full_conversation_token_ids,
-                   d.error_traceback, d.created_at,
-                   m.session_id
-            FROM request_details_active d
-            JOIN request_metadata m ON d.unique_id = m.unique_id
-            WHERE m.run_id = %s
-            ORDER BY m.session_id, d.created_at
-        """, (run_id,))
-
-    logger.info(f"  归档 run '{run_id}'...")
     t_start = time.monotonic()
-    run_dir = temp_root / safe_run
-    suffix = ".jsonl.gz" if compress else ".jsonl"
-    record_count = 0
 
-    # 有界上传队列：队列满时 producer 阻塞，提供背压
-    queue_maxsize = upload_queue_size if upload_queue_size > 0 else 0
-    upload_queue: asyncio.Queue[Optional[Tuple[Path, str]]] = asyncio.Queue(maxsize=queue_maxsize)
-    uploaded_files: List[str] = []
-    error_holder = _ConsumerError()
+    # 1. 查询 session 列表（协调器连接，短用即还）
+    async with pool.connection() as conn:
+        sessions = await _get_run_sessions(conn, run_id)
 
-    # 启动多个上传消费者协程
-    num_consumers = max(1, upload_concurrency)
-    consumer_tasks = [
-        asyncio.create_task(
-            _upload_consumer(upload_queue, storage, uploaded_files, error_holder)
-        )
-        for _ in range(num_consumers)
-    ]
+    if not sessions:
+        logger.info(f"  run '{run_id}' 无活跃记录，跳过")
+        return {"sessions": 0, "records": 0, "files": []}
 
-    # ---- 生产者：流式读取 + 按 session 写文件 ----
-    current_session: Optional[str] = None
-    current_safe_session: Optional[str] = None
-    current_fh = None
-    current_path: Optional[Path] = None
-    session_count = 0
+    logger.info(f"  run '{run_id}': {len(sessions)} 个 session 待归档")
 
-    try:
-        while True:
-            async with conn.cursor() as cur:
-                await cur.execute(f'FETCH {BATCH_SIZE} FROM "{cursor_name}"')
-                batch = await cur.fetchall()
-            if not batch:
-                break
+    # 2. 轮询分发 session 到 Workers
+    futures = []
+    for i, session_id in enumerate(sessions):
+        worker = workers[i % len(workers)]
+        futures.append(worker.archive.remote(run_id, session_id))
 
-            for row in batch:
-                rec = dict(zip(_ARCHIVE_COLUMNS, row))
-                session_id = rec.pop("session_id")
+    # 3. 等待全部完成
+    import ray
+    raw_results = await asyncio.to_thread(ray.get, futures)
 
-                # session_id 为 NULL 时使用占位名
-                display_session = session_id or _NULL_SESSION_DIR
+    t_workers = time.monotonic()
+    logger.info(
+        f"  Workers 完成: {len(sessions)} 个 session, "
+        f"耗时 {t_workers - t_start:.1f}s"
+    )
 
-                # session 切换：关闭前一个 session，提交上传
-                if display_session != current_session:
-                    if current_fh is not None:
-                        current_fh.close()
-                        error_holder.check()
-                        await upload_queue.put((current_path, f"{safe_run}/{current_safe_session}{suffix}"))
-                        session_count += 1
+    # 4. 收集统计
+    total_records = 0
+    files = []
+    for r in raw_results:
+        total_records += r["records"]
+        if r["file"] is not None:
+            files.append(r["file"])
 
-                    # 打开新 session 文件
-                    current_session = display_session
-                    current_safe_session = _safe_path(display_session)
-                    run_dir.mkdir(parents=True, exist_ok=True)
-                    current_path = run_dir / f"{current_safe_session}{suffix}"
-                    current_fh = (
-                        gzip.open(current_path, "wt", encoding="utf-8")
-                        if compress
-                        else open(current_path, "wt", encoding="utf-8")
-                    )
-
-                # 写入记录
-                for k, v in rec.items():
-                    if isinstance(v, datetime):
-                        rec[k] = v.isoformat()
-                current_fh.write(json.dumps(rec, default=str) + "\n")
-                record_count += 1
-
-            logger.info(f"  已处理 {record_count} 条记录...")
-
-        # 关闭 cursor
-        async with conn.cursor() as cur:
-            await cur.execute(f'CLOSE "{cursor_name}"')
-
-        # 显式提交读事务，否则后续 cleanup 的 conn.transaction() 只会创建 SAVEPOINT
-        await conn.commit()
-
-        if record_count == 0:
-            logger.info(f"  run '{run_id}' 无记录，跳过")
-            # 停止所有消费者
-            for _ in consumer_tasks:
-                await upload_queue.put(None)
-            await asyncio.gather(*consumer_tasks, return_exceptions=True)
-            if run_dir.exists():
-                shutil.rmtree(run_dir, ignore_errors=True)
-            return {"sessions": 0, "records": 0, "files": []}
-
-        # 提交最后一个 session
-        if current_fh is not None:
-            current_fh.close()
-            error_holder.check()
-            await upload_queue.put((current_path, f"{safe_run}/{current_safe_session}{suffix}"))
-            session_count += 1
-
-        t_write = time.monotonic()
-        logger.info(
-            f"  写入完成: {session_count} 个 session, {record_count} 条记录, "
-            f"耗时 {t_write - t_start:.1f}s"
-        )
-
-        # 发送 sentinel 停止所有消费者，等待上传完成
-        for _ in consumer_tasks:
-            await upload_queue.put(None)
-        await asyncio.gather(*consumer_tasks, return_exceptions=True)
-
-        # 检查消费者上传是否全部成功
-        error_holder.check()
-
-        t_upload = time.monotonic()
-        logger.info(
-            f"  上传完成: {len(uploaded_files)} 个文件, "
-            f"耗时 {t_upload - t_write:.1f}s"
-        )
-
-        # ---- 清理阶段：run 级 DELETE + UPDATE ----
-        archive_location = f"{storage.location_prefix}{safe_run}/"
+    # 5. run 级 DELETE + UPDATE（协调器连接）
+    archive_location = f"{storage.location_prefix}{safe_run}/"
+    async with pool.connection() as conn:
         await _cleanup_run(conn, run_id, archive_location)
 
-        t_delete = time.monotonic()
-        logger.info(
-            f"  归档 run '{run_id}' 完成: {len(uploaded_files)} 个文件, {record_count} 条记录, "
-            f"总耗时 {t_delete - t_start:.1f}s "
-            f"(读取+压缩 {t_write - t_start:.1f}s / 上传 {t_upload - t_write:.1f}s / 清理 {t_delete - t_upload:.1f}s)"
-        )
-        return {"sessions": len(uploaded_files), "records": record_count, "files": uploaded_files}
-
-    except Exception:
-        # 取消所有消费者
-        for t in consumer_tasks:
-            if not t.done():
-                t.cancel()
-        await asyncio.gather(*consumer_tasks, return_exceptions=True)
-        raise
-
-    finally:
-        if current_fh is not None:
-            try:
-                current_fh.close()
-            except Exception:
-                pass
-        if run_dir.exists():
-            shutil.rmtree(run_dir, ignore_errors=True)
+    t_done = time.monotonic()
+    logger.info(
+        f"  归档 run '{run_id}' 完成: {len(files)} 个文件, {total_records} 条记录, "
+        f"总耗时 {t_done - t_start:.1f}s "
+        f"(Workers {t_workers - t_start:.1f}s / 清理 {t_done - t_workers:.1f}s)"
+    )
+    return {"sessions": len(files), "records": total_records, "files": files}
 
 
 async def _cleanup_run(conn, run_id: str, archive_location: str):
@@ -509,3 +328,21 @@ async def _cleanup_run(conn, run_id: str, archive_location: str):
             "WHERE run_id = %s AND archive_location IS NULL",
             (archive_location, run_id),
         )
+
+
+async def _cleanup_empty_partitions(conn) -> int:
+    """归档完成后清理变空的分区"""
+    partitions = await _find_partitions(conn)
+    cleaned = 0
+    for pn in partitions:
+        if await _is_partition_empty(conn, pn):
+            try:
+                await conn.execute(
+                    f"ALTER TABLE public.request_details_active DETACH PARTITION public.{pn}"
+                )
+                await conn.execute(f"DROP TABLE public.{pn}")
+                logger.info(f"已清理空分区: {pn}")
+                cleaned += 1
+            except Exception as e:
+                logger.warning(f"清理空分区 {pn} 失败: {e}")
+    return cleaned

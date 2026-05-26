@@ -6,9 +6,11 @@ traj_archiver 入口
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 
+import ray
 from psycopg_pool import AsyncConnectionPool
 
 from traj_archiver.config import (
@@ -18,6 +20,7 @@ from traj_archiver.config import (
 )
 from traj_archiver.storage import create_storage
 from traj_archiver.scheduler import ArchiveScheduler
+from traj_archiver.session_worker import SessionArchiveWorker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,7 +43,7 @@ async def main():
     archive_config = get_archive_config()
     pool_config = get_database_pool_config()
 
-    # 创建数据库连接池
+    # 创建数据库连接池（协调器用）
     pool = AsyncConnectionPool(
         conninfo=db_url,
         min_size=pool_config["min_size"],
@@ -50,7 +53,7 @@ async def main():
     await pool.open()
     logger.info("数据库连接池已创建")
 
-    # 根据配置自动选择存储后端（本地 / S3）
+    # 根据配置自动选择存储后端（本地 / S3 / CSB）
     storage = create_storage(archive_config)
 
     # 验证存储可用性
@@ -63,16 +66,41 @@ async def main():
         await pool.close()
         sys.exit(1)
 
+    # 初始化 Ray + 创建 Worker Actors
+    num_workers = archive_config.get("upload_concurrency", 1)
+    compress = archive_config.get("compress", True)
+    local_temp_path = archive_config.get("local_temp_path", "/tmp/archives")
+
+    ray.init(
+        num_cpus=num_workers,
+        ignore_reinit_error=True,
+        log_to_driver=True,
+        _system_config={
+            "automatic_object_spilling_enabled": False,
+        },
+    )
+    logger.info(f"Ray 已初始化: {num_workers} 个 Worker")
+
+    workers = []
+    for i in range(num_workers):
+        w = SessionArchiveWorker.remote(
+            worker_id=i,
+            db_url=db_url,
+            storage_config=archive_config,
+            temp_root=local_temp_path,
+            compress=compress,
+        )
+        workers.append(w)
+    logger.info(f"已创建 {len(workers)} 个 SessionArchiveWorker")
+
     # 创建并启动调度器
     scheduler = ArchiveScheduler(
         pool=pool,
+        workers=workers,
         storage=storage,
         retention_days=archive_config.get("retention_days", 30),
         poll_interval=archive_config.get("poll_interval", 3600),
-        local_temp_path=archive_config.get("local_temp_path", "/tmp/archives"),
-        upload_concurrency=archive_config.get("upload_concurrency", 1),
-        compress=archive_config.get("compress", True),
-        upload_queue_size=archive_config.get("upload_queue_size", 3),
+        local_temp_path=local_temp_path,
     )
     await scheduler.start()
 
@@ -98,6 +126,7 @@ async def main():
 
     # 优雅退出
     await scheduler.stop()
+    ray.shutdown()
     await pool.close()
     logger.info("TrajArchiver 已停止")
 
