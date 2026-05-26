@@ -16,6 +16,7 @@
 - **GZIP 压缩可配置**: `archive.compress` 配置项控制归档文件是否 gzip 压缩
 - **S3 上传可用性验证**: 启动时验证 S3 上传可用性，确保上传成功后才删除 DB 记录
 - **S3 SSL 配置**: `verify_ssl` 配置项支持关闭 SSL 证书校验
+- **归档生产者-消费者 Pipeline**: 利用 `ORDER BY session_id` 连续性，写完一个 session 立即上传，有界队列提供背压，磁盘占用从全量临时文件降至 `queue_size + 1` 个 session 文件
 
 ### Bug 修复
 - **CSB 网关 multipart 500**: 改用 `put_object` 替代 `upload_file`，避免 multipart 上传 500 错误
@@ -25,20 +26,26 @@
 - **归档清理失效**: 改为 run 级批量操作，修复事务未提交导致清理失效
 - **archive_location 路径**: 存储完整绝对路径（`s3://bucket/prefix/run_id/`），E2E 测试适配文件夹路径格式
 - **Tokenizer 重复加载**: Processor 不再内部加载 tokenizer，改为由 `ProcessorManager` 通过 `TokenizerCache` 注入
+- **归档消费者死锁**: 上传失败时存下异常继续消费，避免 producer 因队列满阻塞死锁
+- **NULL/空 session_id 崩溃**: SQL 层面过滤 `run_id` 和 `session_id` 为 NULL 或空字符串的记录，不归档
+- **归档临时文件兜底清理**: finally 块确保 run 临时目录无论成功失败都被删除
 
 ### 优化改进
 - **归档模块精简**: 去掉无意义抽象和死代码
 - **归档配置清理**: 移除独立的 stop 脚本
+- **归档架构简化**: 移除 null-run 归档路径，run_id/session_id 为空不归档；`_check_consumer_error` 闭包改为 `_ConsumerError.check()` 方法；`_columns` 提升为模块级常量
 
 ### 配置更新
 - `archive.compress`: 控制是否 gzip 压缩（默认 true）
 - `archive.upload_concurrency`: 并发上传数
+- `archive.upload_queue_size`: 上传队列深度，控制背压（默认 3）
 - `storage.verify_ssl`: S3 SSL 证书校验开关
 - `storage.csb_*`: CSB 网关相关配置
 
 ### 测试
 - 归档 E2E 测试适配 `archive_location` 文件夹路径格式，新增 `build_archive_file_path` 工具函数
 - 分区创建增加边界检查，已存在但边界不对时自动重建
+- E2E 测试 `retention_days` 和分区检查补充 PASS/FAIL 计数，`retention_days` 提取只保留数字
 
 ### 影响范围
 - `traj_proxy/proxy_core/tokenizer_cache.py` - 新增 Tokenizer 共享缓存
