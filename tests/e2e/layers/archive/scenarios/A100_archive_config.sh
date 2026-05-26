@@ -51,9 +51,14 @@ fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
 if archiver_log_contains "retention_days"; then
-    RETENTION=$(search_archiver_logs "retention_days" | tail -1 | sed 's/.*retention_days: //')
+    RETENTION=$(search_archiver_logs "retention_days" | tail -1 | sed 's/.*retention_days[:=]*//' | sed 's/[^0-9].*//')
     log_success "保留天数: ${RETENTION}"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "未找到保留天数配置"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
 # 步骤 4: 验证核心业务容器不包含归档代码
 log_step "步骤 4: 验证核心业务与归档解耦"
@@ -80,9 +85,12 @@ PARTITIONS=$(db_query "
 
 if [ -n "$PARTITIONS" ] && [ "$PARTITIONS" -gt 0 ]; then
     log_success "找到 ${PARTITIONS} 个分区"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "未找到任何分区"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
 echo ""
 print_summary
