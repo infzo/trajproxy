@@ -163,7 +163,7 @@ async def _find_expired_runs(conn, threshold: datetime) -> List[str]:
             SELECT m.run_id
             FROM request_details_active d
             JOIN request_metadata m ON d.unique_id = m.unique_id
-            WHERE m.run_id IS NOT NULL
+            WHERE m.run_id IS NOT NULL AND m.run_id != ''
             GROUP BY m.run_id
             HAVING MAX(d.created_at) < %s
             ORDER BY m.run_id
@@ -179,6 +179,7 @@ async def _find_expired_null_sessions(conn, threshold: datetime) -> List[str]:
             FROM request_details_active d
             JOIN request_metadata m ON d.unique_id = m.unique_id
             WHERE m.run_id IS NULL
+              AND m.session_id IS NOT NULL AND m.session_id != ''
             GROUP BY m.session_id
             HAVING MAX(d.created_at) < %s
             ORDER BY m.session_id
