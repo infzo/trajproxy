@@ -13,6 +13,7 @@ import asyncio
 import gzip
 import json
 import logging
+import shutil
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -336,6 +337,7 @@ async def _archive_run(
 
     logger.info(f"  归档 run '{run_id}'...")
     t_start = time.monotonic()
+    run_dir = temp_root / safe_run
 
     # ---- 写入阶段：流式读取 + 按 session 写文件 ----
     suffix = ".jsonl.gz" if compress else ".jsonl"
@@ -362,7 +364,6 @@ async def _archive_run(
                     old_fh.close()
                     pending_uploads.append((old_path, f"{safe_run}/{old_key}{suffix}"))
 
-                run_dir = temp_root / safe_run
                 run_dir.mkdir(parents=True, exist_ok=True)
                 file_path = run_dir / f"{safe_session}{suffix}"
                 fh = gzip.open(file_path, "wt", encoding="utf-8") if compress else open(file_path, "wt", encoding="utf-8")
@@ -386,35 +387,43 @@ async def _archive_run(
 
     if record_count == 0:
         logger.info(f"  run '{run_id}' 无记录，跳过")
+        # 清理可能残留的空目录
+        if run_dir.exists():
+            shutil.rmtree(run_dir, ignore_errors=True)
         return {"sessions": 0, "records": 0, "files": []}
 
-    # 关闭剩余文件，加入待上传队列
-    for safe_session, (fh, file_path) in session_files.items():
-        fh.close()
-        pending_uploads.append((file_path, f"{safe_run}/{safe_session}{suffix}"))
+    try:
+        # 关闭剩余文件，加入待上传队列
+        for safe_session, (fh, file_path) in session_files.items():
+            fh.close()
+            pending_uploads.append((file_path, f"{safe_run}/{safe_session}{suffix}"))
 
-    t_write = time.monotonic()
-    logger.info(f"  写入完成: {len(pending_uploads)} 个文件, {record_count} 条记录, 耗时 {t_write - t_start:.1f}s")
+        t_write = time.monotonic()
+        logger.info(f"  写入完成: {len(pending_uploads)} 个文件, {record_count} 条记录, 耗时 {t_write - t_start:.1f}s")
 
-    # ---- 上传阶段：在线程池执行，不阻塞事件循环 ----
-    uploaded_files = await asyncio.to_thread(
-        _upload_pending, storage, pending_uploads, upload_concurrency
-    )
+        # ---- 上传阶段：在线程池执行，不阻塞事件循环 ----
+        uploaded_files = await asyncio.to_thread(
+            _upload_pending, storage, pending_uploads, upload_concurrency
+        )
 
-    t_upload = time.monotonic()
-    logger.info(f"  上传完成: {len(uploaded_files)} 个文件, 耗时 {t_upload - t_write:.1f}s")
+        t_upload = time.monotonic()
+        logger.info(f"  上传完成: {len(uploaded_files)} 个文件, 耗时 {t_upload - t_write:.1f}s")
 
-    # ---- 清理阶段：run 级 DELETE + UPDATE ----
-    archive_location = f"{storage.location_prefix}{safe_run}/"
-    await _cleanup_run(conn, run_id, archive_location)
+        # ---- 清理阶段：run 级 DELETE + UPDATE ----
+        archive_location = f"{storage.location_prefix}{safe_run}/"
+        await _cleanup_run(conn, run_id, archive_location)
 
-    t_delete = time.monotonic()
-    logger.info(
-        f"  归档 run '{run_id}' 完成: {len(uploaded_files)} 个文件, {record_count} 条记录, "
-        f"总耗时 {t_delete - t_start:.1f}s "
-        f"(读取+压缩 {t_write - t_start:.1f}s / 上传 {t_upload - t_write:.1f}s / 清理 {t_delete - t_upload:.1f}s)"
-    )
-    return {"sessions": len(uploaded_files), "records": record_count, "files": uploaded_files}
+        t_delete = time.monotonic()
+        logger.info(
+            f"  归档 run '{run_id}' 完成: {len(uploaded_files)} 个文件, {record_count} 条记录, "
+            f"总耗时 {t_delete - t_start:.1f}s "
+            f"(读取+压缩 {t_write - t_start:.1f}s / 上传 {t_upload - t_write:.1f}s / 清理 {t_delete - t_upload:.1f}s)"
+        )
+        return {"sessions": len(uploaded_files), "records": record_count, "files": uploaded_files}
+    finally:
+        # 兜底清理：无论成功/失败都删除 run 临时目录
+        if run_dir.exists():
+            shutil.rmtree(run_dir, ignore_errors=True)
 
 
 async def _archive_null_session(
@@ -451,24 +460,27 @@ async def _archive_null_session(
     file_path = temp_root / f"{safe_session}{suffix}"
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    record_count = 0
-    opener = gzip.open if compress else open
-    with opener(file_path, "wt", encoding="utf-8") as f:
-        for rec in records:
-            rec = dict(rec)
-            for key, val in rec.items():
-                if isinstance(val, datetime):
-                    rec[key] = val.isoformat()
-            f.write(json.dumps(rec, default=str) + "\n")
-            record_count += 1
+    try:
+        record_count = 0
+        opener = gzip.open if compress else open
+        with opener(file_path, "wt", encoding="utf-8") as f:
+            for rec in records:
+                rec = dict(rec)
+                for key, val in rec.items():
+                    if isinstance(val, datetime):
+                        rec[key] = val.isoformat()
+                f.write(json.dumps(rec, default=str) + "\n")
+                record_count += 1
 
-    key = f"_unknown/{safe_session}{suffix}"
-    loc = _finalize_file(storage, file_path, key)
+        key = f"_unknown/{safe_session}{suffix}"
+        loc = _finalize_file(storage, file_path, key)
 
-    await _cleanup_null_session(conn, session_id, f"{storage.location_prefix}_unknown/")
+        await _cleanup_null_session(conn, session_id, f"{storage.location_prefix}_unknown/")
 
-    logger.info(f"  归档 NULL-run session '{session_id}': {record_count} 条记录")
-    return {"records": record_count, "file": loc}
+        logger.info(f"  归档 NULL-run session '{session_id}': {record_count} 条记录")
+        return {"records": record_count, "file": loc}
+    finally:
+        file_path.unlink(missing_ok=True)
 
 
 def _upload_pending(storage, pending_uploads, concurrency):
@@ -492,6 +504,7 @@ def _upload_pending(storage, pending_uploads, concurrency):
         return loc
 
     results = []
+    first_error = None
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = {}
         for file_path, key in pending_uploads:
@@ -499,8 +512,14 @@ def _upload_pending(storage, pending_uploads, concurrency):
             futures[f] = key
 
         for f in as_completed(futures):
-            results.append(f.result())
+            try:
+                results.append(f.result())
+            except Exception as e:
+                if first_error is None:
+                    first_error = e
 
+    if first_error is not None:
+        raise first_error
     return results
 
 
