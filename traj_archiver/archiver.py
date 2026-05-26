@@ -25,6 +25,16 @@ logger = logging.getLogger(__name__)
 # 每批处理的记录数
 BATCH_SIZE = 500
 
+# 归档查询的列名（与 DECLARE CURSOR SELECT 顺序一致）
+_ARCHIVE_COLUMNS = [
+    "unique_id", "tokenizer_path", "messages",
+    "raw_request", "raw_response", "text_request", "text_response",
+    "prompt_text", "token_ids", "token_request", "token_response",
+    "response_text", "response_ids",
+    "full_conversation_text", "full_conversation_token_ids",
+    "error_traceback", "created_at", "session_id",
+]
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -182,6 +192,10 @@ class _ConsumerError:
     def __init__(self):
         self.exception: Optional[Exception] = None
 
+    def check(self):
+        if self.exception is not None:
+            raise self.exception
+
 
 async def _upload_consumer(
     queue: asyncio.Queue,
@@ -314,14 +328,6 @@ async def _archive_run(
     """
     safe_run = _safe_path(run_id)
 
-    _columns = [
-        "unique_id", "tokenizer_path", "messages",
-        "raw_request", "raw_response", "text_request", "text_response",
-        "prompt_text", "token_ids", "token_request", "token_response",
-        "response_text", "response_ids",
-        "full_conversation_text", "full_conversation_token_ids",
-        "error_traceback", "created_at", "session_id",
-    ]
     cursor_name = f"arch_{safe_run}"
 
     async with conn.cursor() as cur:
@@ -370,10 +376,6 @@ async def _archive_run(
     current_path: Optional[Path] = None
     session_count = 0
 
-    def _check_consumer_error():
-        if error_holder.exception is not None:
-            raise error_holder.exception
-
     try:
         while True:
             async with conn.cursor() as cur:
@@ -383,7 +385,7 @@ async def _archive_run(
                 break
 
             for row in batch:
-                rec = dict(zip(_columns, row))
+                rec = dict(zip(_ARCHIVE_COLUMNS, row))
                 session_id = rec.pop("session_id")
 
                 # session_id 为 NULL 时使用占位名
@@ -393,7 +395,7 @@ async def _archive_run(
                 if display_session != current_session:
                     if current_fh is not None:
                         current_fh.close()
-                        _check_consumer_error()
+                        error_holder.check()
                         await upload_queue.put((current_path, f"{safe_run}/{current_safe_session}{suffix}"))
                         session_count += 1
 
