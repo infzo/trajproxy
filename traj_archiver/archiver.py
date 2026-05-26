@@ -190,17 +190,26 @@ async def _find_expired_null_sessions(conn, threshold: datetime) -> List[str]:
 # 上传消费者协程
 # ============================================================
 
+# session_id 为 NULL 时使用的占位目录名
+_NULL_SESSION_DIR = "_null_session"
+
+
+class _ConsumerError:
+    """消费者异常容器，跨协程传递第一个上传失败"""
+    def __init__(self):
+        self.exception: Optional[Exception] = None
+
 
 async def _upload_consumer(
     queue: asyncio.Queue,
     storage,
     results: List[str],
+    error_holder: _ConsumerError,
 ):
     """从队列取文件，异步上传并删除本地临时文件
 
-    消费者从有界队列中取 (file_path, key) 对，
-    在线程池中调用 storage.upload()，完成后删除临时文件。
-    收到 None sentinel 时退出。
+    上传失败时存下异常到 error_holder 并继续消费，
+    避免 producer 因队列满而阻塞死锁。
     """
     while True:
         item = await queue.get()
@@ -213,10 +222,10 @@ async def _upload_consumer(
             loc = await asyncio.to_thread(storage.upload, file_path, key)
             file_path.unlink(missing_ok=True)
             results.append(loc)
-        except Exception:
-            # 上传失败时重新抛出，由 producer 处理
-            queue.task_done()
-            raise
+        except Exception as e:
+            if error_holder.exception is None:
+                error_holder.exception = e
+            file_path.unlink(missing_ok=True)
         queue.task_done()
 
 
@@ -379,11 +388,16 @@ async def _archive_run(
     queue_maxsize = upload_queue_size if upload_queue_size > 0 else 0
     upload_queue: asyncio.Queue[Optional[Tuple[Path, str]]] = asyncio.Queue(maxsize=queue_maxsize)
     uploaded_files: List[str] = []
+    error_holder = _ConsumerError()
 
-    # 启动上传消费者协程
-    consumer_task = asyncio.create_task(
-        _upload_consumer(upload_queue, storage, uploaded_files)
-    )
+    # 启动多个上传消费者协程
+    num_consumers = max(1, upload_concurrency)
+    consumer_tasks = [
+        asyncio.create_task(
+            _upload_consumer(upload_queue, storage, uploaded_files, error_holder)
+        )
+        for _ in range(num_consumers)
+    ]
 
     # ---- 生产者：流式读取 + 按 session 写文件 ----
     current_session: Optional[str] = None
@@ -391,6 +405,10 @@ async def _archive_run(
     current_fh = None
     current_path: Optional[Path] = None
     session_count = 0
+
+    def _check_consumer_error():
+        if error_holder.exception is not None:
+            raise error_holder.exception
 
     try:
         while True:
@@ -404,16 +422,20 @@ async def _archive_run(
                 rec = dict(zip(_columns, row))
                 session_id = rec.pop("session_id")
 
+                # session_id 为 NULL 时使用占位名
+                display_session = session_id or _NULL_SESSION_DIR
+
                 # session 切换：关闭前一个 session，提交上传
-                if session_id != current_session:
+                if display_session != current_session:
                     if current_fh is not None:
                         current_fh.close()
+                        _check_consumer_error()
                         await upload_queue.put((current_path, f"{safe_run}/{current_safe_session}{suffix}"))
                         session_count += 1
 
                     # 打开新 session 文件
-                    current_session = session_id
-                    current_safe_session = _safe_path(session_id)
+                    current_session = display_session
+                    current_safe_session = _safe_path(display_session)
                     run_dir.mkdir(parents=True, exist_ok=True)
                     current_path = run_dir / f"{current_safe_session}{suffix}"
                     current_fh = (
@@ -440,10 +462,10 @@ async def _archive_run(
 
         if record_count == 0:
             logger.info(f"  run '{run_id}' 无记录，跳过")
-            # 停止消费者
-            await upload_queue.put(None)
-            await consumer_task
-            # 清理可能残留的空目录
+            # 停止所有消费者
+            for _ in consumer_tasks:
+                await upload_queue.put(None)
+            await asyncio.gather(*consumer_tasks, return_exceptions=True)
             if run_dir.exists():
                 shutil.rmtree(run_dir, ignore_errors=True)
             return {"sessions": 0, "records": 0, "files": []}
@@ -451,6 +473,7 @@ async def _archive_run(
         # 提交最后一个 session
         if current_fh is not None:
             current_fh.close()
+            _check_consumer_error()
             await upload_queue.put((current_path, f"{safe_run}/{current_safe_session}{suffix}"))
             session_count += 1
 
@@ -460,9 +483,13 @@ async def _archive_run(
             f"耗时 {t_write - t_start:.1f}s"
         )
 
-        # 发送 sentinel，等待消费者完成所有上传
-        await upload_queue.put(None)
-        await consumer_task
+        # 发送 sentinel 停止所有消费者，等待上传完成
+        for _ in consumer_tasks:
+            await upload_queue.put(None)
+        await asyncio.gather(*consumer_tasks, return_exceptions=True)
+
+        # 检查消费者上传是否全部成功
+        _check_consumer_error()
 
         t_upload = time.monotonic()
         logger.info(
@@ -483,23 +510,19 @@ async def _archive_run(
         return {"sessions": len(uploaded_files), "records": record_count, "files": uploaded_files}
 
     except Exception:
-        # 消费者异常时取消任务
-        if not consumer_task.done():
-            consumer_task.cancel()
-            try:
-                await consumer_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        # 取消所有消费者
+        for t in consumer_tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*consumer_tasks, return_exceptions=True)
         raise
 
     finally:
-        # 确保当前文件句柄关闭
         if current_fh is not None:
             try:
                 current_fh.close()
             except Exception:
                 pass
-        # 兜底清理：无论成功/失败都删除 run 临时目录
         if run_dir.exists():
             shutil.rmtree(run_dir, ignore_errors=True)
 
