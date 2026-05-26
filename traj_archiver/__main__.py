@@ -72,6 +72,7 @@ async def main():
         local_temp_path=archive_config.get("local_temp_path", "/tmp/archives"),
         upload_concurrency=archive_config.get("upload_concurrency", 1),
         compress=archive_config.get("compress", True),
+        upload_queue_size=archive_config.get("upload_queue_size", 3),
     )
     await scheduler.start()
 

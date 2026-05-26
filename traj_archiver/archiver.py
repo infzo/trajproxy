@@ -4,7 +4,7 @@
 流程:
   1. 查找全部记录已过期的 run_id (MAX(created_at) < threshold)
   2. 按 run 导出所有 session → 每 session 一个 .jsonl.gz
-  3. 立即上传到 storage，释放本地磁盘
+  3. 生产者-消费者 pipeline：写完一个 session 立即上传，释放本地磁盘
   4. DELETE + UPDATE metadata 同事务
   5. 顺手清理空的月分区
 """
@@ -18,14 +18,12 @@ import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from psycopg.rows import dict_row
 
 logger = logging.getLogger(__name__)
 
-# 同时打开的最大文件句柄数
-MAX_OPEN_FILES = 50
 # 每批处理的记录数
 BATCH_SIZE = 500
 
@@ -189,6 +187,40 @@ async def _find_expired_null_sessions(conn, threshold: datetime) -> List[str]:
 
 
 # ============================================================
+# 上传消费者协程
+# ============================================================
+
+
+async def _upload_consumer(
+    queue: asyncio.Queue,
+    storage,
+    results: List[str],
+):
+    """从队列取文件，异步上传并删除本地临时文件
+
+    消费者从有界队列中取 (file_path, key) 对，
+    在线程池中调用 storage.upload()，完成后删除临时文件。
+    收到 None sentinel 时退出。
+    """
+    while True:
+        item = await queue.get()
+        if item is None:
+            queue.task_done()
+            break
+
+        file_path, key = item
+        try:
+            loc = await asyncio.to_thread(storage.upload, file_path, key)
+            file_path.unlink(missing_ok=True)
+            results.append(loc)
+        except Exception:
+            # 上传失败时重新抛出，由 producer 处理
+            queue.task_done()
+            raise
+        queue.task_done()
+
+
+# ============================================================
 # 归档执行
 # ============================================================
 
@@ -200,6 +232,7 @@ async def archive_details(
     retention_days: int,
     upload_concurrency: int = 1,
     compress: bool = True,
+    upload_queue_size: int = 3,
 ) -> Dict[str, Any]:
     """按 run_id 粒度归档过期数据"""
     threshold = _utcnow() - timedelta(days=retention_days)
@@ -230,7 +263,10 @@ async def archive_details(
         for idx, run_id in enumerate(expired_runs, 1):
             logger.info(f"[{idx}/{total}] 开始归档 run '{run_id}'...")
             try:
-                stats = await _archive_run(conn, storage, temp_root, run_id, upload_concurrency, compress)
+                stats = await _archive_run(
+                    conn, storage, temp_root, run_id,
+                    upload_concurrency, compress, upload_queue_size,
+                )
                 result["runs_processed"] += 1
                 result["sessions_archived"] += stats["sessions"]
                 result["records_archived"] += stats["records"]
@@ -296,14 +332,12 @@ async def _archive_run(
     conn, storage, temp_root: Path, run_id: str,
     upload_concurrency: int = 1,
     compress: bool = True,
+    upload_queue_size: int = 3,
 ) -> Dict[str, Any]:
-    """归档一个 run 下的所有 session
+    """归档一个 run 下的所有 session（生产者-消费者 pipeline）
 
-    流程:
-      1. server-side cursor 流式读取记录
-      2. 按 session_id 分组写入 gzip 文件
-      3. 并发上传所有 session 文件
-      4. 全部上传成功后 DELETE + UPDATE metadata
+    利用 ORDER BY session_id 的连续性，写完一个 session 立即提交上传。
+    有界队列提供背压，限制磁盘上同时存在的临时文件数量。
     """
     safe_run = _safe_path(run_id)
 
@@ -338,76 +372,103 @@ async def _archive_run(
     logger.info(f"  归档 run '{run_id}'...")
     t_start = time.monotonic()
     run_dir = temp_root / safe_run
-
-    # ---- 写入阶段：流式读取 + 按 session 写文件 ----
     suffix = ".jsonl.gz" if compress else ".jsonl"
-    session_files: Dict[str, tuple] = {}
-    pending_uploads = []
     record_count = 0
 
-    while True:
-        async with conn.cursor() as cur:
-            await cur.execute(f'FETCH {BATCH_SIZE} FROM "{cursor_name}"')
-            batch = await cur.fetchall()
-        if not batch:
-            break
+    # 有界上传队列：队列满时 producer 阻塞，提供背压
+    queue_maxsize = upload_queue_size if upload_queue_size > 0 else 0
+    upload_queue: asyncio.Queue[Optional[Tuple[Path, str]]] = asyncio.Queue(maxsize=queue_maxsize)
+    uploaded_files: List[str] = []
 
-        for row in batch:
-            rec = dict(zip(_columns, row))
-            session_id = rec.pop("session_id")
-            safe_session = _safe_path(session_id)
+    # 启动上传消费者协程
+    consumer_task = asyncio.create_task(
+        _upload_consumer(upload_queue, storage, uploaded_files)
+    )
 
-            if safe_session not in session_files:
-                if len(session_files) >= MAX_OPEN_FILES:
-                    old_key = next(iter(session_files))
-                    old_fh, old_path = session_files.pop(old_key)
-                    old_fh.close()
-                    pending_uploads.append((old_path, f"{safe_run}/{old_key}{suffix}"))
-
-                run_dir.mkdir(parents=True, exist_ok=True)
-                file_path = run_dir / f"{safe_session}{suffix}"
-                fh = gzip.open(file_path, "wt", encoding="utf-8") if compress else open(file_path, "wt", encoding="utf-8")
-                session_files[safe_session] = (fh, file_path)
-
-            fh, _ = session_files[safe_session]
-            for k, v in rec.items():
-                if isinstance(v, datetime):
-                    rec[k] = v.isoformat()
-            fh.write(json.dumps(rec, default=str) + "\n")
-            record_count += 1
-
-        logger.info(f"  已处理 {record_count} 条记录...")
-
-    async with conn.cursor() as cur:
-        await cur.execute(f'CLOSE "{cursor_name}"')
-
-    # 显式提交读事务，否则后续 cleanup 的 conn.transaction() 只会创建 SAVEPOINT，
-    # 外层事务不提交，连接池回收时会 ROLLBACK 所有变更
-    await conn.commit()
-
-    if record_count == 0:
-        logger.info(f"  run '{run_id}' 无记录，跳过")
-        # 清理可能残留的空目录
-        if run_dir.exists():
-            shutil.rmtree(run_dir, ignore_errors=True)
-        return {"sessions": 0, "records": 0, "files": []}
+    # ---- 生产者：流式读取 + 按 session 写文件 ----
+    current_session: Optional[str] = None
+    current_safe_session: Optional[str] = None
+    current_fh = None
+    current_path: Optional[Path] = None
+    session_count = 0
 
     try:
-        # 关闭剩余文件，加入待上传队列
-        for safe_session, (fh, file_path) in session_files.items():
-            fh.close()
-            pending_uploads.append((file_path, f"{safe_run}/{safe_session}{suffix}"))
+        while True:
+            async with conn.cursor() as cur:
+                await cur.execute(f'FETCH {BATCH_SIZE} FROM "{cursor_name}"')
+                batch = await cur.fetchall()
+            if not batch:
+                break
+
+            for row in batch:
+                rec = dict(zip(_columns, row))
+                session_id = rec.pop("session_id")
+
+                # session 切换：关闭前一个 session，提交上传
+                if session_id != current_session:
+                    if current_fh is not None:
+                        current_fh.close()
+                        await upload_queue.put((current_path, f"{safe_run}/{current_safe_session}{suffix}"))
+                        session_count += 1
+
+                    # 打开新 session 文件
+                    current_session = session_id
+                    current_safe_session = _safe_path(session_id)
+                    run_dir.mkdir(parents=True, exist_ok=True)
+                    current_path = run_dir / f"{current_safe_session}{suffix}"
+                    current_fh = (
+                        gzip.open(current_path, "wt", encoding="utf-8")
+                        if compress
+                        else open(current_path, "wt", encoding="utf-8")
+                    )
+
+                # 写入记录
+                for k, v in rec.items():
+                    if isinstance(v, datetime):
+                        rec[k] = v.isoformat()
+                current_fh.write(json.dumps(rec, default=str) + "\n")
+                record_count += 1
+
+            logger.info(f"  已处理 {record_count} 条记录...")
+
+        # 关闭 cursor
+        async with conn.cursor() as cur:
+            await cur.execute(f'CLOSE "{cursor_name}"')
+
+        # 显式提交读事务，否则后续 cleanup 的 conn.transaction() 只会创建 SAVEPOINT
+        await conn.commit()
+
+        if record_count == 0:
+            logger.info(f"  run '{run_id}' 无记录，跳过")
+            # 停止消费者
+            await upload_queue.put(None)
+            await consumer_task
+            # 清理可能残留的空目录
+            if run_dir.exists():
+                shutil.rmtree(run_dir, ignore_errors=True)
+            return {"sessions": 0, "records": 0, "files": []}
+
+        # 提交最后一个 session
+        if current_fh is not None:
+            current_fh.close()
+            await upload_queue.put((current_path, f"{safe_run}/{current_safe_session}{suffix}"))
+            session_count += 1
 
         t_write = time.monotonic()
-        logger.info(f"  写入完成: {len(pending_uploads)} 个文件, {record_count} 条记录, 耗时 {t_write - t_start:.1f}s")
-
-        # ---- 上传阶段：在线程池执行，不阻塞事件循环 ----
-        uploaded_files = await asyncio.to_thread(
-            _upload_pending, storage, pending_uploads, upload_concurrency
+        logger.info(
+            f"  写入完成: {session_count} 个 session, {record_count} 条记录, "
+            f"耗时 {t_write - t_start:.1f}s"
         )
 
+        # 发送 sentinel，等待消费者完成所有上传
+        await upload_queue.put(None)
+        await consumer_task
+
         t_upload = time.monotonic()
-        logger.info(f"  上传完成: {len(uploaded_files)} 个文件, 耗时 {t_upload - t_write:.1f}s")
+        logger.info(
+            f"  上传完成: {len(uploaded_files)} 个文件, "
+            f"耗时 {t_upload - t_write:.1f}s"
+        )
 
         # ---- 清理阶段：run 级 DELETE + UPDATE ----
         archive_location = f"{storage.location_prefix}{safe_run}/"
@@ -420,7 +481,24 @@ async def _archive_run(
             f"(读取+压缩 {t_write - t_start:.1f}s / 上传 {t_upload - t_write:.1f}s / 清理 {t_delete - t_upload:.1f}s)"
         )
         return {"sessions": len(uploaded_files), "records": record_count, "files": uploaded_files}
+
+    except Exception:
+        # 消费者异常时取消任务
+        if not consumer_task.done():
+            consumer_task.cancel()
+            try:
+                await consumer_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        raise
+
     finally:
+        # 确保当前文件句柄关闭
+        if current_fh is not None:
+            try:
+                current_fh.close()
+            except Exception:
+                pass
         # 兜底清理：无论成功/失败都删除 run 临时目录
         if run_dir.exists():
             shutil.rmtree(run_dir, ignore_errors=True)
@@ -481,46 +559,6 @@ async def _archive_null_session(
         return {"records": record_count, "file": loc}
     finally:
         file_path.unlink(missing_ok=True)
-
-
-def _upload_pending(storage, pending_uploads, concurrency):
-    """并发上传待处理文件，返回 [location]"""
-    if not pending_uploads:
-        return []
-
-    if concurrency <= 1:
-        results = []
-        for file_path, key in pending_uploads:
-            loc = storage.upload(file_path, key)
-            file_path.unlink(missing_ok=True)
-            results.append(loc)
-        return results
-
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    def _upload_one(file_path, key):
-        loc = storage.upload(file_path, key)
-        file_path.unlink(missing_ok=True)
-        return loc
-
-    results = []
-    first_error = None
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = {}
-        for file_path, key in pending_uploads:
-            f = pool.submit(_upload_one, file_path, key)
-            futures[f] = key
-
-        for f in as_completed(futures):
-            try:
-                results.append(f.result())
-            except Exception as e:
-                if first_error is None:
-                    first_error = e
-
-    if first_error is not None:
-        raise first_error
-    return results
 
 
 def _finalize_file(storage, local_path: Path, key: str) -> str:

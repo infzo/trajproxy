@@ -13,6 +13,7 @@ archive:
   poll_interval: 60
   storage_path: "/data/archives"     # S3 模式下作为临时目录
   local_temp_path: "/tmp/archives"
+  upload_queue_size: 3           # 上传队列深度（backpressure），0=无限制
   s3:
     bucket: "trajproxy-archives"
     prefix: "archives/"
