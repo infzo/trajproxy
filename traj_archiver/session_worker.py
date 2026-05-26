@@ -73,7 +73,8 @@ class SessionArchiveWorker:
             f"temp={temp_root}, compress={compress}"
         )
 
-    def archive(self, run_id: str, session_id: Optional[str]) -> Dict[str, Any]:
+    def archive(self, run_id: str, session_id: Optional[str],
+                session_idx: int = 0, session_total: int = 0) -> Dict[str, Any]:
         """归档单个 session：读 DB → 写文件 → 上传
 
         返回: {"records": int, "file": str}
@@ -82,6 +83,7 @@ class SessionArchiveWorker:
         safe_run = _safe_path(run_id)
         safe_session = _safe_path(display)
         suffix = ".jsonl.gz" if self.compress else ".jsonl"
+        progress = f"[{session_idx}/{session_total}] " if session_total else ""
         t_start = time.monotonic()
 
         run_dir = self.temp_root / safe_run
@@ -104,7 +106,7 @@ class SessionArchiveWorker:
             t_done = time.monotonic()
 
             logger.info(
-                f"Worker-{self.worker_id}: session '{display}' 完成 — "
+                f"Worker-{self.worker_id}: {progress}session '{display}' 完成 — "
                 f"{record_count} 条 / {file_size / 1024 / 1024:.1f} MB, "
                 f"导出 {t_export - t_start:.1f}s / 上传 {t_done - t_export:.1f}s / "
                 f"总计 {t_done - t_start:.1f}s"

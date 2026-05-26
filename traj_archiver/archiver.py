@@ -275,10 +275,11 @@ async def _archive_run(
     logger.info(f"  run '{run_id}': {len(sessions)} 个 session 待归档")
 
     # 2. 轮询分发 session 到 Workers
+    total_sessions = len(sessions)
     futures = []
     for i, session_id in enumerate(sessions):
         worker = workers[i % len(workers)]
-        futures.append(worker.archive.remote(run_id, session_id))
+        futures.append(worker.archive.remote(run_id, session_id, i + 1, total_sessions))
 
     # 3. 等待全部完成（超时 30 分钟，防止单 Worker 卡死）
     import ray
