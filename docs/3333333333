@@ -1,0 +1,94 @@
+63-1f2746602250-2223-0.jsonl
+2026-05-26 09:19:02,235 [INFO] traj_archiver.csb_storage: 已上传: 460-57-19a02c59-c303-4f6b-9f40-f7075d253d83-21666-0.jsonl (23256529 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-19a02c59-c303-4f6b-9f40-f7075d253d83-21666-0.jsonl
+2026-05-26 09:19:04,672 [INFO] traj_archiver.csb_storage: 已上传: 460-57-2897a14c-3cff-4e6f-b4f6-c4e2ee2f60b4-2225-0.jsonl (41493629 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-2897a14c-3cff-4e6f-b4f6-c4e2ee2f60b4-2225-0.jsonl
+2026-05-26 09:19:05,924 [INFO] traj_archiver.csb_storage: 已上传: 460-57-2aad7b74-fd17-45ab-8533-5f27365e5ff2-2229-0.jsonl (9129652 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-2aad7b74-fd17-45ab-8533-5f27365e5ff2-2229-0.jsonl
+2026-05-26 09:19:07,420 [INFO] traj_archiver.csb_storage: 已上传: 460-57-375da6d5-20d6-440f-946c-21862ec68753-2229-0.jsonl (21523865 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-375da6d5-20d6-440f-946c-21862ec68753-2229-0.jsonl
+2026-05-26 09:19:09,444 [INFO] traj_archiver.csb_storage: 已上传: 460-57-547a566a-65e7-4103-ada2-944d87ae3ee2-2223-0.jsonl (42923038 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-547a566a-65e7-4103-ada2-944d87ae3ee2-2223-0.jsonl
+2026-05-26 09:19:12,250 [INFO] traj_archiver.csb_storage: 已上传: 460-57-5a8cf10d-83ac-4db6-aeab-0ace26265042-2225-0.jsonl (38234061 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-5a8cf10d-83ac-4db6-aeab-0ace26265042-2225-0.jsonl
+2026-05-26 09:19:14,436 [INFO] traj_archiver.csb_storage: 已上传: 460-57-6ca35772-c630-4b4b-befe-36eeba55346c-2225-0.jsonl (41105784 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-6ca35772-c630-4b4b-befe-36eeba55346c-2225-0.jsonl
+2026-05-26 09:19:17,365 [INFO] traj_archiver.csb_storage: 已上传: 460-57-74ca21da-4824-4754-bd6b-19076b74e713-2229-0.jsonl (69496729 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-74ca21da-4824-4754-bd6b-19076b74e713-2229-0.jsonl
+2026-05-26 09:19:17,437 [INFO] traj_archiver.archiver:   已处理 191500 条记录...
+2026-05-26 09:19:17,540 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0' 失败: consuming input failed: terminating connection due to administrator command
+SSL connection has been closed unexpectedly
+2026-05-26 09:19:18,080 [INFO] traj_archiver.archiver: [2/26] 开始归档 run 'ma-job-1ab079cb-1114-4976-bcb0-ba7c3f004979'...
+2026-05-26 09:19:18,080 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-1ab079cb-1114-4976-bcb0-ba7c3f004979' 失败: the connection is closed
+2026-05-26 09:19:18,090 [INFO] traj_archiver.archiver: [3/26] 开始归档 run 'ma-job-29caec71-2fb4-473f-ba34-1e3e8feaa9d0-vj-0'...
+2026-05-26 09:19:18,090 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-29caec71-2fb4-473f-ba34-1e3e8feaa9d0-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,090 [INFO] traj_archiver.archiver: [4/26] 开始归档 run 'ma-job-31b703e0-a119-43e1-954b-a14b9ee0518c'...
+2026-05-26 09:19:18,090 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-31b703e0-a119-43e1-954b-a14b9ee0518c' 失败: the connection is closed
+2026-05-26 09:19:18,090 [INFO] traj_archiver.archiver: [5/26] 开始归档 run 'ma-job-37da0018-ffde-42d1-8b16-f47a1ca32697-vj-0'...
+2026-05-26 09:19:18,090 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-37da0018-ffde-42d1-8b16-f47a1ca32697-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,091 [INFO] traj_archiver.archiver: [6/26] 开始归档 run 'ma-job-61d41fc6-00cc-4af7-b37b-0f3e0cce2ea8'...
+2026-05-26 09:19:18,091 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-61d41fc6-00cc-4af7-b37b-0f3e0cce2ea8' 失败: the connection is closed
+2026-05-26 09:19:18,091 [INFO] traj_archiver.archiver: [7/26] 开始归档 run 'ma-job-6e8909fd-23fd-45ab-a60f-eb781757c13f'...
+2026-05-26 09:19:18,091 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-6e8909fd-23fd-45ab-a60f-eb781757c13f' 失败: the connection is closed
+2026-05-26 09:19:18,092 [INFO] traj_archiver.archiver: [8/26] 开始归档 run 'ma-job-707c1856-3504-4e94-967b-67ada7924ac6'...
+2026-05-26 09:19:18,092 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-707c1856-3504-4e94-967b-67ada7924ac6' 失败: the connection is closed
+2026-05-26 09:19:18,092 [INFO] traj_archiver.archiver: [9/26] 开始归档 run 'ma-job-70a9931e-942d-4686-abec-8c9af59e2a4c'...
+2026-05-26 09:19:18,092 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-70a9931e-942d-4686-abec-8c9af59e2a4c' 失败: the connection is closed
+2026-05-26 09:19:18,092 [INFO] traj_archiver.archiver: [10/26] 开始归档 run 'ma-job-7540d042-af6d-457b-9b21-3e1bbff57c22-vj-0'...
+2026-05-26 09:19:18,092 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-7540d042-af6d-457b-9b21-3e1bbff57c22-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,093 [INFO] traj_archiver.archiver: [11/26] 开始归档 run 'ma-job-7f3ed596-e2b1-4e9e-977f-f06aaf76b35a-vj-0'...
+2026-05-26 09:19:18,093 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-7f3ed596-e2b1-4e9e-977f-f06aaf76b35a-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,093 [INFO] traj_archiver.archiver: [12/26] 开始归档 run 'ma-job-83aa995e-2059-4942-831b-14cd060cd736-vj-0'...
+2026-05-26 09:19:18,093 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-83aa995e-2059-4942-831b-14cd060cd736-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,093 [INFO] traj_archiver.archiver: [13/26] 开始归档 run 'ma-job-97b6824b-7d78-43c9-a854-9173d5b19e32-vj-0'...
+2026-05-26 09:19:18,093 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-97b6824b-7d78-43c9-a854-9173d5b19e32-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,094 [INFO] traj_archiver.archiver: [14/26] 开始归档 run 'ma-job-9d03511c-563d-47f7-b66b-b7d02bdba090'...
+2026-05-26 09:19:18,094 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-9d03511c-563d-47f7-b66b-b7d02bdba090' 失败: the connection is closed
+2026-05-26 09:19:18,094 [INFO] traj_archiver.archiver: [15/26] 开始归档 run 'ma-job-ae6e9c6e-1ce0-400f-8140-8d8dd4c63cf0-vj-0'...
+2026-05-26 09:19:18,094 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-ae6e9c6e-1ce0-400f-8140-8d8dd4c63cf0-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,095 [INFO] traj_archiver.archiver: [16/26] 开始归档 run 'ma-job-aeb1137c-d99d-46fb-9a5d-ba3aae00af78'...
+2026-05-26 09:19:18,095 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-aeb1137c-d99d-46fb-9a5d-ba3aae00af78' 失败: the connection is closed
+2026-05-26 09:19:18,095 [INFO] traj_archiver.archiver: [17/26] 开始归档 run 'ma-job-afad7a4d-63a2-4eeb-877f-e1a7365f5dbe-vj-0'...
+2026-05-26 09:19:18,095 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-afad7a4d-63a2-4eeb-877f-e1a7365f5dbe-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,095 [INFO] traj_archiver.archiver: [18/26] 开始归档 run 'ma-job-afb93599-52bb-4ebd-acc2-39d1727c10e5-vj-0'...
+2026-05-26 09:19:18,095 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-afb93599-52bb-4ebd-acc2-39d1727c10e5-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,096 [INFO] traj_archiver.archiver: [19/26] 开始归档 run 'ma-job-b0132999-95d4-433e-9fe5-10f26c0b077a'...
+2026-05-26 09:19:18,096 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-b0132999-95d4-433e-9fe5-10f26c0b077a' 失败: the connection is closed
+2026-05-26 09:19:18,096 [INFO] traj_archiver.archiver: [20/26] 开始归档 run 'ma-job-e5a1f083-632b-4798-83ac-2cb49db138be'...
+2026-05-26 09:19:18,096 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-e5a1f083-632b-4798-83ac-2cb49db138be' 失败: the connection is closed
+2026-05-26 09:19:18,097 [INFO] traj_archiver.archiver: [21/26] 开始归档 run 'ma-job-e8881ad8-42c2-47a3-8c17-290a9bd284a2'...
+2026-05-26 09:19:18,097 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-e8881ad8-42c2-47a3-8c17-290a9bd284a2' 失败: the connection is closed
+2026-05-26 09:19:18,097 [INFO] traj_archiver.archiver: [22/26] 开始归档 run 'ma-job-f4a4ec39-4b1c-4b5a-8577-cb6949398cfa-vj-0'...
+2026-05-26 09:19:18,097 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-f4a4ec39-4b1c-4b5a-8577-cb6949398cfa-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,097 [INFO] traj_archiver.archiver: [23/26] 开始归档 run 'ma-job-fea6dd69-fea4-45d1-8eae-b9c64ae2f4a6-vj-0'...
+2026-05-26 09:19:18,097 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-fea6dd69-fea4-45d1-8eae-b9c64ae2f4a6-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,098 [INFO] traj_archiver.archiver: [24/26] 开始归档 run 'ma-job-feb7c648-418d-4d4e-847d-ae5323932b1d'...
+2026-05-26 09:19:18,098 [ERROR] traj_archiver.archiver: 归档 run 'ma-job-feb7c648-418d-4d4e-847d-ae5323932b1d' 失败: the connection is closed
+2026-05-26 09:19:18,098 [INFO] traj_archiver.archiver: [25/26] 开始归档 run 'w00835098_2026_05_23_17_40'...
+2026-05-26 09:19:18,098 [ERROR] traj_archiver.archiver: 归档 run 'w00835098_2026_05_23_17_40' 失败: the connection is closed
+2026-05-26 09:19:18,099 [INFO] traj_archiver.archiver: [26/26] 开始归档 run 'w00911750_2026_05_23_09_16'...
+2026-05-26 09:19:18,099 [ERROR] traj_archiver.archiver: 归档 run 'w00911750_2026_05_23_09_16' 失败: the connection is closed
+2026-05-26 09:19:18,099 [WARNING] psycopg.pool: discarding closed connection: <psycopg.AsyncConnection [BAD] at 0x7f22de3f3a10>
+2026-05-26 09:19:18,100 [INFO] traj_archiver.scheduler: 归档完成: 0 runs, 0 sessions, 0 records
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0' 失败: consuming input failed: terminating connection due to administrator command
+SSL connection has been closed unexpectedly
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-1ab079cb-1114-4976-bcb0-ba7c3f004979' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-29caec71-2fb4-473f-ba34-1e3e8feaa9d0-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-31b703e0-a119-43e1-954b-a14b9ee0518c' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-37da0018-ffde-42d1-8b16-f47a1ca32697-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-61d41fc6-00cc-4af7-b37b-0f3e0cce2ea8' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-6e8909fd-23fd-45ab-a60f-eb781757c13f' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-707c1856-3504-4e94-967b-67ada7924ac6' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-70a9931e-942d-4686-abec-8c9af59e2a4c' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-7540d042-af6d-457b-9b21-3e1bbff57c22-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-7f3ed596-e2b1-4e9e-977f-f06aaf76b35a-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-83aa995e-2059-4942-831b-14cd060cd736-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-97b6824b-7d78-43c9-a854-9173d5b19e32-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-9d03511c-563d-47f7-b66b-b7d02bdba090' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-ae6e9c6e-1ce0-400f-8140-8d8dd4c63cf0-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-aeb1137c-d99d-46fb-9a5d-ba3aae00af78' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-afad7a4d-63a2-4eeb-877f-e1a7365f5dbe-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-afb93599-52bb-4ebd-acc2-39d1727c10e5-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-b0132999-95d4-433e-9fe5-10f26c0b077a' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-e5a1f083-632b-4798-83ac-2cb49db138be' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-e8881ad8-42c2-47a3-8c17-290a9bd284a2' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-f4a4ec39-4b1c-4b5a-8577-cb6949398cfa-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-fea6dd69-fea4-45d1-8eae-b9c64ae2f4a6-vj-0' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'ma-job-feb7c648-418d-4d4e-847d-ae5323932b1d' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'w00835098_2026_05_23_17_40' 失败: the connection is closed
+2026-05-26 09:19:18,100 [WARNING] traj_archiver.scheduler:   错误: 归档 run 'w00911750_2026_05_23_09_16' 失败: the connection is closed
+2026-05-26 09:19:18,100 [INFO] traj_archiver.scheduler: ==================================================
+2026-05-26 09:19:20,575 [INFO] traj_archiver.csb_storage: 已上传: 460-57-7dd59adb-a586-49c5-b598-cefb5c75587e-2223-0.jsonl (45854462 bytes) → csb://bucket-910c-6055/bucket-tte-guiyang-mirror/MindForge-Coder/l00619320/trajproxy-archives/ma-job-10834e74-092c-4c4c-a082-24992fe14930-vj-0/460-57-7dd59adb-a586-49c5-b598-cefb5c75587e-2223-0.jsonl
+
