@@ -274,24 +274,62 @@ async def _archive_run(
 
     logger.info(f"  run '{run_id}': {len(sessions)} 个 session 待归档")
 
-    # 2. 轮询分发 session 到 Workers
-    total_sessions = len(sessions)
-    futures = []
-    for i, session_id in enumerate(sessions):
-        worker = workers[i % len(workers)]
-        futures.append(worker.archive.remote(run_id, session_id, i + 1, total_sessions))
-
-    # 3. 等待全部完成（超时 30 分钟，防止单 Worker 卡死）
+    # 2. 动态分发：Worker 完成一个 session 后再领下一个，避免大 session 排队
     import ray
-    raw_results = await asyncio.to_thread(ray.get, futures, timeout=1800)
+    total_sessions = len(sessions)
+    pending = list(enumerate(sessions))  # [(idx, session_id), ...]
+    active = {}  # future -> (worker, session_id, idx)
+    raw_results = []
+
+    # 初始填满：每个 Worker 先领一个
+    for worker in workers:
+        if not pending:
+            break
+        idx, session_id = pending.pop(0)
+        f = worker.archive.remote(run_id, session_id, idx + 1, total_sessions)
+        active[f] = (worker, session_id, idx)
+
+    # 循环等待：完成一个就补一个
+    while active:
+        done_futures, _ = await asyncio.to_thread(
+            ray.wait, list(active.keys()), num_returns=1, timeout=120,
+        )
+        if not done_futures:
+            logger.warning(
+                f"  run '{run_id}': 2 分钟内无 Worker 完成，"
+                f"剩余 {len(active)} 个 session 处理中..."
+            )
+            continue
+
+        for f in done_futures:
+            worker, session_id, idx = active.pop(f)
+            try:
+                result = await asyncio.to_thread(ray.get, f, timeout=10)
+                raw_results.append(result)
+            except Exception as e:
+                logger.error(f"  session [{idx + 1}/{total_sessions}] 失败: {e}")
+                # 清空剩余任务，中止该 run
+                for remaining_f in active:
+                    ray.cancel(remaining_f, force=True)
+                active.clear()
+                pending.clear()
+                raise
+
+            # 该 Worker 空闲，分配下一个 session
+            if pending:
+                next_idx, next_session = pending.pop(0)
+                nf = worker.archive.remote(
+                    run_id, next_session, next_idx + 1, total_sessions,
+                )
+                active[nf] = (worker, next_session, next_idx)
 
     t_workers = time.monotonic()
     logger.info(
-        f"  Workers 完成: {len(sessions)} 个 session, "
+        f"  Workers 完成: {total_sessions} 个 session, "
         f"耗时 {t_workers - t_start:.1f}s"
     )
 
-    # 4. 收集统计
+    # 3. 收集统计
     total_records = 0
     files = []
     for r in raw_results:
@@ -299,7 +337,7 @@ async def _archive_run(
         if r["file"] is not None:
             files.append(r["file"])
 
-    # 5. run 级 DELETE + UPDATE（协调器连接）
+    # 4. run 级 DELETE + UPDATE（协调器连接）
     archive_location = f"{storage.location_prefix}{safe_run}/"
     async with pool.connection() as conn:
         await _cleanup_run(conn, run_id, archive_location)

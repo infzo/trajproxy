@@ -183,6 +183,7 @@ class SessionArchiveWorker:
                 else open(file_path, "wt", encoding="utf-8")
             )
             record_count = 0
+            last_log_time = time.monotonic()
 
             try:
                 while True:
@@ -199,6 +200,16 @@ class SessionArchiveWorker:
                                 rec[k] = v.isoformat()
                         fh.write(json.dumps(rec, default=str) + "\n")
                         record_count += 1
+
+                    # 每 60 秒打印一次进度
+                    now = time.monotonic()
+                    if now - last_log_time >= 60:
+                        logger.info(
+                            f"Worker-{self.worker_id}: "
+                            f"session '{display or _NULL_SESSION_DIR}' "
+                            f"已导出 {record_count} 条..."
+                        )
+                        last_log_time = now
 
             finally:
                 fh.close()
