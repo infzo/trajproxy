@@ -370,10 +370,22 @@ async def _cleanup_run(conn, run_id: str, archive_location: str):
 
 
 async def _cleanup_empty_partitions(conn) -> int:
-    """归档完成后清理变空的分区"""
+    """归档完成后清理变空的分区（保留当月、下月和默认分区）"""
+    now = _utcnow()
+    next_month = now.month + 1 if now.month < 12 else 1
+    next_year = now.year if now.month < 12 else now.year + 1
+
+    protected = {
+        f"request_details_active_{now.strftime('%Y_%m')}",
+        f"request_details_active_{next_year:04d}_{next_month:02d}",
+        "request_details_active_default",
+    }
+
     partitions = await _find_partitions(conn)
     cleaned = 0
     for pn in partitions:
+        if pn in protected:
+            continue
         if await _is_partition_empty(conn, pn):
             try:
                 await conn.execute(
