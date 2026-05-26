@@ -17,6 +17,12 @@ import ray
 
 from traj_archiver.storage import create_storage
 
+# Ray 子进程不继承主进程的 basicConfig，需要独立配置
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
 logger = logging.getLogger(__name__)
 
 # 每批 FETCH 行数
@@ -75,6 +81,7 @@ class SessionArchiveWorker:
         safe_run = _safe_path(run_id)
         safe_session = _safe_path(display)
         suffix = ".jsonl.gz" if self.compress else ".jsonl"
+        logger.info(f"Worker-{self.worker_id}: 开始归档 session '{display}' (run={run_id})")
 
         run_dir = self.temp_root / safe_run
         run_dir.mkdir(parents=True, exist_ok=True)

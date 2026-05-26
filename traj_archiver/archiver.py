@@ -280,9 +280,9 @@ async def _archive_run(
         worker = workers[i % len(workers)]
         futures.append(worker.archive.remote(run_id, session_id))
 
-    # 3. 等待全部完成
+    # 3. 等待全部完成（超时 30 分钟，防止单 Worker 卡死）
     import ray
-    raw_results = await asyncio.to_thread(ray.get, futures)
+    raw_results = await asyncio.to_thread(ray.get, futures, timeout=1800)
 
     t_workers = time.monotonic()
     logger.info(
