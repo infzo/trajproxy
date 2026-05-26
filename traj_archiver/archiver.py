@@ -439,7 +439,7 @@ async def _archive_run(
         # 提交最后一个 session
         if current_fh is not None:
             current_fh.close()
-            _check_consumer_error()
+            error_holder.check()
             await upload_queue.put((current_path, f"{safe_run}/{current_safe_session}{suffix}"))
             session_count += 1
 
@@ -455,7 +455,7 @@ async def _archive_run(
         await asyncio.gather(*consumer_tasks, return_exceptions=True)
 
         # 检查消费者上传是否全部成功
-        _check_consumer_error()
+        error_holder.check()
 
         t_upload = time.monotonic()
         logger.info(
