@@ -4,6 +4,53 @@
 
 ---
 
+## [0.2.3] - 2026-05-26
+
+**类型**: 新功能 + Bug 修复
+
+### 新增功能
+- **CSB 专用存储后端**: 替代 boto3 对接华为云 CSB 网关，支持 token 认证 + 显式 AK/SK 配置
+- **Tokenizer 共享缓存**: 新增 `TokenizerCache`，相同 `tokenizer_path` 只加载一次，通过引用计数管理生命周期，Processor 淘汰/注销时自动释放
+- **归档分阶段耗时统计**: 归档过程分「读取+压缩 / 上传 / 删除」三阶段输出耗时日志
+- **Session 文件并发上传**: 归档上传改为并发执行，`upload_concurrency` 配置控制并发数
+- **GZIP 压缩可配置**: `archive.compress` 配置项控制归档文件是否 gzip 压缩
+- **S3 上传可用性验证**: 启动时验证 S3 上传可用性，确保上传成功后才删除 DB 记录
+- **S3 SSL 配置**: `verify_ssl` 配置项支持关闭 SSL 证书校验
+
+### Bug 修复
+- **CSB 网关 multipart 500**: 改用 `put_object` 替代 `upload_file`，避免 multipart 上传 500 错误
+- **CSB 网关 bucket 检查**: 跳过 bucket 存在性检查，避免网关不支持该 API 报错
+- **归档 OOM**: 改为流式读取 + 进度日志，防止大表归档内存溢出
+- **事件循环阻塞**: 上传阶段改用 `asyncio.to_thread` 不阻塞事件循环
+- **归档清理失效**: 改为 run 级批量操作，修复事务未提交导致清理失效
+- **archive_location 路径**: 存储完整绝对路径（`s3://bucket/prefix/run_id/`），E2E 测试适配文件夹路径格式
+- **Tokenizer 重复加载**: Processor 不再内部加载 tokenizer，改为由 `ProcessorManager` 通过 `TokenizerCache` 注入
+
+### 优化改进
+- **归档模块精简**: 去掉无意义抽象和死代码
+- **归档配置清理**: 移除独立的 stop 脚本
+
+### 配置更新
+- `archive.compress`: 控制是否 gzip 压缩（默认 true）
+- `archive.upload_concurrency`: 并发上传数
+- `storage.verify_ssl`: S3 SSL 证书校验开关
+- `storage.csb_*`: CSB 网关相关配置
+
+### 测试
+- 归档 E2E 测试适配 `archive_location` 文件夹路径格式，新增 `build_archive_file_path` 工具函数
+- 分区创建增加边界检查，已存在但边界不对时自动重建
+
+### 影响范围
+- `traj_proxy/proxy_core/tokenizer_cache.py` - 新增 Tokenizer 共享缓存
+- `traj_proxy/proxy_core/processor.py` - tokenizer 改为外部注入
+- `traj_proxy/proxy_core/processor_manager.py` - 集成 TokenizerCache，淘汰/注销时释放引用
+- `traj_archiver/scheduler.py` - 日志参数名修正
+- `traj_archiver/storage/` - CSB 存储后端
+- `traj_archiver/archiver.py` - 并发上传、流式读取、分阶段耗时
+- `tests/e2e/layers/archive/` - E2E 测试适配
+
+---
+
 ## [0.2.2] - 2026-05-21
 
 **类型**: Bug 修复 + 功能增强
