@@ -6,17 +6,22 @@
 
 ## [0.2.3] - 2026-05-26
 
-**类型**: 新功能 + Bug 修复
+**类型**: 重构 + Bug 修复
+
+### 重构
+- **归档改为 Ray Worker 并发架构**: 生产者-消费者 asyncio Queue 模式替换为 协调器 + Ray Actor Worker 架构。协调器只做查询和 cleanup，Worker 独立进程完成 读 DB → 写文件 → 上传 全流程
+- **动态分发**: Worker 完成一个 session 后立即领下一个，避免大 session 排队
+- **Worker 独立 DB 连接**: 每次 `archive()` 新建 `psycopg.connect()`，不共享连接池，互不干扰
+- **配置重命名**: `upload_concurrency` + `upload_queue_size` → `num_workers` (Ray Worker 进程数)
 
 ### 新增功能
 - **CSB 专用存储后端**: 替代 boto3 对接华为云 CSB 网关，支持 token 认证 + 显式 AK/SK 配置
 - **Tokenizer 共享缓存**: 新增 `TokenizerCache`，相同 `tokenizer_path` 只加载一次，通过引用计数管理生命周期，Processor 淘汰/注销时自动释放
-- **归档分阶段耗时统计**: 归档过程分「读取+压缩 / 上传 / 删除」三阶段输出耗时日志
-- **Session 文件并发上传**: 归档上传改为并发执行，`upload_concurrency` 配置控制并发数
 - **GZIP 压缩可配置**: `archive.compress` 配置项控制归档文件是否 gzip 压缩
 - **S3 上传可用性验证**: 启动时验证 S3 上传可用性，确保上传成功后才删除 DB 记录
 - **S3 SSL 配置**: `verify_ssl` 配置项支持关闭 SSL 证书校验
-- **归档生产者-消费者 Pipeline**: 利用 `ORDER BY session_id` 连续性，写完一个 session 立即上传，有界队列提供背压，磁盘占用从全量临时文件降至 `queue_size + 1` 个 session 文件
+- **Worker 进度心跳**: Ray `wait` 每 120 秒检查一次，防止 Worker 卡死；Worker 导出阶段每 60 秒打印进度
+- **Worker 分阶段耗时日志**: 每个 session 输出 导出/上传/总计 三阶段耗时 + 文件大小
 
 ### Bug 修复
 - **CSB 网关 multipart 500**: 改用 `put_object` 替代 `upload_file`，避免 multipart 上传 500 错误
@@ -33,12 +38,12 @@
 ### 优化改进
 - **归档模块精简**: 去掉无意义抽象和死代码
 - **归档配置清理**: 移除独立的 stop 脚本
-- **归档架构简化**: 移除 null-run 归档路径，run_id/session_id 为空不归档；`_check_consumer_error` 闭包改为 `_ConsumerError.check()` 方法；`_columns` 提升为模块级常量
+- **归档架构简化**: 移除 null-run 归档路径，run_id/session_id 为空不归档；`_columns` 提升为模块级常量
+- **协调器连接隔离**: 查询过期 run、清理 DB、清理分区各用独立连接，互不影响
 
 ### 配置更新
+- `archive.num_workers`: Ray Worker 进程数（替代 `upload_concurrency` + `upload_queue_size`）
 - `archive.compress`: 控制是否 gzip 压缩（默认 true）
-- `archive.upload_concurrency`: 并发上传数
-- `archive.upload_queue_size`: 上传队列深度，控制背压（默认 3）
 - `storage.verify_ssl`: S3 SSL 证书校验开关
 - `storage.csb_*`: CSB 网关相关配置
 
@@ -51,9 +56,12 @@
 - `traj_proxy/proxy_core/tokenizer_cache.py` - 新增 Tokenizer 共享缓存
 - `traj_proxy/proxy_core/processor.py` - tokenizer 改为外部注入
 - `traj_proxy/proxy_core/processor_manager.py` - 集成 TokenizerCache，淘汰/注销时释放引用
-- `traj_archiver/scheduler.py` - 日志参数名修正
+- `traj_archiver/__main__.py` - Ray 初始化 + Worker 创建 + shutdown
+- `traj_archiver/session_worker.py` - 新增 Ray Actor Worker（读 DB → 写文件 → 上传）
+- `traj_archiver/archiver.py` - 重构为协调器模式（动态分发 Worker）
+- `traj_archiver/scheduler.py` - 适配 Worker 参数
 - `traj_archiver/storage/` - CSB 存储后端
-- `traj_archiver/archiver.py` - 并发上传、流式读取、分阶段耗时
+- `configs/archiver.yaml` - `num_workers` 替代 `upload_concurrency` + `upload_queue_size`
 - `tests/e2e/layers/archive/` - E2E 测试适配
 
 ---

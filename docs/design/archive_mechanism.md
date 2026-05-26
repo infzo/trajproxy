@@ -2,7 +2,7 @@
 
 > **导航**: [文档中心](../README.md) | [数据库设计](database.md)
 
-版本: v2.1 | 最后更新: 2026-05-26
+版本: v2.2 | 最后更新: 2026-05-26
 
 ---
 
@@ -30,8 +30,8 @@
           │ 统计能力不受影响（元数据不动）│
           └──────────────┴──────────────┘
      ┌───────────────────┴───────────────────┐
-     │  生产者-消费者 pipeline，边导出边上传   │
-     │  磁盘占用 = (队列深度 + 1) × 单文件    │
+     │  Ray Worker 并发架构，session 粒度分发 │
+     │  协调器查询 → Worker 读/写/上传 → 清理 │
      └───────────────────────────────────────┘
 ```
 
@@ -50,14 +50,34 @@
   -- 零依赖 traj_archiver             -- 零依赖 traj_proxy
 ```
 
-### 2.2 表职责
+### 2.2 协调器-Worker 架构
+
+```
+协调器 (asyncio 主进程)                     Workers (Ray Actor 独立进程)
+  │                                          │
+  ├── 阶段1: 查询过期 run_id                  │
+  ├── 阶段2: 逐 run 查询 session 列表         │
+  │                                          │
+  ├── 将 session 动态分发给空闲 Worker ─────────→│ 读 DB → 写文件 → 上传
+  │   (完成一个就补一个，避免大 session 排队)    │ 返回 {"records", "file"}
+  │                                          │
+  ├── 阶段3: 收集 Worker 结果                 │
+  ├── 阶段4: run 级 DELETE + UPDATE          │
+  ├── 阶段5: 清理空分区                       │
+```
+
+**关键角色**:
+- **协调器**: 查询过期 run → 查询 session 列表 → 动态分发 → 收集结果 → 清理 DB，只做轻量操作
+- **Worker**: Ray Actor 独立进程，每次 `archive()` 新建 DB 连接，独立完成 读/写/上传 全流程
+
+### 2.3 表职责
 
 | 表名 | 职责 | 生命周期 | 关键字段 |
 |------|------|----------|----------|
 | request_metadata | 统计信息 + 分组键 | 永久保留 | run_id, session_id, archive_location |
 | request_details_active | 详情大字段 | 按月分区，过期 DELETE | unique_id (FK), created_at |
 
-### 2.3 archive_location 状态
+### 2.4 archive_location 状态
 
 ```
 写入时: archive_location = NULL (详情在 DB)
@@ -105,41 +125,42 @@ HAVING MAX(d.created_at) < $threshold
 
 **不归档边界**: run_id 为 NULL 或空字符串的记录不参与归档，永久保留在数据库中。
 
-### 4.2 导出: 生产者-消费者 pipeline
+### 4.2 导出: Ray Worker 并发架构
 
-采用 `asyncio.Queue` 实现生产者-消费者模式，**边导出边上传**，磁盘占用有界:
+采用 **协调器 + Ray Actor Worker** 模式，session 粒度并发处理:
 
 ```
-生产者 (主协程)                      消费者 (N 个上传协程)
-  │                                    │
-  ├── DECLARE CURSOR 流式读取          │
-  │                                    │
-  ├── FETCH 500 行 ←──── DB ────┐     │
-  │                              │     │
-  ├── 按 session_id 顺序写入      │     │
-  │   .jsonl.gz 文件              │     │
-  │                              │     │
-  ├── session 切换时:             │     │
-  │   关闭文件                    │     │
-  │   queue.put((path, key)) ─────────→│ 取出 (path, key)
-  │   (队列满则阻塞，提供背压)    │     │ ├── asyncio.to_thread(upload)
-  │                              │     │ ├── 删除本地临时文件
-  │                              │     │ ├── 记录 location
-  │                              │     │
-  ├── CLOSE CURSOR               │     │
-  ├── queue.put(None) ─────────────────→│ 收到 None, 退出
-  │                              │     │
-  └── await gather(consumers)    │     │
-                                 │     │
-  磁盘占用 ≤ (queue_size + 1) 个文件   │
+协调器 (__main__.py + archiver.py)          Workers (session_worker.py × N)
+  │                                          │
+  ├── 1. 查询过期 run_id                      │
+  ├── 2. 逐 run 查询 session 列表             │
+  │                                          │
+  ├── 初始填满: 每个 Worker 领一个 session ────→│ psycopg.connect() (新建连接)
+  │                                          │── DECLARE CURSOR 流式读取
+  │                                          │── 按 batch FETCH 500 行
+  │                                          │── 写 .jsonl.gz 文件
+  │                                          │── storage.upload() → 返回结果
+  │                                          │
+  ├── ray.wait() 等待第一个完成               │
+  │                                          │
+  ├── 该 Worker 空闲 → 分配下一个 session ─────→│ 同上，处理下一个 session
+  │   (动态分发，避免大 session 排队)           │
+  │                                          │
+  ├── 全部 session 完成                       │
+  ├── 3. 收集统计 (records, files)            │
+  ├── 4. run 级 DELETE + UPDATE              │
+  └── 5. 清理空分区                           │
 ```
 
 **关键设计**:
-- 服务端游标 (DECLARE CURSOR) 避免一次性加载全部数据到内存
-- `ORDER BY session_id, created_at` 保证 session 连续，写完一个 session 立即提交上传
-- 有界队列 (`maxsize=upload_queue_size`) 提供背压，防止磁盘被打满
-- `_ConsumerError` 容器: 消费者上传失败时存下异常继续消费，避免生产者死锁
-- 多消费者协程: `upload_concurrency` 控制并发上传数
+- **协调器-Worker 分离**: 协调器只做查询和 cleanup（轻量），Worker 独立进程完成 读/写/上传 全流程
+- **动态分发**: Worker 完成一个 session 后立即领下一个，避免大 session 占用 Worker 导致小 session 排队
+- **独立 DB 连接**: Worker 每次 `archive()` 新建 `psycopg.connect()`，不共享连接池，互不干扰
+- **storage 常驻复用**: Worker `__init__` 时创建 storage 实例，Actor 生命周期内复用
+- **服务端游标**: DECLARE CURSOR 避免一次性加载全部数据到内存
+- **NULL session 处理**: `session_id IS NULL` 使用独立 SQL 路径
+- **心跳超时**: `ray.wait` 每 120 秒检查一次，防止 Worker 卡死
+- **快速失败**: Worker 失败时 `ray.cancel` 清空剩余任务，中止该 run
 
 ### 4.3 清理: DELETE + UPDATE 同事务
 
@@ -177,8 +198,8 @@ async with conn.transaction():
 - 崩溃恢复: 文件先上传，未提交的事务回滚后重试
 
 ### 磁盘保护
-- 有界队列限制磁盘上同时存在的临时文件数
-- 磁盘占用 ≤ (upload_queue_size + 1) × 单个 session 文件大小
+- 每个 Worker 同一时刻只处理一个 session 文件，磁盘占用 ≤ num_workers × 单个 session 文件大小
+- 上传成功后立即删除本地临时文件
 
 ---
 
@@ -190,11 +211,12 @@ async with conn.transaction():
 archive:
   poll_interval: 3600   # 轮询间隔 (秒, 默认 1 小时)
   retention_days: 7     # 留存天数
+  num_workers: 1        # Ray Worker 进程数, 默认 1 (顺序)
 ```
 
 主循环: `execute() -> sleep(poll_interval) -> execute()`
 失败: 等 5 分钟重试
-状态查询: `get_status()` 返回运行状态和统计
+状态查询: `get_status()` 返回运行状态、Worker 数量和统计
 
 ---
 
@@ -252,8 +274,7 @@ database:
 archive:
   retention_days: 30
   poll_interval: 3600
-  upload_concurrency: 1       # session 文件并发上传数
-  upload_queue_size: 3        # 上传队列深度（backpressure），0=无限制
+  num_workers: 1              # Ray Worker 进程数，默认 1（顺序）
   compress: true              # 是否 gzip 压缩
   storage_path: "/data/archives"
   local_temp_path: "/tmp/archives"
@@ -276,8 +297,9 @@ archive:
 
 | 文件 | 职责 |
 |------|------|
-| `traj_archiver/__main__.py` | 进程入口 |
-| `traj_archiver/archiver.py` | 归档执行器 (run 判定、生产者-消费者 pipeline、DELETE+UPDATE) |
+| `traj_archiver/__main__.py` | 进程入口，Ray 初始化 + Worker 创建 + 调度器启动 |
+| `traj_archiver/archiver.py` | 协调器 (run 判定、动态分发 Worker、DELETE+UPDATE) |
+| `traj_archiver/session_worker.py` | Ray Actor Worker (读 DB → 写文件 → 上传) |
 | `traj_archiver/scheduler.py` | 轮询调度器 |
 | `traj_archiver/storage.py` | 存储工厂 (本地/S3/CSB 自动选择) |
 | `traj_archiver/s3_storage.py` | S3 存储实现 (boto3) |
@@ -288,17 +310,19 @@ archive:
 | `scripts/start_docker_archiver.sh` | 启停脚本 |
 | `tests/e2e/layers/archive/` | E2E 测试 |
 
-## 10. 与 v1 的差异
+## 10. 版本演进
 
-| 维度 | v1 (原设计) | v2 (当前) |
-|------|-----------|----------|
-| 架构 | 嵌入 traj_proxy | 独立 traj_archiver 进程 |
-| 调度 | cron (croniter) | 轮询 (poll_interval) |
-| 存储 | 仅本地 | 本地 + S3 + CSB 三模式 |
-| 归档粒度 | 月分区 (DETACH+DROP) | run_id (DELETE+UPDATE) |
-| 文件格式 | YYYY_MM.jsonl.gz | {run_id}/{session_id}.jsonl.gz |
-| 导出模式 | 全量写完再上传 | 生产者-消费者 pipeline 边导出边上传 |
-| 磁盘保护 | 无 (可能打爆磁盘) | 有界队列，磁盘占用可控 |
-| 配置 | config.yaml archive 段 | 独立 archiver.yaml |
-| CLI | scripts/archive_records.py | 已删除，python -m traj_archiver |
-| 留存期 | 30 天固定 | 7/10/30 天灵活配置 |
+| 维度 | v1 (原设计) | v2.0 (独立进程) | v2.2 (当前: Ray Worker) |
+|------|-----------|----------|----------|
+| 架构 | 嵌入 traj_proxy | 独立 traj_archiver 进程 | 独立进程 + Ray Actor Workers |
+| 调度 | cron (croniter) | 轮询 (poll_interval) | 轮询 (poll_interval) |
+| 存储 | 仅本地 | 本地 + S3 + CSB 三模式 | 本地 + S3 + CSB 三模式 |
+| 归档粒度 | 月分区 (DETACH+DROP) | run_id (DELETE+UPDATE) | run_id (DELETE+UPDATE) |
+| 文件格式 | YYYY_MM.jsonl.gz | {run_id}/{session_id}.jsonl.gz | {run_id}/{session_id}.jsonl.gz |
+| 导出模式 | 全量写完再上传 | 生产者-消费者 pipeline | Ray Worker 并发，动态分发 |
+| 并发控制 | 无 | asyncio Queue (upload_concurrency) | Ray Actor (num_workers) |
+| 磁盘保护 | 无 (可能打爆磁盘) | 有界队列 | Worker 同一时刻只处理一个 session |
+| DB 连接 | 共享连接池 | 共享连接池 | 协调器用连接池，Worker 每次新建 |
+| 配置 | config.yaml archive 段 | 独立 archiver.yaml | 独立 archiver.yaml |
+| CLI | scripts/archive_records.py | python -m traj_archiver | python -m traj_archiver |
+| 留存期 | 30 天固定 | 7/10/30 天灵活配置 | 7/10/30 天灵活配置 |
