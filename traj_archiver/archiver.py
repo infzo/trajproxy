@@ -17,7 +17,7 @@ import time
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from psycopg.rows import dict_row
 
@@ -358,22 +358,21 @@ async def _archive_run(
             if safe_session not in session_files:
                 if len(session_files) >= MAX_OPEN_FILES:
                     old_key = next(iter(session_files))
-                    old_fh, old_path, old_ids = session_files.pop(old_key)
+                    old_fh, old_path = session_files.pop(old_key)
                     old_fh.close()
-                    pending_uploads.append((old_path, f"{safe_run}/{old_key}{suffix}", old_ids))
+                    pending_uploads.append((old_path, f"{safe_run}/{old_key}{suffix}"))
 
                 run_dir = temp_root / safe_run
                 run_dir.mkdir(parents=True, exist_ok=True)
                 file_path = run_dir / f"{safe_session}{suffix}"
                 fh = gzip.open(file_path, "wt", encoding="utf-8") if compress else open(file_path, "wt", encoding="utf-8")
-                session_files[safe_session] = (fh, file_path, [])
+                session_files[safe_session] = (fh, file_path)
 
-            fh, _, uid_list = session_files[safe_session]
+            fh, _ = session_files[safe_session]
             for k, v in rec.items():
                 if isinstance(v, datetime):
                     rec[k] = v.isoformat()
             fh.write(json.dumps(rec, default=str) + "\n")
-            uid_list.append(rec["unique_id"])
             record_count += 1
 
         logger.info(f"  已处理 {record_count} 条记录...")
@@ -381,43 +380,38 @@ async def _archive_run(
     async with conn.cursor() as cur:
         await cur.execute(f'CLOSE "{cursor_name}"')
 
+    # 显式提交读事务，否则后续 cleanup 的 conn.transaction() 只会创建 SAVEPOINT，
+    # 外层事务不提交，连接池回收时会 ROLLBACK 所有变更
+    await conn.commit()
+
     if record_count == 0:
         logger.info(f"  run '{run_id}' 无记录，跳过")
         return {"sessions": 0, "records": 0, "files": []}
 
     # 关闭剩余文件，加入待上传队列
-    for safe_session, (fh, file_path, uid_list) in session_files.items():
+    for safe_session, (fh, file_path) in session_files.items():
         fh.close()
-        pending_uploads.append((file_path, f"{safe_run}/{safe_session}{suffix}", uid_list))
+        pending_uploads.append((file_path, f"{safe_run}/{safe_session}{suffix}"))
 
     t_write = time.monotonic()
     logger.info(f"  写入完成: {len(pending_uploads)} 个文件, {record_count} 条记录, 耗时 {t_write - t_start:.1f}s")
 
     # ---- 上传阶段：在线程池执行，不阻塞事件循环 ----
-    upload_results = await asyncio.to_thread(
+    uploaded_files = await asyncio.to_thread(
         _upload_pending, storage, pending_uploads, upload_concurrency
     )
-
-    archive_map: Dict[str, str] = {}
-    uploaded_files = []
-    for loc, uid_list in upload_results:
-        for uid in uid_list:
-            archive_map[uid] = loc
-        uploaded_files.append(loc)
 
     t_upload = time.monotonic()
     logger.info(f"  上传完成: {len(uploaded_files)} 个文件, 耗时 {t_upload - t_write:.1f}s")
 
-    # ---- 删除阶段：全部上传成功后才执行 ----
-    uid_pairs = list(archive_map.items())
-    for i in range(0, len(uid_pairs), BATCH_SIZE):
-        await _delete_and_update(conn, uid_pairs[i:i + BATCH_SIZE])
+    # ---- 清理阶段：run 级 DELETE + UPDATE ----
+    await _cleanup_run(conn, run_id, f"{safe_run}/")
 
     t_delete = time.monotonic()
     logger.info(
         f"  归档 run '{run_id}' 完成: {len(uploaded_files)} 个文件, {record_count} 条记录, "
         f"总耗时 {t_delete - t_start:.1f}s "
-        f"(读取+压缩 {t_write - t_start:.1f}s / 上传 {t_upload - t_write:.1f}s / 删除 {t_delete - t_upload:.1f}s)"
+        f"(读取+压缩 {t_write - t_start:.1f}s / 上传 {t_upload - t_write:.1f}s / 清理 {t_delete - t_upload:.1f}s)"
     )
     return {"sessions": len(uploaded_files), "records": record_count, "files": uploaded_files}
 
@@ -450,10 +444,13 @@ async def _archive_null_session(
     if not records:
         return {"records": 0, "file": None}
 
+    # 提交读事务，让后续 cleanup 在独立事务里执行
+    await conn.commit()
+
     file_path = temp_root / f"{safe_session}{suffix}"
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    uids = []
+    record_count = 0
     opener = gzip.open if compress else open
     with opener(file_path, "wt", encoding="utf-8") as f:
         for rec in records:
@@ -462,29 +459,28 @@ async def _archive_null_session(
                 if isinstance(val, datetime):
                     rec[key] = val.isoformat()
             f.write(json.dumps(rec, default=str) + "\n")
-            uids.append(rec["unique_id"])
+            record_count += 1
 
     key = f"_unknown/{safe_session}{suffix}"
     loc = _finalize_file(storage, file_path, key)
 
-    # DELETE + UPDATE
-    await _delete_and_update(conn, [(uid, loc) for uid in uids])
+    await _cleanup_null_session(conn, session_id)
 
-    logger.info(f"  归档 NULL-run session '{session_id}': {len(uids)} 条记录")
-    return {"records": len(uids), "file": loc}
+    logger.info(f"  归档 NULL-run session '{session_id}': {record_count} 条记录")
+    return {"records": record_count, "file": loc}
 
 
 def _upload_pending(storage, pending_uploads, concurrency):
-    """并发上传待处理文件，返回 [(location, uid_list)]"""
+    """并发上传待处理文件，返回 [location]"""
     if not pending_uploads:
         return []
 
     if concurrency <= 1:
         results = []
-        for file_path, key, uid_list in pending_uploads:
+        for file_path, key in pending_uploads:
             loc = storage.upload(file_path, key)
             file_path.unlink(missing_ok=True)
-            results.append((loc, uid_list))
+            results.append(loc)
         return results
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -497,12 +493,12 @@ def _upload_pending(storage, pending_uploads, concurrency):
     results = []
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = {}
-        for file_path, key, uid_list in pending_uploads:
+        for file_path, key in pending_uploads:
             f = pool.submit(_upload_one, file_path, key)
-            futures[f] = uid_list
+            futures[f] = key
 
         for f in as_completed(futures):
-            results.append((f.result(), futures[f]))
+            results.append(f.result())
 
     return results
 
@@ -514,22 +510,38 @@ def _finalize_file(storage, local_path: Path, key: str) -> str:
     return loc
 
 
-async def _delete_and_update(conn, uid_loc_pairs: List[Tuple[str, str]]):
-    """DELETE + UPDATE metadata 在同一事务内"""
-    if not uid_loc_pairs:
-        return
-
-    uids = [p[0] for p in uid_loc_pairs]
-
+async def _cleanup_run(conn, run_id: str, archive_location: str):
+    """按 run_id 粒度清理：DELETE details + UPDATE metadata"""
     async with conn.transaction():
         await conn.execute(
-            "DELETE FROM request_details_active WHERE unique_id = ANY(%s)",
-            (uids,),
+            "DELETE FROM request_details_active "
+            "WHERE unique_id IN ("
+            "  SELECT unique_id FROM request_metadata WHERE run_id = %s"
+            ")",
+            (run_id,),
         )
-        for uid, loc in uid_loc_pairs:
-            await conn.execute(
-                """UPDATE request_metadata
-                   SET archive_location = %s, archived_at = NOW()
-                   WHERE unique_id = %s""",
-                (loc, uid),
-            )
+        await conn.execute(
+            "UPDATE request_metadata "
+            "SET archive_location = %s, archived_at = NOW() "
+            "WHERE run_id = %s AND archive_location IS NULL",
+            (archive_location, run_id),
+        )
+
+
+async def _cleanup_null_session(conn, session_id: str):
+    """清理单个 null-run session"""
+    async with conn.transaction():
+        await conn.execute(
+            "DELETE FROM request_details_active "
+            "WHERE unique_id IN ("
+            "  SELECT unique_id FROM request_metadata "
+            "  WHERE session_id = %s AND run_id IS NULL"
+            ")",
+            (session_id,),
+        )
+        await conn.execute(
+            "UPDATE request_metadata "
+            "SET archive_location = '_unknown/', archived_at = NOW() "
+            "WHERE session_id = %s AND run_id IS NULL AND archive_location IS NULL",
+            (session_id,),
+        )
