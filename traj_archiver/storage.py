@@ -28,6 +28,10 @@ class LocalStorage:
         self.storage_path.mkdir(parents=True, exist_ok=True)
         logger.info(f"LocalStorage 初始化: path={self.storage_path}")
 
+    @property
+    def location_prefix(self) -> str:
+        return f"{self.storage_path}/"
+
     def upload(self, local_path: Path, key: str) -> str:
         dest = self.storage_path / key
         dest.parent.mkdir(parents=True, exist_ok=True)

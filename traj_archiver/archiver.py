@@ -405,7 +405,8 @@ async def _archive_run(
     logger.info(f"  上传完成: {len(uploaded_files)} 个文件, 耗时 {t_upload - t_write:.1f}s")
 
     # ---- 清理阶段：run 级 DELETE + UPDATE ----
-    await _cleanup_run(conn, run_id, f"{safe_run}/")
+    archive_location = f"{storage.location_prefix}{safe_run}/"
+    await _cleanup_run(conn, run_id, archive_location)
 
     t_delete = time.monotonic()
     logger.info(
@@ -464,7 +465,7 @@ async def _archive_null_session(
     key = f"_unknown/{safe_session}{suffix}"
     loc = _finalize_file(storage, file_path, key)
 
-    await _cleanup_null_session(conn, session_id)
+    await _cleanup_null_session(conn, session_id, f"{storage.location_prefix}_unknown/")
 
     logger.info(f"  归档 NULL-run session '{session_id}': {record_count} 条记录")
     return {"records": record_count, "file": loc}
@@ -528,7 +529,7 @@ async def _cleanup_run(conn, run_id: str, archive_location: str):
         )
 
 
-async def _cleanup_null_session(conn, session_id: str):
+async def _cleanup_null_session(conn, session_id: str, archive_location: str):
     """清理单个 null-run session"""
     async with conn.transaction():
         await conn.execute(
@@ -541,7 +542,7 @@ async def _cleanup_null_session(conn, session_id: str):
         )
         await conn.execute(
             "UPDATE request_metadata "
-            "SET archive_location = '_unknown/', archived_at = NOW() "
+            "SET archive_location = %s, archived_at = NOW() "
             "WHERE session_id = %s AND run_id IS NULL AND archive_location IS NULL",
-            (session_id,),
+            (archive_location, session_id),
         )

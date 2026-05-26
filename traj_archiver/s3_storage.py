@@ -56,6 +56,10 @@ class S3Storage:
             except Exception as e:
                 logger.warning(f"创建 bucket 失败（可能已存在）: {e}")
 
+    @property
+    def location_prefix(self) -> str:
+        return f"s3://{self.bucket}/{self.prefix}"
+
     def upload(self, local_path: Path, key: str) -> str:
         full_key = f"{self.prefix}{key}"
         self.client.upload_file(str(local_path), self.bucket, full_key)

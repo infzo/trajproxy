@@ -102,6 +102,10 @@ class CSBStorage:
             raise RuntimeError(f"CSB bucket 认证失败: {result.get('msg')}")
         logger.info(f"CSB bucket 认证通过: {self.bucket}")
 
+    @property
+    def location_prefix(self) -> str:
+        return f"csb://{self.bucket}/{self.prefix}"
+
     def _encode_key(self, key: str) -> str:
         """base64 url-safe 编码对象键"""
         return base64.urlsafe_b64encode(key.encode("utf-8")).decode("utf-8")
