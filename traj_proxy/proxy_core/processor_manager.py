@@ -21,6 +21,7 @@ import traceback
 from traj_proxy.utils import utcnow
 
 from traj_proxy.proxy_core.processor import Processor
+from traj_proxy.proxy_core.tokenizer_cache import TokenizerCache
 from traj_proxy.proxy_core.infer_client import InferClient
 from traj_proxy.store.database_manager import DatabaseManager
 from traj_proxy.store.model_repository import ModelRepository
@@ -77,6 +78,9 @@ class ProcessorManager:
         # 防止并发加载同一模型的锁
         self._load_lock = asyncio.Lock()
 
+        # Tokenizer 共享缓存
+        self._tokenizer_cache = TokenizerCache()
+
         # 模型注册表（供 ModelSynchronizer 使用）
         self.model_registry = ModelRepository(db_manager.pool)
         self.request_repository = RequestRepository(db_manager.pool)
@@ -131,6 +135,11 @@ class ProcessorManager:
         if token_in_token_out and not tokenizer_path:
             raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
 
+        # 从共享缓存获取 tokenizer（相同 path 只加载一次）
+        shared_tokenizer = None
+        if token_in_token_out and tokenizer_path:
+            shared_tokenizer = self._tokenizer_cache.get_or_load(tokenizer_path)
+
         # 获取 InferClient 超时配置
         infer_config = get_infer_client_config()
 
@@ -155,7 +164,8 @@ class ProcessorManager:
             config=config,
             tool_parser=tool_parser,
             reasoning_parser=reasoning_parser,
-            updated_at=updated_at
+            updated_at=updated_at,
+            tokenizer=shared_tokenizer
         )
 
         return processor
@@ -170,7 +180,10 @@ class ProcessorManager:
     def _evict_one(self) -> None:
         """淘汰最久未使用的 Processor"""
         if self._processor_cache:
-            evicted_key, _ = self._processor_cache.popitem(last=False)
+            evicted_key, evicted = self._processor_cache.popitem(last=False)
+            # 释放 tokenizer 引用
+            if evicted.tokenizer_path and evicted.token_in_token_out:
+                self._tokenizer_cache.release(evicted.tokenizer_path)
             logger.info(
                 f"LRU 淘汰: run_id={evicted_key[0]}, model_name={evicted_key[1]}, "
                 f"cache_size={len(self._processor_cache)}"
@@ -286,7 +299,9 @@ class ProcessorManager:
             key: (run_id, model_name) 元组
         """
         self._dynamic_configs.pop(key, None)
-        self._processor_cache.pop(key, None)
+        removed = self._processor_cache.pop(key, None)
+        if removed and removed.tokenizer_path and removed.token_in_token_out:
+            self._tokenizer_cache.release(removed.tokenizer_path)
         logger.info(f"模型已注销: run_id={key[0]}, model_name={key[1]}")
 
     async def full_sync(self, db_models: List[ModelConfig]):
@@ -319,14 +334,18 @@ class ProcessorManager:
                     existing.reasoning_parser != config.reasoning_parser):
                     # 配置变更，更新 config 并淘汰旧 Processor
                     self._dynamic_configs[key] = config
-                    self._processor_cache.pop(key, None)
+                    old = self._processor_cache.pop(key, None)
+                    if old and old.tokenizer_path and old.token_in_token_out:
+                        self._tokenizer_cache.release(old.tokenizer_path)
                     logger.info(f"全量同步 - 配置变更，缓存已失效: {key}")
 
         # 删除不在数据库中的模型
         to_remove = local_model_keys - db_model_keys
         for key in to_remove:
             self._dynamic_configs.pop(key, None)
-            self._processor_cache.pop(key, None)
+            old = self._processor_cache.pop(key, None)
+            if old and old.tokenizer_path and old.token_in_token_out:
+                self._tokenizer_cache.release(old.tokenizer_path)
             logger.info(f"全量同步 - 已删除: run_id={key[0]}, model_name={key[1]}")
 
     # ========== 公开注册接口 ==========
@@ -495,7 +514,9 @@ class ProcessorManager:
         # 优先从 dynamic_configs 删除
         if key in self._dynamic_configs:
             del self._dynamic_configs[key]
-            self._processor_cache.pop(key, None)
+            removed = self._processor_cache.pop(key, None)
+            if removed and removed.tokenizer_path and removed.token_in_token_out:
+                self._tokenizer_cache.release(removed.tokenizer_path)
             logger.info(f"[{model_name}] 删除动态模型成功: run_id={run_id}")
             deleted = True
         elif key in self._config_configs:

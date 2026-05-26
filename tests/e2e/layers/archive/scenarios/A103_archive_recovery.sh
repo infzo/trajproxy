@@ -41,7 +41,10 @@ sleep 2
 ARCHIVE_LOCATION=$(get_archive_location "${TEST_SESSION}")
 log_info "archive_location: ${ARCHIVE_LOCATION}"
 
-if ! check_archive_file_exists "${ARCHIVE_LOCATION}"; then
+# archive_location 是文件夹路径，拼接 session 文件名得到实际文件
+ARCHIVE_FILE=$(build_archive_file_path "${ARCHIVE_LOCATION}" "${TEST_SESSION}")
+
+if ! check_archive_file_exists "${ARCHIVE_FILE}"; then
     log_error "归档文件不存在，无法继续测试"
     print_summary
     exit 1
@@ -51,7 +54,7 @@ log_success "归档文件存在"
 # 步骤 2: 读取并验证 GZIP + JSON 格式
 log_step "步骤 2: 验证 GZIP + JSON 格式"
 
-FIRST_LINE=$(read_archive_first_line "${ARCHIVE_LOCATION}")
+FIRST_LINE=$(read_archive_first_line "${ARCHIVE_FILE}")
 
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 if [ -n "$FIRST_LINE" ]; then
@@ -90,7 +93,7 @@ done
 
 # 步骤 4: 验证文件记录数
 log_step "步骤 4: 验证归档文件记录数"
-verify_archive_file "${ARCHIVE_LOCATION}" 5
+verify_archive_file "${ARCHIVE_FILE}" 5
 
 # 步骤 5: 验证 unique_id 与数据库一致
 log_step "步骤 5: 验证 unique_id 与数据库一致"
@@ -112,13 +115,12 @@ else
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
-# 步骤 6: 验证 archive_location 格式
+# 步骤 6: 验证 archive_location 格式（文件夹路径，含 run_id）
 log_step "步骤 6: 验证 archive_location 格式"
 
-EXPECTED_PATTERN="${TEST_RUN}/${TEST_SESSION}"
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
-if echo "$ARCHIVE_LOCATION" | grep -q "${EXPECTED_PATTERN}"; then
-    log_success "archive_location 格式: {run_id}/{session_id}.jsonl.gz"
+if echo "$ARCHIVE_LOCATION" | grep -q "${TEST_RUN}"; then
+    log_success "archive_location 格式正确: 包含 ${TEST_RUN}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "archive_location 格式不正确: ${ARCHIVE_LOCATION}"

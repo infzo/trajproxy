@@ -79,11 +79,10 @@ else
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
-# 验证 archive_location 格式
+# 验证 archive_location 格式（文件夹路径，含 run_id）
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
-EXPECTED_FILE="${TEST_RUN}/${TEST_SESSION}.jsonl.gz"
-if echo "$ARCHIVE_LOCATION" | grep -q "${EXPECTED_FILE}"; then
-    log_success "archive_location 格式正确: {run_id}/{session_id}.jsonl.gz"
+if echo "$ARCHIVE_LOCATION" | grep -q "${TEST_RUN}"; then
+    log_success "archive_location 格式正确: 包含 ${TEST_RUN}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "archive_location 格式错误: ${ARCHIVE_LOCATION}"
@@ -104,7 +103,8 @@ fi
 # 步骤 5: 验证归档文件
 log_step "步骤 5: 验证归档文件"
 
-if [ -n "$ARCHIVE_LOCATION" ] && check_archive_file_exists "${ARCHIVE_LOCATION}"; then
+ARCHIVE_FILE=$(build_archive_file_path "${ARCHIVE_LOCATION}" "${TEST_SESSION}")
+if [ -n "$ARCHIVE_LOCATION" ] && check_archive_file_exists "${ARCHIVE_FILE}"; then
     log_success "归档文件可由存储后端读取"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else

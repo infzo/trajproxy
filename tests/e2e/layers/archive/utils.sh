@@ -37,7 +37,7 @@ db_execute() {
 # 测试数据生成函数
 # ========================================
 
-# 创建指定月份的分区
+# 创建指定月份的分区（已存在时检查边界，不对则重建）
 create_partition() {
     local year_month="$1"  # 格式: YYYY_MM
     local year="${year_month:0:4}"
@@ -54,6 +54,33 @@ create_partition() {
     local next_month_start="${next_year}-$(printf '%02d' $next_month)-01"
 
     local partition_name="request_details_active_${year_month}"
+
+    # 检查分区是否已存在
+    local exists=$(db_query "
+        SELECT COUNT(*) FROM pg_class
+        WHERE relname = '${partition_name}'
+        AND relnamespace = 'public'::regnamespace;
+    ")
+
+    if [ "${exists:-0}" -gt 0 ]; then
+        # 已存在：检查边界是否正确
+        local actual_range=$(db_query "
+            SELECT pg_get_expr(relpartbound, oid)
+            FROM pg_class
+            WHERE relname = '${partition_name}'
+            AND relnamespace = 'public'::regnamespace;
+        ")
+        local expected_lower="('${month_start}'"
+        if echo "$actual_range" | grep -q "$expected_lower"; then
+            log_info "分区 ${partition_name} 已存在且边界正确"
+            return 0
+        fi
+
+        # 边界不对，重建
+        log_info "分区 ${partition_name} 边界不正确，重建中..."
+        db_execute "ALTER TABLE public.request_details_active DETACH PARTITION public.${partition_name};" 2>/dev/null
+        db_execute "DROP TABLE IF EXISTS public.${partition_name};"
+    fi
 
     db_execute "
         CREATE TABLE IF NOT EXISTS public.${partition_name}
@@ -273,6 +300,18 @@ check_archive_file_exists() {
     fi
 
     return 1
+}
+
+# 根据文件夹级 archive_location 拼接出 session 归档文件的完整路径
+# archive_location 形如 "s3://bucket/prefix/run_id/" 或 "run_id/"
+# 返回形如 "s3://bucket/prefix/run_id/session.jsonl.gz" 或 "run_id/session.jsonl.gz"
+build_archive_file_path() {
+    local archive_location="$1"
+    local session_id="$2"
+    local safe_session=$(echo "$session_id" | tr ',/' '__')
+    local suffix=".jsonl.gz"
+
+    echo "${archive_location}${safe_session}${suffix}"
 }
 
 # 验证归档文件内容（自动识别本地 / S3，支持多容器 fallback）

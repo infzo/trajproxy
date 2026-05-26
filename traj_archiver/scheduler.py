@@ -55,7 +55,7 @@ class ArchiveScheduler:
         self._running = True
         self._started_at = _utcnow()
         self._task = asyncio.create_task(self._run_loop())
-        logger.info(f"ArchiveScheduler 已启动 (interval={self.poll_interval}s, retention={self.retention_days}d)")
+        logger.info(f"ArchiveScheduler 已启动 (poll_interval={self.poll_interval}s, retention_days={self.retention_days}d)")
 
     async def stop(self):
         if not self._running:

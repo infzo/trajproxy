@@ -47,7 +47,7 @@ sleep 1
 REMAINING=$(get_partition_record_count "request_details_active_${MONTH_LAST}")
 assert_eq "0" "$REMAINING" "分区记录数应为 0（已全部 DELETE）"
 
-# 步骤 5: 验证 archive_location 格式
+# 步骤 5: 验证 archive_location 格式（文件夹路径，含 run_id）
 log_step "步骤 5: 验证 archive_location 格式"
 
 ARCHIVED_COUNT=$(get_archived_record_count "${TEST_SESSION}")
@@ -57,9 +57,8 @@ ARCHIVE_LOCATION=$(get_archive_location "${TEST_SESSION}")
 log_info "archive_location: ${ARCHIVE_LOCATION}"
 
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
-EXPECTED_FILE="${TEST_RUN}/${TEST_SESSION}.jsonl.gz"
-if echo "$ARCHIVE_LOCATION" | grep -q "${EXPECTED_FILE}"; then
-    log_success "archive_location 格式正确: 包含 ${EXPECTED_FILE}"
+if echo "$ARCHIVE_LOCATION" | grep -q "${TEST_RUN}"; then
+    log_success "archive_location 格式正确: 包含 ${TEST_RUN}"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "archive_location 格式错误: ${ARCHIVE_LOCATION}"
@@ -69,7 +68,10 @@ fi
 # 步骤 6: 验证归档文件存在且内容正确
 log_step "步骤 6: 验证归档文件"
 
-if check_archive_file_exists "${ARCHIVE_LOCATION}"; then
+# archive_location 是文件夹路径，拼接 session 文件名得到实际文件
+ARCHIVE_FILE=$(build_archive_file_path "${ARCHIVE_LOCATION}" "${TEST_SESSION}")
+
+if check_archive_file_exists "${ARCHIVE_FILE}"; then
     log_success "归档文件存在"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
@@ -78,7 +80,7 @@ else
 fi
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 
-verify_archive_file "${ARCHIVE_LOCATION}" 10
+verify_archive_file "${ARCHIVE_FILE}" 10
 
 # 步骤 7: 清理
 log_step "步骤 7: 清理测试数据"

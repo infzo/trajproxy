@@ -10,8 +10,6 @@ from datetime import datetime
 import traceback
 from pathlib import Path
 
-from transformers import AutoTokenizer
-
 from traj_proxy.proxy_core.context import ProcessContext
 from traj_proxy.proxy_core.pipeline.base import BasePipeline
 from traj_proxy.proxy_core.pipeline.direct_pipeline import DirectPipeline
@@ -53,7 +51,8 @@ class Processor:
         run_id: str = "",
         tool_parser: str = "",
         reasoning_parser: str = "",
-        updated_at: Optional[datetime] = None
+        updated_at: Optional[datetime] = None,
+        tokenizer=None
     ):
         """初始化 Processor
 
@@ -67,6 +66,7 @@ class Processor:
             tool_parser: Tool parser 名称
             reasoning_parser: Reasoning parser 名称
             updated_at: 模型注册/更新时间
+            tokenizer: Tokenizer 实例（由 ProcessorManager 通过 TokenizerCache 提供）
         """
         self.model = model
         self.run_id = run_id
@@ -76,6 +76,7 @@ class Processor:
         self.tool_parser_name = tool_parser
         self.updated_at = updated_at
         self.reasoning_parser_name = reasoning_parser
+        self._tokenizer = tokenizer
 
         # 从传入的配置读取 token_in_token_out
         if config:
@@ -99,10 +100,9 @@ class Processor:
 
     def _create_token_pipeline(self) -> BasePipeline:
         """创建 Token 模式 Pipeline 及其依赖"""
-        # 加载 tokenizer
-        if not self.tokenizer_path:
-            raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
-        tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_path, trust_remote_code=True)
+        if self._tokenizer is None:
+            raise ValueError("token_in_token_out=True 时，tokenizer 必须由 ProcessorManager 通过 TokenizerCache 提供")
+        tokenizer = self._tokenizer
 
         # 推断 TITO 模板路径
         tito_template_path = self._get_tito_template_path()
