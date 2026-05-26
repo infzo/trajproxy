@@ -20,8 +20,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from psycopg.rows import dict_row
-
 logger = logging.getLogger(__name__)
 
 # 每批处理的记录数
@@ -171,22 +169,6 @@ async def _find_expired_runs(conn, threshold: datetime) -> List[str]:
         return [r[0] for r in await cur.fetchall()]
 
 
-async def _find_expired_null_sessions(conn, threshold: datetime) -> List[str]:
-    """找到所有记录都已过期的 run_id=NULL 的 session_id"""
-    async with conn.cursor() as cur:
-        await cur.execute("""
-            SELECT m.session_id
-            FROM request_details_active d
-            JOIN request_metadata m ON d.unique_id = m.unique_id
-            WHERE m.run_id IS NULL
-              AND m.session_id IS NOT NULL AND m.session_id != ''
-            GROUP BY m.session_id
-            HAVING MAX(d.created_at) < %s
-            ORDER BY m.session_id
-        """, (threshold,))
-        return [r[0] for r in await cur.fetchall()]
-
-
 # ============================================================
 # 上传消费者协程
 # ============================================================
@@ -292,27 +274,8 @@ async def archive_details(
                 logger.debug(traceback.format_exc())
                 result["errors"].append(msg)
 
-        # 归档 run_id=NULL 的（按 session）
-        expired_null = await _find_expired_null_sessions(conn, threshold)
-        if expired_null:
-            logger.info(f"找到 {len(expired_null)} 个过期 NULL-run 的 session")
-            for session_id in expired_null:
-                try:
-                    stats = await _archive_null_session(
-                        conn, storage, temp_root, session_id, compress
-                    )
-                    result["sessions_archived"] += 1
-                    result["records_archived"] += stats["records"]
-                    if stats["file"]:
-                        result["archive_files"].append(stats["file"])
-                except Exception as e:
-                    msg = f"归档 session '{session_id}' 失败: {e}"
-                    logger.error(msg)
-                    logger.debug(traceback.format_exc())
-                    result["errors"].append(msg)
-
         # 清理空分区
-        cleaned = await _cleanup_empty_partitions(conn, result["runs_processed"] + len(expired_null))
+        cleaned = await _cleanup_empty_partitions(conn, result["runs_processed"])
         result["partitions_cleaned"] = cleaned
 
     return result
@@ -528,70 +491,6 @@ async def _archive_run(
             shutil.rmtree(run_dir, ignore_errors=True)
 
 
-async def _archive_null_session(
-    conn, storage, temp_root: Path, session_id: str,
-    compress: bool = True,
-) -> Dict[str, Any]:
-    """归档一个 run_id=NULL 的 session"""
-    safe_session = _safe_path(session_id)
-    suffix = ".jsonl.gz" if compress else ".jsonl"
-
-    async with conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute("""
-            SELECT d.unique_id, d.tokenizer_path, d.messages,
-                   d.raw_request, d.raw_response,
-                   d.text_request, d.text_response,
-                   d.prompt_text, d.token_ids,
-                   d.token_request, d.token_response,
-                   d.response_text, d.response_ids,
-                   d.full_conversation_text, d.full_conversation_token_ids,
-                   d.error_traceback, d.created_at
-            FROM request_details_active d
-            JOIN request_metadata m ON d.unique_id = m.unique_id
-            WHERE m.run_id IS NULL AND m.session_id = %s
-            ORDER BY d.created_at
-        """, (session_id,))
-        records = await cur.fetchall()
-
-    if not records:
-        return {"records": 0, "file": None}
-
-    # 提交读事务，让后续 cleanup 在独立事务里执行
-    await conn.commit()
-
-    file_path = temp_root / f"{safe_session}{suffix}"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        record_count = 0
-        opener = gzip.open if compress else open
-        with opener(file_path, "wt", encoding="utf-8") as f:
-            for rec in records:
-                rec = dict(rec)
-                for key, val in rec.items():
-                    if isinstance(val, datetime):
-                        rec[key] = val.isoformat()
-                f.write(json.dumps(rec, default=str) + "\n")
-                record_count += 1
-
-        key = f"_unknown/{safe_session}{suffix}"
-        loc = _finalize_file(storage, file_path, key)
-
-        await _cleanup_null_session(conn, session_id, f"{storage.location_prefix}_unknown/")
-
-        logger.info(f"  归档 NULL-run session '{session_id}': {record_count} 条记录")
-        return {"records": record_count, "file": loc}
-    finally:
-        file_path.unlink(missing_ok=True)
-
-
-def _finalize_file(storage, local_path: Path, key: str) -> str:
-    """上传文件并清理本地副本"""
-    loc = storage.upload(local_path, key)
-    local_path.unlink(missing_ok=True)
-    return loc
-
-
 async def _cleanup_run(conn, run_id: str, archive_location: str):
     """按 run_id 粒度清理：DELETE details + UPDATE metadata"""
     async with conn.transaction():
@@ -607,23 +506,4 @@ async def _cleanup_run(conn, run_id: str, archive_location: str):
             "SET archive_location = %s, archived_at = NOW() "
             "WHERE run_id = %s AND archive_location IS NULL",
             (archive_location, run_id),
-        )
-
-
-async def _cleanup_null_session(conn, session_id: str, archive_location: str):
-    """清理单个 null-run session"""
-    async with conn.transaction():
-        await conn.execute(
-            "DELETE FROM request_details_active "
-            "WHERE unique_id IN ("
-            "  SELECT unique_id FROM request_metadata "
-            "  WHERE session_id = %s AND run_id IS NULL"
-            ")",
-            (session_id,),
-        )
-        await conn.execute(
-            "UPDATE request_metadata "
-            "SET archive_location = %s, archived_at = NOW() "
-            "WHERE session_id = %s AND run_id IS NULL AND archive_location IS NULL",
-            (archive_location, session_id),
         )
