@@ -72,5 +72,5 @@ volumes:
 
 networks:
   traj-proxy-network:
-    external: true
+    driver: bridge
     name: traj-proxy-network
