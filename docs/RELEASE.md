@@ -34,6 +34,7 @@
 - **归档消费者死锁**: 上传失败时存下异常继续消费，避免 producer 因队列满阻塞死锁
 - **NULL/空 session_id 崩溃**: SQL 层面过滤 `run_id` 和 `session_id` 为 NULL 或空字符串的记录，不归档
 - **归档临时文件兜底清理**: finally 块确保 run 临时目录无论成功失败都被删除
+- **归档测试 compose 网络不存在**: docker-compose-test.yml 的 `traj-proxy-network` 从 `external: true` 改为 `driver: bridge`，独立启动时自动创建网络，不再依赖主 compose 先启动
 
 ### 优化改进
 - **归档模块精简**: 去掉无意义抽象和死代码
@@ -63,6 +64,7 @@
 - `traj_archiver/storage/` - CSB 存储后端
 - `configs/archiver.yaml` - `num_workers` 替代 `upload_concurrency` + `upload_queue_size`
 - `tests/e2e/layers/archive/` - E2E 测试适配
+- `dockers/archiver/docker-compose-test.yml` - 网络定义改为自动创建
 
 ---
 
