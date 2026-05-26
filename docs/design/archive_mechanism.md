@@ -2,7 +2,7 @@
 
 > **导航**: [文档中心](../README.md) | [数据库设计](database.md)
 
-版本: v2.0 | 最后更新: 2026-05-25
+版本: v2.1 | 最后更新: 2026-05-26
 
 ---
 
@@ -30,7 +30,8 @@
           │ 统计能力不受影响（元数据不动）│
           └──────────────┴──────────────┘
      ┌───────────────────┴───────────────────┐
-     │   按 run_id 组织，JSONL+GZIP, S3/本地  │
+     │  生产者-消费者 pipeline，边导出边上传   │
+     │  磁盘占用 = (队列深度 + 1) × 单文件    │
      └───────────────────────────────────────┘
 ```
 
@@ -60,8 +61,9 @@
 
 ```
 写入时: archive_location = NULL (详情在 DB)
-归档后: archive_location = "my-run/sess-123.jsonl.gz" (本地)
-         或 "s3://bucket/prefix/my-run/sess-123.jsonl.gz" (S3)
+归档后: archive_location = "/data/archives/run-001/"          (本地)
+         或 "s3://bucket/prefix/run-001/"                     (S3)
+         或 "csb://bucket/prefix/run-001/"                    (CSB)
 ```
 
 ---
@@ -96,56 +98,93 @@ run "app-001" 有 3 个 session, 15 条记录:
 SELECT m.run_id
 FROM request_details_active d
 JOIN request_metadata m ON d.unique_id = m.unique_id
-WHERE m.run_id IS NOT NULL
+WHERE m.run_id IS NOT NULL AND m.run_id != ''
 GROUP BY m.run_id
 HAVING MAX(d.created_at) < $threshold
 ```
 
-run_id = NULL 的记录按 session 单独判定（同样逻辑，HAVING MAX < threshold）。
+**不归档边界**: run_id 为 NULL 或空字符串的记录不参与归档，永久保留在数据库中。
 
-### 4.2 导出: 按 session 分文件
+### 4.2 导出: 生产者-消费者 pipeline
+
+采用 `asyncio.Queue` 实现生产者-消费者模式，**边导出边上传**，磁盘占用有界:
 
 ```
-每个过期 run:
-  1. 查询该 run 的全部记录 (JOIN metadata 获取 session_id)
-  2. 按 session_id 分组, 流式写入 .jsonl.gz
-  3. 最多同时打开 50 个文件句柄 (LRU 淘汰)
-  4. 每个 session 文件写完后立即上传到 storage
-  5. 删除本地临时文件
+生产者 (主协程)                      消费者 (N 个上传协程)
+  │                                    │
+  ├── DECLARE CURSOR 流式读取          │
+  │                                    │
+  ├── FETCH 500 行 ←──── DB ────┐     │
+  │                              │     │
+  ├── 按 session_id 顺序写入      │     │
+  │   .jsonl.gz 文件              │     │
+  │                              │     │
+  ├── session 切换时:             │     │
+  │   关闭文件                    │     │
+  │   queue.put((path, key)) ─────────→│ 取出 (path, key)
+  │   (队列满则阻塞，提供背压)    │     │ ├── asyncio.to_thread(upload)
+  │                              │     │ ├── 删除本地临时文件
+  │                              │     │ ├── 记录 location
+  │                              │     │
+  ├── CLOSE CURSOR               │     │
+  ├── queue.put(None) ─────────────────→│ 收到 None, 退出
+  │                              │     │
+  └── await gather(consumers)    │     │
+                                 │     │
+  磁盘占用 ≤ (queue_size + 1) 个文件   │
 ```
+
+**关键设计**:
+- 服务端游标 (DECLARE CURSOR) 避免一次性加载全部数据到内存
+- `ORDER BY session_id, created_at` 保证 session 连续，写完一个 session 立即提交上传
+- 有界队列 (`maxsize=upload_queue_size`) 提供背压，防止磁盘被打满
+- `_ConsumerError` 容器: 消费者上传失败时存下异常继续消费，避免生产者死锁
+- 多消费者协程: `upload_concurrency` 控制并发上传数
 
 ### 4.3 清理: DELETE + UPDATE 同事务
 
 ```python
-# 每 500 条 unique_id 一批, 同一事务内:
-DELETE FROM request_details_active WHERE unique_id = ANY($1)
-UPDATE request_metadata SET archive_location = $loc, archived_at = NOW()
-    WHERE unique_id = $uid
+# 按 run_id 整体清理，同一事务内:
+async with conn.transaction():
+    DELETE FROM request_details_active
+        WHERE unique_id IN (
+            SELECT unique_id FROM request_metadata WHERE run_id = $run_id
+        )
+    UPDATE request_metadata
+        SET archive_location = $loc, archived_at = NOW()
+        WHERE run_id = $run_id AND archive_location IS NULL
 ```
 
 ### 4.4 空分区清理
 
 归档结束后检查月分区是否为空, 空则 DETACH + DROP (零 VACUUM)。
 
+---
+
 ## 5. 保护机制
+
+### 归档范围保护
+- 只 DELETE 详情表，元数据表永久保留
+- run_id 为 NULL 或空字符串的记录不归档
+- archive_location 标记归档位置
 
 ### 时间保护
 - 只有 run 内全部记录的 MAX(created_at) 小于阈值才归档
 - 避免部分归档导致 session 数据割裂
 
-### 范围保护
-- 只 DELETE 详情表, 元数据表永久保留
-- archive_location 标记归档位置
-
 ### 事务保护
-- DELETE + UPDATE 在同事务内, 原子性保证
-- 崩溃恢复: 文件先上传, 未提交的事务回滚后重试
+- DELETE + UPDATE 在同事务内，原子性保证
+- 崩溃恢复: 文件先上传，未提交的事务回滚后重试
+
+### 磁盘保护
+- 有界队列限制磁盘上同时存在的临时文件数
+- 磁盘占用 ≤ (upload_queue_size + 1) × 单个 session 文件大小
 
 ---
 
 ## 6. 调度器
 
-轮询模式, 固定间隔:
+轮询模式，固定间隔:
 
 ```yaml
 archive:
@@ -153,8 +192,8 @@ archive:
   retention_days: 7     # 留存天数
 ```
 
-主循环: `execute() -> sleep(poll_interval) -> execute()`  
-失败: 等 5 分钟重试  
+主循环: `execute() -> sleep(poll_interval) -> execute()`
+失败: 等 5 分钟重试
 状态查询: `get_status()` 返回运行状态和统计
 
 ---
@@ -163,12 +202,13 @@ archive:
 
 ### 7.1 存储后端
 
-双模式, 配置自动选择:
+三模式，配置自动选择:
 
 | 配置 | 后端 | archive_location 格式 |
 |------|------|----------------------|
-| s3 为空 | 本地文件 | `{run_id}/{session_id}.jsonl.gz` |
-| s3.bucket 有值 | S3/MinIO | `s3://{bucket}/{prefix}{run_id}/{session_id}.jsonl.gz` |
+| 无 s3 配置 | 本地文件 | `{run_id}/{session_id}.jsonl.gz` |
+| s3.bucket 有值 (无 app_token) | S3/MinIO | `s3://{bucket}/{prefix}{run_id}/{session_id}.jsonl.gz` |
+| s3.app_token 有值 | CSB 网关 | `csb://{bucket}/{prefix}{run_id}/{session_id}.jsonl.gz` |
 
 ### 7.2 文件结构
 
@@ -177,13 +217,11 @@ archive:
   {session_id}.jsonl.gz    -- 该 session 的完整请求轨迹
   {session_id}.jsonl.gz
   ...
-_unknown/
-  {session_id}.jsonl.gz    -- run_id=NULL 的记录
 ```
 
 ### 7.3 数据格式
 
-JSONL + GZIP, 每行一个请求记录:
+JSONL + GZIP，每行一个请求记录:
 ```json
 {"unique_id": "...", "messages": [...], "created_at": "2026-05-15T10:30:00", ...}
 ```
@@ -214,8 +252,12 @@ database:
 archive:
   retention_days: 30
   poll_interval: 3600
+  upload_concurrency: 1       # session 文件并发上传数
+  upload_queue_size: 3        # 上传队列深度（backpressure），0=无限制
+  compress: true              # 是否 gzip 压缩
   storage_path: "/data/archives"
-  s3:  # 可选, 不设则本地模式
+  local_temp_path: "/tmp/archives"
+  s3:  # 可选，不设则本地模式
     bucket: "my-bucket"
     prefix: "archives/"
     endpoint_url: null
@@ -235,10 +277,11 @@ archive:
 | 文件 | 职责 |
 |------|------|
 | `traj_archiver/__main__.py` | 进程入口 |
-| `traj_archiver/archiver.py` | 归档执行器 (run 判定、流式导出、DELETE+UPDATE) |
+| `traj_archiver/archiver.py` | 归档执行器 (run 判定、生产者-消费者 pipeline、DELETE+UPDATE) |
 | `traj_archiver/scheduler.py` | 轮询调度器 |
-| `traj_archiver/storage.py` | 存储抽象 (本地/S3 自动选择) |
-| `traj_archiver/s3_storage.py` | S3 存储实现 |
+| `traj_archiver/storage.py` | 存储工厂 (本地/S3/CSB 自动选择) |
+| `traj_archiver/s3_storage.py` | S3 存储实现 (boto3) |
+| `traj_archiver/csb_storage.py` | CSB 网关存储实现 (原生 REST API) |
 | `traj_archiver/config.py` | 独立配置加载 |
 | `configs/archiver.yaml` | 归档配置文件 |
 | `dockers/archiver/` | 独立 compose 部署 |
@@ -251,9 +294,11 @@ archive:
 |------|-----------|----------|
 | 架构 | 嵌入 traj_proxy | 独立 traj_archiver 进程 |
 | 调度 | cron (croniter) | 轮询 (poll_interval) |
-| 存储 | 仅本地 | 本地 + S3 双模式 |
+| 存储 | 仅本地 | 本地 + S3 + CSB 三模式 |
 | 归档粒度 | 月分区 (DETACH+DROP) | run_id (DELETE+UPDATE) |
 | 文件格式 | YYYY_MM.jsonl.gz | {run_id}/{session_id}.jsonl.gz |
+| 导出模式 | 全量写完再上传 | 生产者-消费者 pipeline 边导出边上传 |
+| 磁盘保护 | 无 (可能打爆磁盘) | 有界队列，磁盘占用可控 |
 | 配置 | config.yaml archive 段 | 独立 archiver.yaml |
-| CLI | scripts/archive_records.py | 已删除, python -m traj_archiver |
+| CLI | scripts/archive_records.py | 已删除，python -m traj_archiver |
 | 留存期 | 30 天固定 | 7/10/30 天灵活配置 |
