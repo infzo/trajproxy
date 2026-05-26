@@ -445,7 +445,7 @@ async def main():
     compress = archive_config.get('compress', True)
     local_temp_path = archive_config.get('local_temp_path', '/tmp/archives')
 
-    ray.init(num_cpus=num_workers, ignore_reinit_error=True, log_to_driver=False)
+    ray.init(address='auto', ignore_reinit_error=True, log_to_driver=False)
 
     workers = []
     for i in range(num_workers):
