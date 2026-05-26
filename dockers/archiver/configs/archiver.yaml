@@ -13,7 +13,7 @@ database:
 archive:
   retention_days: 30             # 活跃详情保留天数
   poll_interval: 3600            # 轮询间隔（秒），每小时检查一次
-  upload_concurrency: 1          # 并发 Worker 进程数，默认 1（顺序）
+  num_workers: 1                   # Ray Worker 进程数，默认 1（顺序）
   compress: true                 # 是否 gzip 压缩，false 则直接上传 jsonl
   storage_path: "/data/archives" # 本地模式：归档文件保存目录
   local_temp_path: "/tmp/archives"  # S3 模式：本地临时导出目录

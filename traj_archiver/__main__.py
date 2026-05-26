@@ -67,7 +67,7 @@ async def main():
         sys.exit(1)
 
     # 初始化 Ray + 创建 Worker Actors
-    num_workers = archive_config.get("upload_concurrency", 1)
+    num_workers = archive_config.get("num_workers", 1)
     compress = archive_config.get("compress", True)
     local_temp_path = archive_config.get("local_temp_path", "/tmp/archives")
 
