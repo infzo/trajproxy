@@ -135,9 +135,6 @@ class ArchiveScheduler:
         for d in result.get("details", []):
             logger.info(f"  run_id={d['run_id']}: {d['sessions']} sessions, {d['records']} records")
 
-        for f in result.get("archive_files", []):
-            logger.info(f"  文件: {f}")
-
         if result.get("errors"):
             for err in result["errors"]:
                 logger.warning(f"  错误: {err}")
