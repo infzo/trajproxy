@@ -77,4 +77,5 @@ def get_database_pool_config() -> Dict:
         "min_size": pool_config.get("min_size", 2),
         "max_size": pool_config.get("max_size", 10),
         "timeout": pool_config.get("timeout", 30),
+        "max_idle": pool_config.get("max_idle", 900),
     }

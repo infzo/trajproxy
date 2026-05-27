@@ -8,6 +8,7 @@ database:
     min_size: 2
     max_size: 10
     timeout: 30
+    max_idle: 900
 
 # 归档配置
 archive:

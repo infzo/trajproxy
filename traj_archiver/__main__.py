@@ -49,6 +49,7 @@ async def main():
         min_size=pool_config["min_size"],
         max_size=pool_config["max_size"],
         timeout=pool_config["timeout"],
+        max_idle=pool_config["max_idle"],
     )
     await pool.open()
     logger.info("数据库连接池已创建")
