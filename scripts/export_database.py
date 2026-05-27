@@ -6,9 +6,9 @@
 
     export_output/
       <run_id_1>/
-        models.json                  # 模型配置（JSON）
-        request_metadata.parquet     # 请求元数据（Parquet，zstd 压缩）
-        request_details.parquet      # 请求详情（Parquet，zstd 压缩）
+        models.json                  # 模型配置
+        request_metadata.json        # 请求元数据
+        request_details.json         # 请求详情
         archived_trace.json          # 已归档记录追踪（如有）
       <run_id_2>/
         ...
@@ -22,7 +22,7 @@
     python scripts/export_database.py --run-id app-001
     python scripts/export_database.py --db-url postgresql://user:pass@host:5432/db
 
-依赖：psycopg, orjson, pyyaml, pyarrow
+依赖：psycopg, orjson, pyyaml（均为镜像已有依赖）
 """
 
 import argparse
@@ -33,8 +33,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import orjson
-import pyarrow as pa
-import pyarrow.parquet as pq
 import psycopg
 import yaml
 
@@ -167,66 +165,10 @@ def row_to_dict(columns: list[str], row: tuple) -> dict:
     return item
 
 
-def write_json(data: list[dict], path: Path) -> None:
+def write_json(data, path: Path) -> None:
     """使用 orjson 写入 JSON 文件"""
     with open(path, "wb") as f:
         f.write(orjson.dumps(data, option=orjson.OPT_INDENT_2))
-
-
-def dicts_to_parquet(data: list[dict], path: Path, compression: str = "zstd") -> None:
-    """将字典列表写入 Parquet 文件
-
-    使用 pyarrow 直接构建表并写入，zstd 压缩算法兼顾压缩率和速度。
-    对于 JSONB/ARRAY 类型列，使用 string 类型存储（orjson 序列化后写入）。
-    """
-    if not data:
-        pq.write_table(pa.table({}), str(path), compression=compression)
-        return
-
-    # 按列构建，推断各列类型
-    col_names = list(data[0].keys())
-    arrays = []
-    fields = []
-
-    for col in col_names:
-        values = [row.get(col) for row in data]
-
-        # 判断列类型：采样第一个非 None 值
-        sample = next((v for v in values if v is not None), None)
-
-        if sample is None:
-            # 全为 None 的列，用 string 类型
-            arrays.append(pa.array([str(v) if v is not None else None for v in values], type=pa.string()))
-            fields.append(pa.field(col, pa.string()))
-        elif isinstance(sample, bool):
-            arrays.append(pa.array(values, type=pa.bool_()))
-            fields.append(pa.field(col, pa.bool_()))
-        elif isinstance(sample, int):
-            arrays.append(pa.array(values, type=pa.int64()))
-            fields.append(pa.field(col, pa.int64()))
-        elif isinstance(sample, float):
-            arrays.append(pa.array(values, type=pa.float64()))
-            fields.append(pa.field(col, pa.float64()))
-        elif isinstance(sample, str):
-            arrays.append(pa.array(values, type=pa.string()))
-            fields.append(pa.field(col, pa.string()))
-        elif isinstance(sample, (list, dict)):
-            # JSONB/ARRAY 类型：orjson 序列化为字符串存储
-            serialized = [
-                orjson.dumps(v).decode("utf-8") if v is not None else None
-                for v in values
-            ]
-            arrays.append(pa.array(serialized, type=pa.string()))
-            fields.append(pa.field(col, pa.string()))
-        else:
-            # 其他类型（datetime 等，已在 row_to_dict 中转为字符串）
-            str_values = [str(v) if v is not None else None for v in values]
-            arrays.append(pa.array(str_values, type=pa.string()))
-            fields.append(pa.field(col, pa.string()))
-
-    schema = pa.schema(fields)
-    table = pa.Table.from_arrays(arrays, schema=schema)
-    pq.write_table(table, str(path), compression=compression)
 
 
 # ─── 核心导出逻辑 ───────────────────────────────────────────────
@@ -253,15 +195,15 @@ def export_run_id(conn, run_id: str, output_dir: Path) -> dict:
     stats["models"] = len(models)
     print(f"  [模型] {len(models)} 条 → {models_file.relative_to(output_dir)}")
 
-    # ── 2. 请求元数据（Parquet）──
+    # ── 2. 请求元数据（JSON）──
     meta_columns, meta_rows = fetch_request_metadata_by_run_id(conn, run_id)
     meta_data = [row_to_dict(meta_columns, row) for row in meta_rows]
-    meta_file = run_dir / "request_metadata.parquet"
-    dicts_to_parquet(meta_data, meta_file)
+    meta_file = run_dir / "request_metadata.json"
+    write_json(meta_data, meta_file)
     stats["metadata"] = len(meta_rows)
     print(f"  [元数据] {len(meta_rows)} 条 → {meta_file.relative_to(output_dir)}")
 
-    # ── 3. 请求详情（Parquet）──
+    # ── 3. 请求详情（JSON）──
     archive_idx = meta_columns.index("archive_location")
     unique_id_idx = meta_columns.index("unique_id")
     active_unique_ids = []
@@ -276,8 +218,8 @@ def export_run_id(conn, run_id: str, output_dir: Path) -> dict:
 
     detail_columns, detail_rows = fetch_request_details_by_unique_ids(conn, active_unique_ids)
     detail_data = [row_to_dict(detail_columns, row) for row in detail_rows]
-    detail_file = run_dir / "request_details.parquet"
-    dicts_to_parquet(detail_data, detail_file)
+    detail_file = run_dir / "request_details.json"
+    write_json(detail_data, detail_file)
     stats["details"] = len(detail_rows)
     print(f"  [详情] {len(detail_rows)} 条活跃 → {detail_file.relative_to(output_dir)}")
 
