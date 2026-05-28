@@ -5,6 +5,7 @@ TokenizerCache - 按 tokenizer_path 共享 tokenizer 实例
 Processor 创建时 acquire，淘汰/注销时 release，归零时清除缓存。
 """
 
+import asyncio
 from typing import Dict
 
 from transformers import AutoTokenizer
@@ -20,9 +21,14 @@ class TokenizerCache:
     def __init__(self):
         self._cache: Dict[str, AutoTokenizer] = {}
         self._ref_counts: Dict[str, int] = {}
+        self._load_lock = asyncio.Lock()
 
-    def get_or_load(self, tokenizer_path: str) -> AutoTokenizer:
-        """获取或加载 tokenizer，引用计数 +1"""
+    async def get_or_load(self, tokenizer_path: str) -> AutoTokenizer:
+        """获取或加载 tokenizer，引用计数 +1
+
+        首次加载使用 asyncio.to_thread 避免阻塞事件循环。
+        使用锁防止并发加载同一 tokenizer。
+        """
         if tokenizer_path in self._cache:
             self._ref_counts[tokenizer_path] += 1
             logger.debug(
@@ -31,13 +37,22 @@ class TokenizerCache:
             )
             return self._cache[tokenizer_path]
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_path, trust_remote_code=True
-        )
-        self._cache[tokenizer_path] = tokenizer
-        self._ref_counts[tokenizer_path] = 1
-        logger.info(f"Tokenizer 已加载并缓存: {tokenizer_path}")
-        return tokenizer
+        async with self._load_lock:
+            # 双重检查：锁内再次确认
+            if tokenizer_path in self._cache:
+                self._ref_counts[tokenizer_path] += 1
+                return self._cache[tokenizer_path]
+
+            # 在线程中加载，避免阻塞事件循环
+            tokenizer = await asyncio.to_thread(
+                AutoTokenizer.from_pretrained,
+                tokenizer_path,
+                trust_remote_code=True
+            )
+            self._cache[tokenizer_path] = tokenizer
+            self._ref_counts[tokenizer_path] = 1
+            logger.info(f"Tokenizer 已加载并缓存: {tokenizer_path}")
+            return tokenizer
 
     def release(self, tokenizer_path: str) -> None:
         """引用计数 -1，归零时清除缓存"""

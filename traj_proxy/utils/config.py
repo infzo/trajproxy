@@ -174,6 +174,18 @@ def get_max_concurrent_requests() -> int:
     return get_proxy_workers_config().get("max_concurrent_requests", 128)
 
 
+def get_semaphore_acquire_timeout() -> float:
+    """
+    获取信号量获取超时秒数
+
+    超过此时间未获取到信号量则返回 429。
+
+    Returns:
+        超时秒数，默认 5.0
+    """
+    return get_proxy_workers_config().get("semaphore_acquire_timeout", 5.0)
+
+
 def get_processor_cache_max_size() -> int:
     """
     获取 LRU 缓存最大 Processor 数量
@@ -182,6 +194,19 @@ def get_processor_cache_max_size() -> int:
         最大 Processor 数，默认 32
     """
     return get_processor_manager_config().get("processor_cache_max_size", 32)
+
+
+def get_processor_idle_timeout() -> int:
+    """
+    获取 Processor 空闲超时秒数
+
+    超过此时间未被访问的 Processor 将被自动淘汰释放资源。
+    设为 0 禁用空闲淘汰。
+
+    Returns:
+        空闲超时秒数，默认 300（5分钟）
+    """
+    return get_processor_manager_config().get("processor_idle_timeout", 300)
 
 
 def get_infer_client_config() -> Dict:

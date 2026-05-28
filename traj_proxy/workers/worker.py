@@ -280,6 +280,9 @@ class ProxyWorker:
         )
         await self.model_synchronizer.start()
 
+        # 启动空闲淘汰
+        await self.processor_manager.start_idle_eviction()
+
         # 注册预置模型（不持久化到数据库）
         if models_config:
             for model_config in models_config:
@@ -309,6 +312,12 @@ class ProxyWorker:
 
     async def shutdown(self):
         """关闭资源"""
+        if self.processor_manager:
+            # 停止空闲淘汰
+            await self.processor_manager.stop_idle_eviction()
+            # 清理 LRU 缓存
+            await self.processor_manager.clear_cache()
+
         if self.model_synchronizer:
             try:
                 await self.model_synchronizer.stop()

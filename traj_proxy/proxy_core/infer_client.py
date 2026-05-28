@@ -1,12 +1,9 @@
 import json
 import asyncio
 import traceback
-import requests
+import httpx
 import logging
 from typing import Dict, Any, AsyncIterator, List, Union, Optional
-from concurrent.futures import ThreadPoolExecutor
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from traj_proxy.exceptions import InferServiceError, InferTimeoutError
 from traj_proxy.utils.logger import get_logger
@@ -17,12 +14,16 @@ logger = get_logger(__name__)
 # prompt 参数类型：可以是 string 或 List[int] (token ids)
 PromptInput = Union[str, List[int]]
 
+# 需要重试的 HTTP 状态码
+_RETRY_STATUS_CODES = {502, 503, 504}
+
 
 class InferClient:
-    """Infer 服务客户端 - 使用 requests 线程池实现 (兼容异步接口)
+    """Infer 服务客户端 - 使用 httpx 异步 HTTP 实现
 
-    融合了最新的接口规范，并针对 vLLM/Ascend NPU 环境下的网络不稳定性
-    进行了优化。通过 requests 的 Retry 机制处理临时故障，使用线程池保持异步兼容。
+    通过 httpx.AsyncClient 实现纯协程 HTTP 调用，
+    无需线程池，直接在事件循环中处理 TCP I/O。
+    针对 502/503/504 错误实现手动重试。
     """
 
     # Chat Completions 参数映射到 Completions 时的不兼容参数
@@ -44,7 +45,6 @@ class InferClient:
         "chat_template",         # 自定义模板
         "chat_template_kwargs",  # 模板参数
         "mm_processor_kwargs",   # 多模态处理器
-        # "bad_words",             # 屏蔽词列表
     })
 
     # 参数名映射（Chat -> Completion）
@@ -58,82 +58,61 @@ class InferClient:
         api_key: Optional[str] = None,
         timeout: float = 600.0,
         connect_timeout: float = 60.0,
-        max_connections: int = 1000,
+        max_connections: int = 32,
         max_retries: Optional[int] = None,
         **kwargs
     ):
-        """初始化 InferClient
-
-        参数:
-            max_retries: 请求失败重试次数，为 None 时从配置文件读取
-        """
         if base_url is None or api_key is None:
             raise ValueError("InferClient base_url 和 api_key 必须提供")
 
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
 
-        # requests 专用配置 (连接超时, 读取超时)
-        self._timeout_config = (connect_timeout, timeout)
-        self._pool_size = max_connections
+        self._timeout = httpx.Timeout(
+            connect=connect_timeout,
+            read=timeout,
+            write=60.0,
+            pool=60.0
+        )
+        # max_connections=0 时不限制连接数，由后端推理服务控制并发
+        effective_max = max_connections if max_connections > 0 else None
+        self._limits = httpx.Limits(
+            max_connections=effective_max,
+            max_keepalive_connections=max(effective_max // 2, 4) if effective_max else 16
+        )
 
-        # 重试次数：优先使用传入参数，否则从配置文件读取
         if max_retries is None:
             config = get_infer_client_config()
             self._max_retries = config.get("max_retries", 2)
         else:
             self._max_retries = max_retries
 
-        self._session: Optional[requests.Session] = None
+        self._client: Optional[httpx.AsyncClient] = None
         self._client_lock = asyncio.Lock()
 
-        # 使用线程池执行同步调用，避免阻塞异步事件循环
-        self._executor = ThreadPoolExecutor(max_workers=max_connections)
+    async def _get_client(self) -> httpx.AsyncClient:
+        """懒初始化 httpx.AsyncClient"""
+        if self._client is not None:
+            return self._client
 
-    async def _get_session(self) -> requests.Session:
-        """初始化并配置带重试机制的 Session (针对 vLLM 稳定性优化)"""
-        # 无锁快速路径：已初始化时直接返回，避免高并发下的锁竞争
-        if self._session is not None:
-            return self._session
-
-        # 需要初始化时才获取锁
         async with self._client_lock:
-            if self._session is None:
-                self._session = requests.Session()
-                # 鲁棒重试策略：针对 502/503/504 进行自动重试
-                retry_strategy = Retry(
-                    total=self._max_retries,
-                    backoff_factor=1,
-                    status_forcelist=[502, 503, 504],
-                    allowed_methods=["POST"]
+            if self._client is None:
+                self._client = httpx.AsyncClient(
+                    timeout=self._timeout,
+                    limits=self._limits,
+                    headers=self._build_common_headers()
                 )
-                adapter = HTTPAdapter(
-                    pool_connections=self._pool_size,
-                    pool_maxsize=self._pool_size,
-                    max_retries=retry_strategy
-                )
-                self._session.mount("http://", adapter)
-                self._session.mount("https://", adapter)
-                logger.debug(f"[{self.base_url}] InferClient: 已初始化 requests Session")
-        return self._session
+                logger.debug(f"[{self.base_url}] InferClient: 已初始化 httpx.AsyncClient")
+        return self._client
 
-    def _build_common_headers(self):
-        """构建通用请求头"""
+    def _build_common_headers(self) -> Dict[str, str]:
         return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
 
     def _transform_chat_params_to_completion(self, kwargs: dict, request_id: str = None) -> dict:
-        """将 Chat Completions 参数转换为 Completions 兼容格式
-
-        Args:
-            kwargs: 原始请求参数
-            request_id: 请求 ID（用于日志）
-
-        Returns:
-            转换后的参数
-        """
+        """将 Chat Completions 参数转换为 Completions 兼容格式"""
         result = {}
         dropped = []
         mapped = []
@@ -148,7 +127,6 @@ class InferClient:
             else:
                 result[key] = value
 
-        # 记录日志
         if dropped:
             logger.warning(
                 f"[{request_id or 'unknown'}] Chat->Completion 参数不兼容，已丢弃: {dropped}"
@@ -162,117 +140,146 @@ class InferClient:
 
     async def close(self):
         """释放资源"""
-        if self._session:
-            self._session.close()
-            self._session = None
-        self._executor.shutdown(wait=False)
+        if self._client:
+            await self._client.aclose()
+            self._client = None
 
     async def __aenter__(self) -> "InferClient":
-        """异步上下文管理器入口"""
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """异步上下文管理器出口，自动释放资源"""
         await self.close()
         return False
 
     # --- 异常处理 ---
 
     def _wrap_request_error(self, e: Exception) -> None:
-        """统一的异常包装，将 requests 异常转换为业务异常
-
-        消除 _handle_request / _handle_stream_request 中的重复异常处理。
-        使用 raise ... from e 保持异常链可追溯。
-        """
-        if isinstance(e, requests.exceptions.ConnectTimeout):
+        """将 httpx 异常转换为业务异常"""
+        if isinstance(e, httpx.ConnectTimeout):
             raise InferTimeoutError(f"推理服务连接超时: {self.base_url}") from e
-        if isinstance(e, requests.exceptions.ReadTimeout):
+        if isinstance(e, httpx.ReadTimeout):
             raise InferTimeoutError(f"推理服务读取超时: {self.base_url}") from e
-        if isinstance(e, requests.exceptions.RequestException):
-            status_code = getattr(e.response, 'status_code', 'N/A')
-            error_text = getattr(e.response, 'text', str(e))
-            raise InferServiceError(f"Infer 请求失败 [{status_code}]: {error_text}") from e
+        if isinstance(e, httpx.HTTPStatusError):
+            raise InferServiceError(
+                f"Infer 请求失败 [{e.response.status_code}]: {e.response.text}"
+            ) from e
+        if isinstance(e, httpx.RequestError):
+            raise InferServiceError(f"Infer 请求失败: {str(e)}") from e
         raise InferServiceError(f"Infer 内部异常: {str(e)}\n{traceback.format_exc()}") from e
 
     # --- 核心请求逻辑 ---
 
-    async def _handle_request(self, url: str, request_body: dict, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-        """非流式请求处理，将 requests 同步调用转为异步执行"""
-        session = await self._get_session()
-        loop = asyncio.get_event_loop()
+    async def _handle_request(
+        self, url: str, request_body: dict,
+        extra_headers: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        """非流式请求处理，带重试"""
+        client = await self._get_client()
+        headers = extra_headers or {}
 
-        headers = self._build_common_headers()
-        if extra_headers:
-            headers.update(extra_headers)
+        last_error = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                logger.debug(f"Infer 请求: {url}")
+                response = await client.post(url, json=request_body, headers=headers)
 
-        try:
-            logger.debug(f"Infer 请求: {url}")
-            response = await loop.run_in_executor(
-                self._executor,
-                lambda: session.post(
-                    url,
-                    json=request_body,
-                    headers=headers,
-                    timeout=self._timeout_config,
-                    stream=False
-                )
-            )
-            response.raise_for_status()
-            return response.json()
+                if response.status_code in _RETRY_STATUS_CODES and attempt < self._max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        f"Infer 请求返回 {response.status_code}，"
+                        f"第 {attempt + 1}/{self._max_retries} 次重试，等待 {wait}s"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
 
-        except Exception as e:
-            self._wrap_request_error(e)
+                response.raise_for_status()
+                return response.json()
 
-    async def _handle_stream_request(self, url: str, request_body: dict, extra_headers: Optional[Dict[str, str]] = None) -> AsyncIterator[Dict[str, Any]]:
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                if e.response.status_code in _RETRY_STATUS_CODES and attempt < self._max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        f"Infer 请求返回 {e.response.status_code}，"
+                        f"第 {attempt + 1}/{self._max_retries} 次重试，等待 {wait}s"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise self._wrap_request_error(e)
+            except httpx.RequestError as e:
+                last_error = e
+                if attempt < self._max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        f"Infer 请求异常: {e}，"
+                        f"第 {attempt + 1}/{self._max_retries} 次重试，等待 {wait}s"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise self._wrap_request_error(e)
+
+        # 不应到达此处，但保险起见
+        if last_error:
+            raise self._wrap_request_error(last_error)
+
+    async def _handle_stream_request(
+        self, url: str, request_body: dict,
+        extra_headers: Optional[Dict[str, str]] = None
+    ) -> AsyncIterator[Dict[str, Any]]:
         """流式请求处理，返回异步生成器"""
-        session = await self._get_session()
-        loop = asyncio.get_event_loop()
+        client = await self._get_client()
+        headers = extra_headers or {}
 
-        headers = self._build_common_headers()
-        if extra_headers:
-            headers.update(extra_headers)
+        # 流式请求的重试：仅在建立连接阶段重试
+        last_error = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                logger.debug(f"Infer 流式请求: {url}")
+                async with client.stream("POST", url, json=request_body, headers=headers) as response:
+                    if response.status_code in _RETRY_STATUS_CODES:
+                        if attempt < self._max_retries:
+                            wait = 2 ** attempt
+                            logger.warning(
+                                f"Infer 流式请求返回 {response.status_code}，"
+                                f"第 {attempt + 1}/{self._max_retries} 次重试，等待 {wait}s"
+                            )
+                            # 消费响应体以便复用连接
+                            await response.aread()
+                            await asyncio.sleep(wait)
+                            continue
 
-        try:
-            logger.debug(f"Infer 流式请求: {url}")
-            response = await loop.run_in_executor(
-                self._executor,
-                lambda: session.post(
-                    url,
-                    json=request_body,
-                    headers=headers,
-                    timeout=self._timeout_config,
-                    stream=True
-                )
-            )
-            response.raise_for_status()
+                    response.raise_for_status()
 
-            async for chunk in self._async_stream_gen(response):
-                yield chunk
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            content = line[6:]
+                            if content == "[DONE]":
+                                return
+                            try:
+                                yield json.loads(content)
+                            except json.JSONDecodeError:
+                                continue
+                    return
 
-        except Exception as e:
-            self._wrap_request_error(e)
+            except httpx.HTTPStatusError as e:
+                # 非重试状态码（400/500 等）：不重试，直接抛出业务异常
+                raise self._wrap_request_error(e)
+            except httpx.RequestError as e:
+                last_error = e
+                if attempt < self._max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        f"Infer 流式请求异常: {e}，"
+                        f"第 {attempt + 1}/{self._max_retries} 次重试，等待 {wait}s"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                raise self._wrap_request_error(e)
 
-    async def _async_stream_gen(self, response: requests.Response) -> AsyncIterator[Dict[str, Any]]:
-        """异步生成器：解析 SSE 流数据"""
-        loop = asyncio.get_event_loop()
-        try:
-            iterator = response.iter_lines()
-            while True:
-                # 在线程池中执行迭代，避免阻塞事件循环
-                line = await loop.run_in_executor(self._executor, next, iterator, None)
-                if line is None:
-                    break
-                decoded_line = line.decode('utf-8').strip()
-                if decoded_line.startswith("data: "):
-                    content = decoded_line[6:]
-                    if content == "[DONE]":
-                        break
-                    try:
-                        yield json.loads(content)
-                    except json.JSONDecodeError:
-                        continue
-        finally:
-            response.close()
+        if last_error:
+            raise self._wrap_request_error(last_error)
 
     # --- OpenAI Completions 接口 ---
 
@@ -288,15 +295,8 @@ class InferClient:
             yield chunk
 
     def _build_completion_body(self, prompt, model, stream, request_id=None, **kwargs):
-        """构建 Completion 请求体（黑名单透传模式）
-
-        已显式处理的参数不再通过 kwargs 透传，避免重复。
-        Chat Completions 特有参数会被自动过滤/映射。
-        """
-        # 参数转换（Chat -> Completion）
+        """构建 Completion 请求体（黑名单透传模式）"""
         transformed = self._transform_chat_params_to_completion(kwargs, request_id)
-
-        # 已在 body 中显式处理的参数
         handled_params = {"model", "prompt", "stream", "max_tokens", "temperature", "logprobs", "extra_body"}
 
         body = {
@@ -309,7 +309,6 @@ class InferClient:
             "return_token_ids": True
         }
 
-        # 透传所有未显式处理的参数
         for k, v in transformed.items():
             if k not in handled_params and v is not None:
                 body[k] = v
@@ -330,12 +329,7 @@ class InferClient:
             yield chunk
 
     def _build_chat_body(self, messages, model, stream, **kwargs):
-        """构建 Chat 请求体（黑名单透传模式）
-
-        已在 body 中显式处理的参数不再通过 kwargs 透传，避免重复。
-        其余参数全部透传到推理服务。
-        """
-        # 已在 body 中显式处理的参数
+        """构建 Chat 请求体（黑名单透传模式）"""
         handled_params = {"model", "messages", "stream"}
 
         body = {
@@ -344,7 +338,6 @@ class InferClient:
             "stream": stream
         }
 
-        # 透传所有未显式处理的参数
         for k, v in kwargs.items():
             if k not in handled_params and v is not None:
                 body[k] = v
@@ -352,4 +345,4 @@ class InferClient:
         return body
 
     def __repr__(self) -> str:
-        return f"InferClient(requests_stabilized)(base_url={self.base_url})"
+        return f"InferClient(httpx)(base_url={self.base_url})"

@@ -12,6 +12,7 @@ ProcessorManager - 多模型处理器管理器
 """
 
 import asyncio
+import time
 from collections import OrderedDict
 from typing import Dict, Optional, List, Tuple
 from datetime import datetime
@@ -29,7 +30,7 @@ from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.store.models import ModelConfig
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
-from traj_proxy.utils.config import get_models_dir, get_infer_client_config, get_processor_cache_max_size
+from traj_proxy.utils.config import get_models_dir, get_infer_client_config, get_processor_cache_max_size, get_processor_idle_timeout
 
 # API 数据模型已移至 schemas 模块
 from traj_proxy.serve.schemas import (
@@ -81,6 +82,11 @@ class ProcessorManager:
         # Tokenizer 共享缓存
         self._tokenizer_cache = TokenizerCache()
 
+        # 空闲淘汰状态
+        self._last_access_time: Dict[Tuple[str, str], float] = {}
+        self._idle_timeout: int = get_processor_idle_timeout()
+        self._idle_eviction_task: Optional[asyncio.Task] = None
+
         # 模型注册表（供 ModelSynchronizer 使用）
         self.model_registry = ModelRepository(db_manager.pool)
         self.request_repository = RequestRepository(db_manager.pool)
@@ -97,7 +103,7 @@ class ProcessorManager:
         """动态模型注册数"""
         return len(self._dynamic_configs)
 
-    def _create_processor(
+    async def _create_processor(
         self,
         model_name: str,
         url: str,
@@ -135,10 +141,10 @@ class ProcessorManager:
         if token_in_token_out and not tokenizer_path:
             raise ValueError("token_in_token_out=True 时，tokenizer_path 必须提供")
 
-        # 从共享缓存获取 tokenizer（相同 path 只加载一次）
+        # 从共享缓存获取 tokenizer（相同 path 只加载一次，非阻塞）
         shared_tokenizer = None
         if token_in_token_out and tokenizer_path:
-            shared_tokenizer = self._tokenizer_cache.get_or_load(tokenizer_path)
+            shared_tokenizer = await self._tokenizer_cache.get_or_load(tokenizer_path)
 
         # 获取 InferClient 超时配置
         infer_config = get_infer_client_config()
@@ -173,23 +179,33 @@ class ProcessorManager:
     # ========== LRU 缓存管理 ==========
 
     def _touch(self, key: Tuple[str, str]) -> None:
-        """标记 key 为最近使用"""
+        """标记 key 为最近使用并更新访问时间"""
         if key in self._processor_cache:
             self._processor_cache.move_to_end(key)
+            self._last_access_time[key] = time.monotonic()
 
-    def _evict_one(self) -> None:
+    async def _release_processor_async(self, processor: Processor) -> None:
+        """异步释放 Processor 持有的所有资源"""
+        if processor.infer_client:
+            try:
+                await processor.infer_client.close()
+            except Exception as e:
+                logger.debug(f"释放 InferClient 异常（可忽略）: {e}")
+        if processor.tokenizer_path and processor.token_in_token_out:
+            self._tokenizer_cache.release(processor.tokenizer_path)
+
+    async def _evict_one(self) -> None:
         """淘汰最久未使用的 Processor"""
         if self._processor_cache:
             evicted_key, evicted = self._processor_cache.popitem(last=False)
-            # 释放 tokenizer 引用
-            if evicted.tokenizer_path and evicted.token_in_token_out:
-                self._tokenizer_cache.release(evicted.tokenizer_path)
+            self._last_access_time.pop(evicted_key, None)
+            await self._release_processor_async(evicted)
             logger.info(
                 f"LRU 淘汰: run_id={evicted_key[0]}, model_name={evicted_key[1]}, "
                 f"cache_size={len(self._processor_cache)}"
             )
 
-    def _build_processor(self, config: ModelConfig) -> Processor:
+    async def _build_processor(self, config: ModelConfig) -> Processor:
         """从 ModelConfig 创建 Processor（不存储）
 
         tokenizer 路径已在注册时解析为标准路径，此处直接使用。
@@ -200,7 +216,7 @@ class ProcessorManager:
         Returns:
             新创建的 Processor 实例
         """
-        return self._create_processor(
+        return await self._create_processor(
             model_name=config.model_name,
             url=config.url,
             api_key=config.api_key,
@@ -211,27 +227,6 @@ class ProcessorManager:
             reasoning_parser=config.reasoning_parser,
             updated_at=config.updated_at
         )
-
-    def _sync_load_processor(self, key: Tuple[str, str], config: ModelConfig) -> Optional[Processor]:
-        """同步加载 Processor（无锁版本）
-
-        适用于同步方法中的首次加载。
-        """
-        while len(self._processor_cache) >= self._cache_max_size:
-            self._evict_one()
-
-        try:
-            processor = self._build_processor(config)
-        except Exception as e:
-            logger.error(f"创建 Processor 失败 [{key}]: {e}\n{traceback.format_exc()}")
-            return None
-
-        self._processor_cache[key] = processor
-        logger.info(
-            f"Processor 加载到缓存: run_id={key[0]}, model_name={key[1]}, "
-            f"cache_size={len(self._processor_cache)}/{self._cache_max_size}"
-        )
-        return processor
 
     async def _load_processor(self, key: Tuple[str, str]) -> Optional[Processor]:
         """异步加载 Processor 到 LRU 缓存（带锁保护）
@@ -262,16 +257,17 @@ class ProcessorManager:
 
             # 淘汰旧项（如有必要）
             while len(self._processor_cache) >= self._cache_max_size:
-                self._evict_one()
+                await self._evict_one()
 
             # 创建 Processor
             try:
-                processor = self._build_processor(config)
+                processor = await self._build_processor(config)
             except Exception as e:
                 logger.error(f"创建 Processor 失败 [{key}]: {e}\n{traceback.format_exc()}")
                 return None
 
             self._processor_cache[key] = processor
+            self._last_access_time[key] = time.monotonic()
             logger.info(
                 f"Processor 加载到缓存: run_id={key[0]}, model_name={key[1]}, "
                 f"cache_size={len(self._processor_cache)}/{self._cache_max_size}"
@@ -299,9 +295,10 @@ class ProcessorManager:
             key: (run_id, model_name) 元组
         """
         self._dynamic_configs.pop(key, None)
+        self._last_access_time.pop(key, None)
         removed = self._processor_cache.pop(key, None)
-        if removed and removed.tokenizer_path and removed.token_in_token_out:
-            self._tokenizer_cache.release(removed.tokenizer_path)
+        if removed:
+            await self._release_processor_async(removed)
         logger.info(f"模型已注销: run_id={key[0]}, model_name={key[1]}")
 
     async def full_sync(self, db_models: List[ModelConfig]):
@@ -334,18 +331,20 @@ class ProcessorManager:
                     existing.reasoning_parser != config.reasoning_parser):
                     # 配置变更，更新 config 并淘汰旧 Processor
                     self._dynamic_configs[key] = config
+                    self._last_access_time.pop(key, None)
                     old = self._processor_cache.pop(key, None)
-                    if old and old.tokenizer_path and old.token_in_token_out:
-                        self._tokenizer_cache.release(old.tokenizer_path)
+                    if old:
+                        await self._release_processor_async(old)
                     logger.info(f"全量同步 - 配置变更，缓存已失效: {key}")
 
         # 删除不在数据库中的模型
         to_remove = local_model_keys - db_model_keys
         for key in to_remove:
             self._dynamic_configs.pop(key, None)
+            self._last_access_time.pop(key, None)
             old = self._processor_cache.pop(key, None)
-            if old and old.tokenizer_path and old.token_in_token_out:
-                self._tokenizer_cache.release(old.tokenizer_path)
+            if old:
+                await self._release_processor_async(old)
             logger.info(f"全量同步 - 已删除: run_id={key[0]}, model_name={key[1]}")
 
     # ========== 公开注册接口 ==========
@@ -514,9 +513,10 @@ class ProcessorManager:
         # 优先从 dynamic_configs 删除
         if key in self._dynamic_configs:
             del self._dynamic_configs[key]
+            self._last_access_time.pop(key, None)
             removed = self._processor_cache.pop(key, None)
-            if removed and removed.tokenizer_path and removed.token_in_token_out:
-                self._tokenizer_cache.release(removed.tokenizer_path)
+            if removed:
+                await self._release_processor_async(removed)
             logger.info(f"[{model_name}] 删除动态模型成功: run_id={run_id}")
             deleted = True
         elif key in self._config_configs:
@@ -540,37 +540,6 @@ class ProcessorManager:
         return deleted
 
     # ========== Processor 查询接口 ==========
-
-    def get_processor(self, run_id: str, model_name: str) -> Optional[Processor]:
-        """根据 run_id 和 model_name 获取 Processor（同步，兼容旧接口）
-
-        查找顺序：
-        1. LRU 缓存（命中则刷新使用时间）
-        2. 配置字典（命中则懒加载）
-
-        注意：异步上下文中请优先使用 get_processor_async()。
-
-        Args:
-            run_id: 运行ID
-            model_name: 模型名称
-
-        Returns:
-            Processor 实例，如果不存在则返回 None
-        """
-        key = (run_id, model_name)
-
-        # 检查缓存
-        if key in self._processor_cache:
-            self._touch(key)
-            return self._processor_cache[key]
-
-        # 查找配置
-        config = self._config_configs.get(key) or self._dynamic_configs.get(key)
-        if config is None:
-            return None
-
-        # 懒加载
-        return self._sync_load_processor(key, config)
 
     async def get_processor_async(self, run_id: str, model_name: str) -> Optional[Processor]:
         """根据 run_id 和 model_name 获取 Processor（异步，带锁保护）
@@ -639,24 +608,6 @@ class ProcessorManager:
         except Exception as e:
             logger.error(f"DB 回退查询失败: {e}")
             return None
-
-    def get_processor_or_raise(self, run_id: str, model_name: str) -> Processor:
-        """根据 run_id 和 model_name 获取 Processor，不存在时抛出异常
-
-        Args:
-            run_id: 运行ID
-            model_name: 模型名称
-
-        Returns:
-            Processor 实例
-
-        Raises:
-            ValueError: 如果模型不存在
-        """
-        processor = self.get_processor(run_id, model_name)
-        if processor is None:
-            raise ValueError(f"模型 '{model_name}' 未注册 (run_id={run_id})")
-        return processor
 
     def list_models(self) -> List[Tuple[str, str]]:
         """列出所有已注册的模型（预置 + 动态）
@@ -746,3 +697,68 @@ class ProcessorManager:
             f"或使用绝对路径，或使用 HuggingFace 模型名称（如 'Qwen/Qwen3.5-2B'）。"
             f"已检查目录: {models_dir}"
         )
+
+    # ========== 空闲淘汰 ==========
+
+    async def start_idle_eviction(self):
+        """启动空闲淘汰后台任务"""
+        if self._idle_timeout <= 0:
+            logger.info("空闲淘汰已禁用 (processor_idle_timeout=0)")
+            return
+        self._idle_eviction_task = asyncio.create_task(self._idle_eviction_loop())
+        logger.info(f"空闲淘汰已启动，超时: {self._idle_timeout}秒")
+
+    async def stop_idle_eviction(self):
+        """停止空闲淘汰后台任务"""
+        if self._idle_eviction_task:
+            self._idle_eviction_task.cancel()
+            try:
+                await self._idle_eviction_task
+            except asyncio.CancelledError:
+                pass
+            self._idle_eviction_task = None
+            logger.info("空闲淘汰已停止")
+
+    async def _idle_eviction_loop(self):
+        """定期扫描并淘汰空闲 Processor"""
+        check_interval = max(30, self._idle_timeout // 4)
+        while True:
+            try:
+                await asyncio.sleep(check_interval)
+                await self._evict_idle_processors()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"空闲淘汰循环异常: {e}\n{traceback.format_exc()}")
+
+    async def _evict_idle_processors(self):
+        """淘汰所有超时未使用的 Processor"""
+        if not self._processor_cache:
+            return
+
+        now = time.monotonic()
+        keys_to_evict = [
+            key for key, last_time in self._last_access_time.items()
+            if now - last_time > self._idle_timeout
+        ]
+
+        if not keys_to_evict:
+            return
+
+        for key in keys_to_evict:
+            processor = self._processor_cache.pop(key, None)
+            self._last_access_time.pop(key, None)
+            if processor:
+                await self._release_processor_async(processor)
+                logger.info(
+                    f"空闲淘汰: run_id={key[0]}, model_name={key[1]}, "
+                    f"cache_size={len(self._processor_cache)}"
+                )
+
+    async def clear_cache(self):
+        """清理所有缓存中的 Processor 并释放资源"""
+        for key, processor in list(self._processor_cache.items()):
+            await self._release_processor_async(processor)
+        self._processor_cache.clear()
+        self._last_access_time.clear()
+        logger.info("ProcessorManager 缓存已清理")

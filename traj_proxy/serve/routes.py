@@ -19,7 +19,6 @@ import uuid
 # 轨迹查询超时配置（秒）
 TRAJECTORY_DB_TIMEOUT = 30
 TRAJECTORY_SERIALIZE_TIMEOUT = 30
-TRAJECTORY_SEMAPHORE_ACQUIRE_TIMEOUT = 5.0
 
 try:
     import orjson
@@ -28,6 +27,7 @@ except ImportError:
     _HAS_ORJSON = False
 
 from traj_proxy.utils.logger import get_logger
+from traj_proxy.utils.config import get_semaphore_acquire_timeout
 from traj_proxy.serve.schemas import (
     RegisterModelRequest,
     RegisterModelResponse,
@@ -168,7 +168,7 @@ async def chat_completions(
     acquired = False
     if semaphore:
         try:
-            await asyncio.wait_for(semaphore.acquire(), timeout=5.0)
+            await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
             acquired = True
         except asyncio.TimeoutError:
             max_conc = getattr(request.app.state, "max_concurrent_requests", "?")
@@ -529,7 +529,7 @@ async def get_trajectory(
     acquired = False
     if semaphore:
         try:
-            await asyncio.wait_for(semaphore.acquire(), timeout=TRAJECTORY_SEMAPHORE_ACQUIRE_TIMEOUT)
+            await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
             acquired = True
         except asyncio.TimeoutError:
             raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
@@ -659,7 +659,7 @@ async def get_trajectory_detail(
     acquired = False
     if semaphore:
         try:
-            await asyncio.wait_for(semaphore.acquire(), timeout=TRAJECTORY_SEMAPHORE_ACQUIRE_TIMEOUT)
+            await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
             acquired = True
         except asyncio.TimeoutError:
             raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")

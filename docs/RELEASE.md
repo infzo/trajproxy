@@ -4,6 +4,43 @@
 
 ---
 
+## [0.2.4] - 2026-05-28
+
+**类型**: 重构 + 功能增强
+
+### 重构
+- **InferClient 改用 httpx 异步 HTTP**: 从 `requests` + `ThreadPoolExecutor` 重构为 `httpx.AsyncClient` 纯协程实现，移除线程池开销，直接在事件循环中处理 TCP I/O。手动实现 502/503/504 指数退避重试，流式请求使用 `client.stream()` + `aiter_lines()` 原生异步迭代
+- **ProcessorManager 异步化资源释放**: `_create_processor`、`_evict_one`、`_build_processor` 全部改为 `async`，淘汰/注销时异步关闭 InferClient 连接和释放 Tokenizer 引用。移除同步方法 `get_processor`、`get_processor_or_raise`、`_sync_load_processor`
+- **TokenizerCache 异步加载**: `get_or_load` 改为 `async`，首次加载使用 `asyncio.to_thread` 避免阻塞事件循环，新增 `asyncio.Lock` 防止并发加载同一 tokenizer（双重检查）
+
+### 新增功能
+- **Processor 空闲淘汰**: 后台定期扫描，超时未访问的 Processor 自动淘汰并释放资源（`processor_idle_timeout` 可配置，默认 300 秒，0 = 禁用）
+- **信号量获取超时可配置**: 信号量获取超时从硬编码改为 `semaphore_acquire_timeout` 配置项（默认 5.0 秒），适用于 chat/completions 和轨迹查询端点
+- **ProcessorManager 优雅关闭**: `shutdown` 时停止空闲淘汰任务并清理 LRU 缓存
+
+### 配置更新
+- `proxy_workers.max_concurrent_requests`: 128 → 256
+- `proxy_workers.semaphore_acquire_timeout`: 新增，信号量获取超时（默认 5.0 秒）
+- `proxy_workers.processor_idle_timeout`: 新增，Processor 空闲淘汰超时（默认 300 秒）
+- `infer_client.connect_timeout`: 60 → 10 秒
+- `infer_client.max_connections`: 1000 → 0（不限制，由后端推理服务控制并发）
+- `database.pool.min_size`: 10 → 2，`max_size`: 30 → 4（优化连接池资源占用）
+
+### 依赖变更
+- 新增 `httpx` 依赖（替代 `requests`）
+- 移除 `requests`、`urllib3` 直接依赖
+
+### 影响范围
+- `traj_proxy/proxy_core/infer_client.py` - httpx 异步重构
+- `traj_proxy/proxy_core/processor_manager.py` - 异步化 + 空闲淘汰
+- `traj_proxy/proxy_core/tokenizer_cache.py` - 异步加载
+- `traj_proxy/serve/routes.py` - 信号量超时可配置
+- `traj_proxy/utils/config.py` - 新增配置函数
+- `traj_proxy/workers/worker.py` - 启动/关闭空闲淘汰
+- `configs/config.yaml` - 配置参数调整
+
+---
+
 ## [0.2.3] - 2026-05-26
 
 **类型**: 重构 + Bug 修复
