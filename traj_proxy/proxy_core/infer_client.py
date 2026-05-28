@@ -302,8 +302,6 @@ class InferClient:
         body = {
             "model": model,
             "prompt": prompt,
-            "max_tokens": transformed.get("max_tokens") if transformed.get("max_tokens") is not None else 100,
-            "temperature": transformed.get("temperature") if transformed.get("temperature") is not None else 0.7,
             "stream": stream,
             "logprobs": 1,
             "return_token_ids": True

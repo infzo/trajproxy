@@ -3,7 +3,7 @@
 # 测试流程：启动mock服务 -> 注册模型(直接模式) -> 发送请求(带扩展参数和header) -> 验证mock收到的请求 -> 删除模型 -> 停止mock
 #
 # 验证要点：
-#   1. OpenAI 标准参数(n, seed, stop, logprobs, top_logprobs, user)被透传到后端
+#   1. OpenAI 标准参数(n, seed, stop, top_logprobs, user)被透传到后端；logprobs 始终被强制覆盖为 1（用于轨迹存储）
 #   2. 自定义header(x-sandbox-traj-id)被透传
 #   3. 内部header(x-run-id, x-session-id, authorization)不被转发
 
@@ -174,7 +174,7 @@ N_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:n=" | cut -d= -f2)
 assert_eq "1" "$N_VAL" "n参数应被透传，期望1"
 
 LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "True" "$LOGPROBS_VAL" "logprobs参数应被透传"
+assert_eq "1" "$LOGPROBS_VAL" "logprobs应被强制覆盖为1（用于轨迹存储），而非透传客户端的true"
 
 USER_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:user=" | cut -d= -f2)
 assert_eq "test-user-passthrough" "$USER_VAL" "user参数应被透传"
