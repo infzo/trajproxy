@@ -86,6 +86,24 @@ show_services_status() {
     echo ""
 }
 
+# 检查并清理已运行的服务容器
+# 如果存在运行中的容器，先执行 down 操作确保干净部署
+cleanup_running_services() {
+    # 获取当前 compose 项目下的容器数量（包括运行和停止的）
+    local running_containers
+    running_containers=$(docker-compose ps -q 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "${running_containers}" -gt 0 ]; then
+        echo "检测到 ${running_containers} 个已存在的容器，先进行清理..."
+        docker-compose down --timeout ${STOP_TIMEOUT}
+        echo "已清理完毕，准备重新部署。"
+        echo ""
+    else
+        echo "未检测到已运行的容器，直接部署。"
+        echo ""
+    fi
+}
+
 # 启动所有服务
 start_service() {
     echo "=== 启动 TrajProxy 服务 ==="
@@ -93,6 +111,9 @@ start_service() {
 
     # 检查 compose 文件
     check_compose_file
+
+    # 检查并清理已运行的服务，确保干净部署
+    cleanup_running_services
 
     # 启动服务
     echo "启动所有服务..."
