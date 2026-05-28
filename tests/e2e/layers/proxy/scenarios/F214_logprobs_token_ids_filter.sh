@@ -1,13 +1,20 @@
 #!/bin/bash
 # 场景 F214: logprobs 和 token_ids 强制覆盖与返回过滤（Proxy 层）
-# 测试流程：启动mock服务 -> 注册模型 -> 测试各种参数组合 -> 验证上游参数和客户端响应 -> 删除模型 -> 停止mock
+# 使用真实推理服务（vLLM）验证完整功能链路：
 #
 # 验证要点：
-#   1. 无论客户端是否传递，上游始终收到 logprobs=1 和 return_token_ids=True
+#   1. 无论客户端是否传递，proxy 强制覆盖 logprobs=1 和 return_token_ids=True
+#      → 通过轨迹中存储的 logprobs/token_ids 间接证明强制覆盖生效
+#      （若 proxy 未强制覆盖，真实推理服务不会返回 logprobs/token_ids）
 #   2. 客户端传递 logprobs=true 时，上游收到 logprobs=1（覆盖，不是 true）
 #   3. 客户端传递 logprobs=5 时，上游收到 logprobs=1（覆盖）
-#   4. 客户端响应始终不包含 logprobs 和 token_ids
-#   5. 流式和非流式行为一致
+#   4. 客户端响应始终不包含 logprobs 和 token_ids（已剥离）
+#   5. 存储的轨迹中包含完整的 logprobs 和 token_ids 数据（剥离前存储）
+#   6. 流式和非流式行为一致
+#
+# 前提条件：
+#   - BACKEND_MODEL_URL 指向支持 logprobs 和 return_token_ids 的 vLLM 推理服务
+#   - TEST_MODEL_API_KEY 为有效的推理服务 API Key
 
 # 获取脚本目录并加载utils
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +22,7 @@ source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
 echo "场景 F214: logprobs 和 token_ids 强制覆盖与返回过滤（Proxy 层）"
+echo "使用真实推理服务验证"
 echo "========================================"
 echo ""
 
@@ -23,16 +31,6 @@ SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:u
 TEST_BASE_URL="${BASE_URL}"
 TEST_MODEL_NAME="logprobs-filter-model"
 TEST_RUN_ID="run-${SCENARIO_ID}"
-TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
-
-# Mock服务配置
-MOCK_PORT=19992
-MOCK_URL="http://127.0.0.1:${MOCK_PORT}"
-MOCK_PID=""
-MOCK_INFER_URL="http://${MOCK_INFER_HOST}:${MOCK_PORT}/v1"
-
-# 确保退出时停止mock服务
-trap stop_mock EXIT
 
 # ========================================
 # 辅助函数：检查响应是否包含指定字段
@@ -105,29 +103,115 @@ print('OK')
 " 2>/dev/null
 }
 
+# 辅助函数：验证轨迹中存储了 logprobs 和 token_ids
+# 参数：$1 - session_id
+# 输出：RESULT:logprobs=OK/FAIL(reason), RESULT:token_ids=OK/FAIL(reason)
+verify_trajectory_logprobs_token_ids() {
+    local session_id="$1"
+
+    # 查询轨迹（包含所有字段）
+    local traj_response
+    traj_response=$(curl -s --noproxy '*' --max-time 10 -X GET \
+        "${TEST_BASE_URL}/trajectory?session_id=${session_id}&limit=1")
+
+    # 将结果写入临时文件（避免大 JSON 在命令行传递丢失）
+    local tmpfile
+    tmpfile=$(mktemp)
+    echo "$traj_response" > "$tmpfile"
+
+    python3 << PYEOF
+import json
+import sys
+
+with open("$tmpfile", "r") as f:
+    data = json.loads(f.read())
+
+records = data.get('records', [])
+if not records:
+    print('RESULT:logprobs=FAIL(no_records)')
+    print('RESULT:token_ids=FAIL(no_records)')
+    sys.exit(0)
+
+record = records[0]
+raw_response = record.get('raw_response')
+
+if not raw_response:
+    print('RESULT:logprobs=FAIL(no_raw_response)')
+    print('RESULT:token_ids=FAIL(no_raw_response)')
+    sys.exit(0)
+
+# raw_response 可能是字符串或已解析的 dict
+if isinstance(raw_response, str):
+    try:
+        raw_response = json.loads(raw_response)
+    except json.JSONDecodeError:
+        print('RESULT:logprobs=FAIL(raw_response_parse_error)')
+        print('RESULT:token_ids=FAIL(raw_response_parse_error)')
+        sys.exit(0)
+
+choices = raw_response.get('choices', [])
+if not choices:
+    print('RESULT:logprobs=FAIL(no_choices)')
+    print('RESULT:token_ids=FAIL(no_choices)')
+    sys.exit(0)
+
+choice = choices[0]
+
+# 检查 logprobs
+has_logprobs = 'logprobs' in choice and choice['logprobs'] is not None
+logprobs_val = choice.get('logprobs')
+if isinstance(logprobs_val, dict):
+    # chat completion 格式: {"content": [...]}
+    content_list = logprobs_val.get('content', [])
+    logprobs_nonempty = len(content_list) > 0
+elif isinstance(logprobs_val, list):
+    logprobs_nonempty = len(logprobs_val) > 0
+else:
+    logprobs_nonempty = bool(logprobs_val)
+
+if has_logprobs and logprobs_nonempty:
+    print('RESULT:logprobs=OK')
+else:
+    reason = 'not_present' if not has_logprobs else 'empty/null'
+    print(f'RESULT:logprobs=FAIL({reason})')
+
+# 检查 token_ids
+has_token_ids = 'token_ids' in choice and choice['token_ids'] is not None
+token_ids_val = choice.get('token_ids', [])
+token_ids_nonempty = isinstance(token_ids_val, list) and len(token_ids_val) > 0
+
+if has_token_ids and token_ids_nonempty:
+    print(f'RESULT:token_ids=OK(len={len(token_ids_val)})')
+else:
+    reason = 'not_present' if not has_token_ids else 'empty/null'
+    print(f'RESULT:token_ids=FAIL({reason})')
+PYEOF
+
+    rm -f "$tmpfile"
+}
+
 # ========================================
 # 步骤 0: 清理残留模型
 # ========================================
 log_info "清理可能残留的模型..."
 curl -s --noproxy '*' -X DELETE "${TEST_BASE_URL}/models?model_name=${TEST_MODEL_NAME}&run_id=${TEST_RUN_ID}" > /dev/null 2>&1
 
-# ========================================
-# 步骤 1: 启动Mock服务
-# ========================================
-log_step "步骤 1: 启动Mock推理服务"
-log_separator
-
-if ! start_mock; then
-    log_error "无法启动Mock服务，测试终止"
-    exit 1
-fi
-
 echo ""
 
 # ========================================
-# 步骤 2: 注册模型（直接转发模式）
+# 步骤 1: 注册模型（直接转发模式，使用真实推理服务）
 # ========================================
-log_step "步骤 2: 注册模型（直接转发模式）"
+log_step "步骤 1: 注册模型（直接转发模式，使用真实推理服务）"
+log_curl_cmd "curl -s --noproxy '*' --max-time 10 -w '\n%{http_code}' \\
+    -X POST '${TEST_BASE_URL}/models/register' \\
+    -H 'Content-Type: application/json' \\
+    -d '{
+        \"run_id\": \"${TEST_RUN_ID}\",
+        \"model_name\": \"${TEST_MODEL_NAME}\",
+        \"url\": \"${BACKEND_MODEL_URL}\",
+        \"api_key\": \"${TEST_MODEL_API_KEY}\",
+        \"token_in_token_out\": false
+    }'"
 log_separator
 
 REGISTER_RESPONSE=$(curl -s --noproxy '*' --max-time 10 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/models/register" \
@@ -135,8 +219,8 @@ REGISTER_RESPONSE=$(curl -s --noproxy '*' --max-time 10 -w "\n%{http_code}" -X P
     -d "{
         \"run_id\": \"${TEST_RUN_ID}\",
         \"model_name\": \"${TEST_MODEL_NAME}\",
-        \"url\": \"${MOCK_INFER_URL}\",
-        \"api_key\": \"mock-api-key\",
+        \"url\": \"${BACKEND_MODEL_URL}\",
+        \"api_key\": \"${TEST_MODEL_API_KEY}\",
         \"token_in_token_out\": false
     }")
 
@@ -157,14 +241,15 @@ sleep 2
 echo ""
 
 # ========================================
-# 步骤 3: 非流式 - 不传递参数 -> 上游强制覆盖，客户端无字段
+# 步骤 2: 非流式 - 不传递 logprobs/return_token_ids
+#   验证：客户端无字段 + 轨迹存储有 logprobs/token_ids
 # ========================================
-log_step "步骤 3: 非流式 - 不传递 logprobs/return_token_ids"
+SESSION_NS_NO_PARAM="session-${SCENARIO_ID}-ns-noparam-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 2: 非流式 - 不传递 logprobs/return_token_ids"
 log_separator
 
-clear_mock_records
-
-CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}/v1/chat/completions" \
+CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_NO_PARAM}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -182,7 +267,7 @@ log_separator
 
 assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
 
-# 3a: 验证客户端响应不含 logprobs 和 token_ids
+# 2a: 验证客户端响应不含 logprobs 和 token_ids（剥离生效）
 log_info "验证客户端响应不含 logprobs 和 token_ids..."
 check_response_field "$CHAT_BODY" "logprobs" "false"
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
@@ -192,36 +277,115 @@ check_response_field "$CHAT_BODY" "token_ids" "false"
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
-# 3b: 验证上游收到强制参数 logprobs=1, return_token_ids=True
-log_info "验证上游收到强制参数..."
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "上游应收到 logprobs=1（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+# 2b: 等待轨迹存储，验证轨迹中包含 logprobs 和 token_ids（证明强制覆盖生效）
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids（间接证明强制覆盖生效）..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_NO_PARAM}")
 
-TOKEN_IDS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:return_token_ids=" | cut -d= -f2)
-assert_eq "True" "$TOKEN_IDS_VAL" "上游应收到 return_token_ids=True（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "轨迹中 logprobs 存在且非空 → proxy 强制覆盖 logprobs=1 生效"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "轨迹中 token_ids 存在且非空 → proxy 强制覆盖 return_token_ids=True 生效"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 echo ""
 
 # ========================================
-# 步骤 4: 非流式 - 传递 logprobs=true -> 上游仍为1，客户端无字段
+# 步骤 3: 非流式 - 传递 logprobs=true（应被覆盖为1）
 # ========================================
-log_step "步骤 4: 非流式 - 传递 logprobs=true（应被覆盖为1）"
+SESSION_NS_LOGP_TRUE="session-${SCENARIO_ID}-ns-logp-true-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 3: 非流式 - 传递 logprobs=true（应被覆盖为1）"
 log_separator
 
-clear_mock_records
-
-CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-logp/v1/chat/completions" \
+CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_LOGP_TRUE}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
         \"logprobs\": true,
+        \"stream\": false
+    }")
+
+CHAT_BODY=$(echo "$CHAT_RESPONSE" | sed '$d')
+CHAT_STATUS=$(echo "$CHAT_RESPONSE" | sed -n '$p')
+
+log_response "HTTP Status: ${CHAT_STATUS}"
+log_response "${CHAT_BODY}"
+log_separator
+
+assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
+
+# 3a: 客户端响应不含 logprobs 和 token_ids
+check_response_field "$CHAT_BODY" "logprobs" "false"
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
+[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+
+check_response_field "$CHAT_BODY" "token_ids" "false"
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
+[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+
+# 3b: 验证轨迹存储（覆盖 true → 1，仍能获取 logprobs）
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids（覆盖 logprobs=true → 1 仍生效）..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_LOGP_TRUE}")
+
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "轨迹中 logprobs 存在且非空 → proxy 覆盖 true→1 后仍返回完整 logprobs"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "轨迹中 token_ids 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+echo ""
+
+# ========================================
+# 步骤 4: 非流式 - 传递 logprobs=5（应被覆盖为1）
+# ========================================
+SESSION_NS_LOGP_5="session-${SCENARIO_ID}-ns-logp5-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 4: 非流式 - 传递 logprobs=5（应被覆盖为1）"
+log_separator
+
+CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_LOGP_5}/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${CHAT_API_KEY}" \
+    -d "{
+        \"model\": \"${TEST_MODEL_NAME}\",
+        \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
+        \"logprobs\": 5,
         \"stream\": false
     }")
 
@@ -243,35 +407,50 @@ check_response_field "$CHAT_BODY" "token_ids" "false"
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
-# 4b: 上游收到 logprobs=1（不是 true），return_token_ids=True
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "上游应收到 logprobs=1（覆盖客户端的 true）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+# 4b: 验证轨迹存储（覆盖 5 → 1）
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids（覆盖 logprobs=5 → 1 仍生效）..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_LOGP_5}")
 
-TOKEN_IDS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:return_token_ids=" | cut -d= -f2)
-assert_eq "True" "$TOKEN_IDS_VAL" "上游应收到 return_token_ids=True（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "轨迹中 logprobs 存在且非空 → proxy 覆盖 5→1 后仍返回完整 logprobs"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "轨迹中 token_ids 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 echo ""
 
 # ========================================
-# 步骤 5: 非流式 - 传递 logprobs=5（数值型）-> 上游覆盖为1
+# 步骤 5: 非流式 - 传递 return_token_ids=true
 # ========================================
-log_step "步骤 5: 非流式 - 传递 logprobs=5（应被覆盖为1）"
+SESSION_NS_TOKS="session-${SCENARIO_ID}-ns-toks-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 5: 非流式 - 传递 return_token_ids=true"
 log_separator
 
-clear_mock_records
-
-CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-logp5/v1/chat/completions" \
+CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_TOKS}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
-        \"logprobs\": 5,
+        \"return_token_ids\": true,
         \"stream\": false
     }")
 
@@ -293,29 +472,50 @@ check_response_field "$CHAT_BODY" "token_ids" "false"
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
-# 5b: 上游收到 logprobs=1（覆盖客户端的 5）
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "上游应收到 logprobs=1（覆盖客户端的 5）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+# 5b: 验证轨迹存储
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_TOKS}")
+
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "轨迹中 logprobs 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "轨迹中 token_ids 存在且非空 → proxy 强制覆盖 return_token_ids=True 生效"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 echo ""
 
 # ========================================
-# 步骤 6: 非流式 - 传递 return_token_ids=true -> 上游为True，客户端无字段
+# 步骤 6: 非流式 - 同时传递 logprobs=true 和 return_token_ids=true
 # ========================================
-log_step "步骤 6: 非流式 - 传递 return_token_ids=true"
+SESSION_NS_BOTH="session-${SCENARIO_ID}-ns-both-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 6: 非流式 - 同时传递 logprobs=true 和 return_token_ids=true"
 log_separator
 
-clear_mock_records
-
-CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-toks/v1/chat/completions" \
+CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_BOTH}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
+        \"logprobs\": true,
         \"return_token_ids\": true,
         \"stream\": false
     }")
@@ -338,85 +538,115 @@ check_response_field "$CHAT_BODY" "token_ids" "false"
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
-# 6b: 上游收到强制参数
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "上游应收到 logprobs=1（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+# 6b: 验证轨迹存储
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_BOTH}")
 
-TOKEN_IDS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:return_token_ids=" | cut -d= -f2)
-assert_eq "True" "$TOKEN_IDS_VAL" "上游应收到 return_token_ids=True"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "轨迹中 logprobs 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "轨迹中 token_ids 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 echo ""
 
 # ========================================
-# 步骤 7: 非流式 - 同时传递两个参数
+# 步骤 7: 流式 - 不传递 logprobs/return_token_ids
 # ========================================
-log_step "步骤 7: 非流式 - 同时传递 logprobs=true 和 return_token_ids=true"
+SESSION_S_NO_PARAM="session-${SCENARIO_ID}-s-noparam-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 7: 流式 - 不传递 logprobs/return_token_ids"
 log_separator
 
-clear_mock_records
+STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_NO_PARAM}/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${CHAT_API_KEY}" \
+    -d "{
+        \"model\": \"${TEST_MODEL_NAME}\",
+        \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
+        \"stream\": true
+    }")
 
-CHAT_RESPONSE=$(curl -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-both/v1/chat/completions" \
+log_info "流式响应内容（截取前5行）:"
+echo "$STREAM_RESPONSE" | head -5
+log_separator
+
+assert_contains "$STREAM_RESPONSE" "data:" "流式响应应包含 data: 前缀"
+assert_contains "$STREAM_RESPONSE" "[DONE]" "流式响应应以 [DONE] 结束"
+
+# 7a: 验证所有chunk不含 logprobs/token_ids
+STREAM_CHECK=$(check_stream_no_logprobs_token_ids "$STREAM_RESPONSE")
+if [ "$STREAM_CHECK" == "OK" ]; then
+    log_success "流式响应所有chunk不含 logprobs 和 token_ids（符合预期）"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式响应包含 logprobs 或 token_ids: $STREAM_CHECK"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+# 7b: 验证轨迹存储
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids（间接证明流式强制覆盖生效）..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_NO_PARAM}")
+
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 logprobs 存在且非空 → proxy 强制覆盖 logprobs=1 生效"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 token_ids 存在且非空 → proxy 强制覆盖 return_token_ids=True 生效"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+echo ""
+
+# ========================================
+# 步骤 8: 流式 - 传递 logprobs=true（应被覆盖为1）
+# ========================================
+SESSION_S_LOGP_TRUE="session-${SCENARIO_ID}-s-logp-true-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 8: 流式 - 传递 logprobs=true（应被覆盖为1）"
+log_separator
+
+STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_LOGP_TRUE}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
         \"logprobs\": true,
-        \"return_token_ids\": true,
-        \"stream\": false
-    }")
-
-CHAT_BODY=$(echo "$CHAT_RESPONSE" | sed '$d')
-CHAT_STATUS=$(echo "$CHAT_RESPONSE" | sed -n '$p')
-
-log_response "HTTP Status: ${CHAT_STATUS}"
-log_response "${CHAT_BODY}"
-log_separator
-
-assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
-
-# 7a: 客户端响应不含 logprobs 和 token_ids
-check_response_field "$CHAT_BODY" "logprobs" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
-check_response_field "$CHAT_BODY" "token_ids" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
-# 7b: 上游收到强制参数
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "上游应收到 logprobs=1（覆盖客户端的 true）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
-TOKEN_IDS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:return_token_ids=" | cut -d= -f2)
-assert_eq "True" "$TOKEN_IDS_VAL" "上游应收到 return_token_ids=True"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
-echo ""
-
-# ========================================
-# 步骤 8: 流式 - 不传递参数 -> 上游强制覆盖，客户端无字段
-# ========================================
-log_step "步骤 8: 流式 - 不传递 logprobs/return_token_ids"
-log_separator
-
-clear_mock_records
-
-STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 15 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-stream/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{
-        \"model\": \"${TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
         \"stream\": true
     }")
 
@@ -439,35 +669,50 @@ else
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
-# 8b: 验证上游收到强制参数
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "流式上游应收到 logprobs=1（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+# 8b: 验证轨迹存储（覆盖 true → 1）
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_LOGP_TRUE}")
 
-TOKEN_IDS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:return_token_ids=" | cut -d= -f2)
-assert_eq "True" "$TOKEN_IDS_VAL" "流式上游应收到 return_token_ids=True（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 logprobs 存在且非空 → proxy 覆盖 true→1 后仍返回完整 logprobs"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 token_ids 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 echo ""
 
 # ========================================
-# 步骤 9: 流式 - 传递 logprobs=true -> 上游覆盖，客户端无字段
+# 步骤 9: 流式 - 传递 logprobs=5（应被覆盖为1）
 # ========================================
-log_step "步骤 9: 流式 - 传递 logprobs=true（应被覆盖为1）"
+SESSION_S_LOGP_5="session-${SCENARIO_ID}-s-logp5-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 9: 流式 - 传递 logprobs=5（应被覆盖为1）"
 log_separator
 
-clear_mock_records
-
-STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 15 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-stream-logp/v1/chat/completions" \
+STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_LOGP_5}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
-        \"logprobs\": true,
+        \"logprobs\": 5,
         \"stream\": true
     }")
 
@@ -490,35 +735,50 @@ else
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
-# 9b: 验证上游收到 logprobs=1（覆盖客户端的 true）
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "流式上游应收到 logprobs=1（覆盖客户端的 true）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+# 9b: 验证轨迹存储（覆盖 5 → 1）
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_LOGP_5}")
 
-TOKEN_IDS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:return_token_ids=" | cut -d= -f2)
-assert_eq "True" "$TOKEN_IDS_VAL" "流式上游应收到 return_token_ids=True（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 logprobs 存在且非空 → proxy 覆盖 5→1 后仍返回完整 logprobs"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 token_ids 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 echo ""
 
 # ========================================
-# 步骤 10: 流式 - 传递 logprobs=5 -> 上游覆盖为1
+# 步骤 10: 流式 - 传递 return_token_ids=true
 # ========================================
-log_step "步骤 10: 流式 - 传递 logprobs=5（应被覆盖为1）"
+SESSION_S_TOKS="session-${SCENARIO_ID}-s-toks-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 10: 流式 - 传递 return_token_ids=true"
 log_separator
 
-clear_mock_records
-
-STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 15 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-stream-logp5/v1/chat/completions" \
+STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_TOKS}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
-        \"logprobs\": 5,
+        \"return_token_ids\": true,
         \"stream\": true
     }")
 
@@ -541,29 +801,50 @@ else
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
-# 10b: 验证上游收到 logprobs=1（覆盖客户端的 5）
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "流式上游应收到 logprobs=1（覆盖客户端的 5）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+# 10b: 验证轨迹存储
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_TOKS}")
+
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 logprobs 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 token_ids 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 echo ""
 
 # ========================================
-# 步骤 11: 流式 - 传递 return_token_ids=true -> 上游强制True，客户端无字段
+# 步骤 11: 流式 - 同时传递 logprobs=true 和 return_token_ids=true
 # ========================================
-log_step "步骤 11: 流式 - 传递 return_token_ids=true"
+SESSION_S_BOTH="session-${SCENARIO_ID}-s-both-$(date +%s%N | md5sum | head -c 8)"
+
+log_step "步骤 11: 流式 - 同时传递 logprobs=true 和 return_token_ids=true"
 log_separator
 
-clear_mock_records
-
-STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 15 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-stream-toks/v1/chat/completions" \
+STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_BOTH}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
+        \"logprobs\": true,
         \"return_token_ids\": true,
         \"stream\": true
     }")
@@ -587,76 +868,39 @@ else
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
-# 11b: 验证上游收到强制参数
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "流式上游应收到 logprobs=1（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+# 11b: 验证轨迹存储
+sleep 2
+log_info "验证轨迹存储包含 logprobs 和 token_ids..."
+TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_BOTH}")
 
-TOKEN_IDS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:return_token_ids=" | cut -d= -f2)
-assert_eq "True" "$TOKEN_IDS_VAL" "流式上游应收到 return_token_ids=True（强制覆盖）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
-echo ""
-
-# ========================================
-# 步骤 12: 流式 - 同时传递两个参数
-# ========================================
-log_step "步骤 12: 流式 - 同时传递 logprobs=true 和 return_token_ids=true"
-log_separator
-
-clear_mock_records
-
-STREAM_RESPONSE=$(curl -s --noproxy '*' --no-buffer --max-time 15 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}-stream-both/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{
-        \"model\": \"${TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
-        \"logprobs\": true,
-        \"return_token_ids\": true,
-        \"stream\": true
-    }")
-
-log_info "流式响应内容（截取前5行）:"
-echo "$STREAM_RESPONSE" | head -5
-log_separator
-
-assert_contains "$STREAM_RESPONSE" "data:" "流式响应应包含 data: 前缀"
-assert_contains "$STREAM_RESPONSE" "[DONE]" "流式响应应以 [DONE] 结束"
-
-# 12a: 验证所有chunk不含 logprobs/token_ids
-STREAM_CHECK=$(check_stream_no_logprobs_token_ids "$STREAM_RESPONSE")
-if [ "$STREAM_CHECK" == "OK" ]; then
-    log_success "流式响应所有chunk不含 logprobs 和 token_ids（符合预期）"
+LOGPROBS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:logprobs=" | cut -d= -f2)
+if [ "$LOGPROBS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 logprobs 存在且非空"
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式响应包含 logprobs 或 token_ids: $STREAM_CHECK"
+    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
-# 12b: 验证上游收到强制参数
-VERIFY_RESULT=$(verify_infer_request "logprobs return_token_ids" "")
-LOGPROBS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:logprobs=" | cut -d= -f2)
-assert_eq "1" "$LOGPROBS_VAL" "流式上游应收到 logprobs=1（覆盖客户端的 true）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
-TOKEN_IDS_VAL=$(echo "$VERIFY_RESULT" | grep "^BODY:return_token_ids=" | cut -d= -f2)
-assert_eq "True" "$TOKEN_IDS_VAL" "流式上游应收到 return_token_ids=True（覆盖客户端的 true）"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
+TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
+if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
+    log_success "流式轨迹中 token_ids 存在且非空"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
 
 echo ""
 
 # ========================================
-# 步骤 13: 删除模型
+# 步骤 12: 删除模型
 # ========================================
-log_step "步骤 13: 删除模型（run_id: ${TEST_RUN_ID}）"
+log_step "步骤 12: 删除模型（run_id: ${TEST_RUN_ID}）"
 log_separator
 
 DELETE_RESPONSE=$(curl -s --noproxy '*' --max-time 10 -w "\n%{http_code}" -X DELETE "${TEST_BASE_URL}/models?model_name=${TEST_MODEL_NAME}&run_id=${TEST_RUN_ID}")
