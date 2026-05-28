@@ -4,6 +4,28 @@
 
 ---
 
+## [0.2.5] - 2026-05-28
+
+**类型**: 功能增强
+
+### 新增功能
+- **logprobs/return_token_ids 强制覆盖**: 上游推理请求始终注入 `logprobs=1` 和 `return_token_ids=True`（用于数据库存储完整轨迹信息），无论客户端是否传递这两个参数
+- **客户端响应自动剥离**: 响应存储到数据库后，自动从返回给客户端的响应中移除 `logprobs` 和 `token_ids` 字段（非流式原地修改，流式返回浅拷贝）
+
+### 优化改进
+- **并发上限调整**: `proxy_workers.max_concurrent_requests` 从 256 提升至 4096，适应高并发场景
+
+### 测试
+- **F214**: 重写 logprobs/token_ids 测试场景，从「返回过滤」改为验证「强制覆盖 + 返回剥离」双重视角（非流式 7 步 + 流式 5 步，覆盖不传/传 true/传数值/组合参数等场景），移除 TITO 模式测试依赖
+
+### 影响范围
+- `traj_proxy/proxy_core/infer_client.py` - 上游请求强制注入 logprobs=1 和 return_token_ids=True
+- `traj_proxy/proxy_core/pipeline/direct_pipeline.py` - 响应剥离 logprobs/token_ids（非流式 + 流式）
+- `dockers/compose/configs/config.yaml` - max_concurrent_requests 256 → 4096
+- `tests/e2e/layers/proxy/scenarios/F214_logprobs_token_ids_filter.sh` - 测试重写
+
+---
+
 ## [0.2.4] - 2026-05-28
 
 **类型**: 重构 + 功能增强
