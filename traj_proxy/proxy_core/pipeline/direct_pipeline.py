@@ -138,8 +138,11 @@ class DirectPipeline(BasePipeline):
                 f"inference_ms={context.inference_duration_ms:.2f}"
             )
 
-            # 存储到数据库
+            # 存储到数据库（保留完整的 logprobs/token_ids）
             await self._store_trajectory(context, run_id=context.run_id)
+
+            # 从响应中剥离 logprobs 和 token_ids，不返回给客户端
+            self._strip_logprobs_token_ids(context.raw_response)
 
             return context
 
@@ -189,7 +192,8 @@ class DirectPipeline(BasePipeline):
                 # 累积流式响应中的所有字段
                 self._accumulate_stream_fields(context, chunk)
                 context.stream_chunk_count += 1
-                yield chunk
+                # 剥离 logprobs 和 token_ids 后再返回给客户端
+                yield self._strip_chunk_logprobs_token_ids(chunk)
 
             # 记录推理总耗时
             context.inference_duration_ms = (time.perf_counter() - infer_start_time) * 1000
@@ -318,15 +322,15 @@ class DirectPipeline(BasePipeline):
             "finish_reason": context.stream_finish_reason or "stop"
         }
 
-        # 仅在请求参数中要求时才返回 logprobs 给客户端
-        if context.stream_logprobs and context.request_params.get('logprobs'):
+        # logprobs 和 token_ids 仅用于数据库存储，不返回给客户端
+        if context.stream_logprobs:
             choice["logprobs"] = context.stream_logprobs
 
         # 添加 vLLM 扩展字段（stop_reason 总是返回）
         if context.stream_stop_reason is not None:
             choice["stop_reason"] = context.stream_stop_reason
-        # 仅在请求参数中要求时才返回 token_ids 给客户端
-        if context.stream_token_ids and context.request_params.get('return_token_ids'):
+        # token_ids 仅用于数据库存储，不返回给客户端
+        if context.stream_token_ids:
             choice["token_ids"] = context.stream_token_ids
 
         # 构建最终响应
@@ -386,3 +390,24 @@ class DirectPipeline(BasePipeline):
 
         # 存储到数据库
         await self._store_trajectory(context, run_id=context.run_id)
+
+    @staticmethod
+    def _strip_logprobs_token_ids(response: Dict[str, Any]) -> None:
+        """从响应的 choices 中移除 logprobs 和 token_ids（原地修改）"""
+        if not response or "choices" not in response:
+            return
+        for choice in response.get("choices", []):
+            choice.pop("logprobs", None)
+            choice.pop("token_ids", None)
+
+    @staticmethod
+    def _strip_chunk_logprobs_token_ids(chunk: Dict[str, Any]) -> Dict[str, Any]:
+        """从流式响应块中移除 logprobs 和 token_ids（返回浅拷贝）"""
+        if "choices" not in chunk:
+            return chunk
+        stripped = {k: v for k, v in chunk.items() if k != "choices"}
+        stripped["choices"] = [
+            {k: v for k, v in c.items() if k not in ("logprobs", "token_ids")}
+            for c in chunk["choices"]
+        ]
+        return stripped

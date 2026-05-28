@@ -330,12 +330,14 @@ class InferClient:
 
     def _build_chat_body(self, messages, model, stream, **kwargs):
         """构建 Chat 请求体（黑名单透传模式）"""
-        handled_params = {"model", "messages", "stream"}
+        handled_params = {"model", "messages", "stream", "logprobs", "return_token_ids"}
 
         body = {
             "model": model,
             "messages": messages,
-            "stream": stream
+            "stream": stream,
+            "logprobs": 1,
+            "return_token_ids": True
         }
 
         for k, v in kwargs.items():
