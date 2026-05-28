@@ -1,0 +1,43 @@
+# 归档进程独立配置（All-in-One 版本）
+# 与核心业务完全独立，归档进程独享此配置文件
+
+# 数据库配置（All-in-One：localhost 通信）
+database:
+  url: "postgresql://llmproxy:dbpassword9090@127.0.0.1:5432/traj_proxy"
+  pool:
+    min_size: 2
+    max_size: 10
+    timeout: 30
+    max_idle: 900
+
+# 归档配置
+archive:
+  retention_days: 30             # 活跃详情保留天数
+  poll_interval: 3600            # 轮询间隔（秒），每小时检查一次
+  num_workers: 1                   # Ray Worker 进程数，默认 1（顺序）
+  compress: true                 # 是否 gzip 压缩，false 则直接上传 jsonl
+  storage_path: "/data/archives" # 本地模式：归档文件保存目录
+  local_temp_path: "/tmp/archives"  # S3 模式：本地临时导出目录
+
+  # S3 存储配置（设为 null 或不设则使用本地文件系统模式）
+  # 启用 S3 时取消注释并填写 bucket：
+  # s3:
+  #   bucket: "my-archive-bucket"
+  #   prefix: "trajproxy-archives/"
+  #   endpoint_url: null           # null = AWS S3；URL = MinIO/Ceph
+  #   verify_ssl: true             # SSL 证书校验，内网自签证书时设为 false
+  #
+  #   # ---- 方式 1: CSB 网关 Token 认证（华为云 CSB 原生 REST API）----
+  #   # app_token 非空时自动启用 CSB 模式，不走 boto3
+  #   app_token: null              # YAML 直接配置，或设环境变量 CSB_APP_TOKEN
+  #   vendor: "HEC"                # CSB 厂商标识
+  #   region: null                 # CSB 区域（CSB 模式必填）
+  #
+  #   # ---- 方式 2: 显式 AK/SK 认证（标准 S3）----
+  #   access_key: null
+  #   secret_key: null
+  #   session_token: null          # STS 临时凭证（可选）
+  #   # region: null               # 标准模式下的 region（可选）
+  #
+  #   # 不配任何凭证时，回退到 boto3 默认凭证链：
+  #   # 环境变量 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY → ~/.aws/credentials → IAM 角色

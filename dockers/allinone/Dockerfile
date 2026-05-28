@@ -49,9 +49,11 @@ RUN PATH="/opt/litellm-venv/bin:$PATH" \
 # 应用代码复制
 # ========================================
 COPY scripts/download_tokenizer.py ./download_tokenizer.py
-COPY scripts/archive_records.py ./scripts/archive_records.py
 COPY dockers/compose/scripts/entrypoint.sh ./scripts/entrypoint.sh
 COPY dockers/allinone/scripts/entrypoint.sh ./scripts/entrypoint_allinone.sh
+
+# traj_archiver 归档独立包
+COPY traj_archiver/ ./traj_archiver/
 
 # models 目录
 RUN mkdir -p ./models
@@ -66,6 +68,7 @@ COPY traj_proxy/ ./traj_proxy/
 COPY dockers/allinone/configs/nginx.conf /etc/nginx/conf.d/default.conf
 COPY dockers/allinone/configs/litellm.yaml /app/configs/litellm.yaml
 COPY dockers/allinone/configs/config.yaml /app/configs/config.yaml
+COPY dockers/allinone/configs/archiver.yaml /app/configs/archiver.yaml
 COPY dockers/allinone/configs/supervisord.conf /etc/supervisor/conf.d/trajproxy.conf
 
 # ========================================

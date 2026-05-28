@@ -54,6 +54,18 @@ fi
 echo "=== TrajProxy All-in-One 容器启动 ==="
 
 # ========================================
+# 检查 /dev/shm 空间（Ray 共享内存要求）
+# ========================================
+SHM_SIZE_KB=$(df -k /dev/shm | tail -1 | awk '{print $2}')
+SHM_SIZE_MB=$((SHM_SIZE_KB / 1024))
+# Ray 建议至少 30% 可用 RAM，实测至少需要 ~1.7GB
+if [ "${SHM_SIZE_MB}" -lt 1700 ]; then
+    echo "⚠ /dev/shm 空间不足: ${SHM_SIZE_MB}MB（建议至少 2GB）"
+    echo "  Ray 将回退到 /tmp，性能会下降"
+    echo "  解决: docker run 时加 --shm-size=2g"
+fi
+
+# ========================================
 # 第一阶段：PostgreSQL 数据目录初始化
 # ========================================
 if [ ! -f "${PGDATA}/PG_VERSION" ]; then
@@ -389,12 +401,30 @@ LITELLM_PRISMA_DIR="/opt/litellm-venv/lib/python3.11/site-packages/litellm/proxy
 if [ -f "${LITELLM_PRISMA_DIR}/schema.prisma" ]; then
     # 添加 litellm-venv/bin 到 PATH，确保 prisma-client-py 生成器可被找到
     export PATH="/opt/litellm-venv/bin:$PATH"
+
+    # 使用 prisma db push 创建表结构（不依赖迁移历史）
     DATABASE_URL="${LITELLM_DATABASE_URL}" \
     /opt/litellm-venv/bin/prisma db push \
         --schema "${LITELLM_PRISMA_DIR}/schema.prisma" \
         --skip-generate \
         --accept-data-loss 2>&1 || \
-    echo "警告: LiteLLM Prisma 迁移失败，LiteLLM 部分功能可能不可用"
+    echo "警告: LiteLLM Prisma db push 失败"
+
+    # 标记 baseline 迁移，避免 LiteLLM 启动时 prisma migrate deploy 报 P3005
+    # 仅在 _prisma_migrations 表存在且无记录时执行（首次初始化场景）
+    MIGRATION_COUNT=$(DATABASE_URL="${LITELLM_DATABASE_URL}" \
+        /opt/litellm-venv/bin/prisma migrate status \
+        --schema "${LITELLM_PRISMA_DIR}/schema.prisma" 2>&1 | \
+        grep -c "Migration.*applied" || echo "0")
+
+    if [ "${MIGRATION_COUNT}" -eq "0" ]; then
+        DATABASE_URL="${LITELLM_DATABASE_URL}" \
+        /opt/litellm-venv/bin/prisma migrate resolve \
+            --applied baseline \
+            --schema "${LITELLM_PRISMA_DIR}/schema.prisma" 2>&1 || \
+        echo "警告: LiteLLM baseline 迁移标记失败（LiteLLM 启动时会自动处理）"
+    fi
+
     echo "LiteLLM 数据表初始化完成"
 else
     echo "警告: 未找到 LiteLLM Prisma schema，跳过迁移"
