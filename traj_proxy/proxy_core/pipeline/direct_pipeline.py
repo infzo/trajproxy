@@ -219,13 +219,19 @@ class DirectPipeline(BasePipeline):
             context: 处理上下文
             chunk: 流式响应块
         """
-        # 累积顶级响应元数据（排除 choices 和 usage，这两个单独处理）
-        # 从每个 chunk 中捕获非 choices/usage 的字段，用于构建 raw_response
+        # 累积顶级响应元数据（排除 choices、usage 和 prompt_token_ids，这三个单独处理）
+        # 从每个 chunk 中捕获非 choices/usage/prompt_token_ids 的字段，用于构建 raw_response
         if context.stream_response_metadata is None:
             context.stream_response_metadata = {}
         for key, value in chunk.items():
-            if key not in ("choices", "usage") and value is not None:
+            if key not in ("choices", "usage", "prompt_token_ids") and value is not None:
                 context.stream_response_metadata[key] = value
+
+        # 累积 prompt_token_ids（vLLM 扩展字段，顶级字段，通常在首chunk中返回完整的prompt token列表）
+        # 与 usage 类似，单独处理而非依赖通用元数据循环，确保即使后续chunk覆盖也不会丢失
+        if "prompt_token_ids" in chunk and chunk["prompt_token_ids"] is not None:
+            # 首chunk包含完整列表，直接赋值；后续chunk不含此字段，不会覆盖
+            context.stream_prompt_token_ids = chunk["prompt_token_ids"]
 
         # 先处理 usage 信息（可能在没有 choices 的单独 chunk 中）
         # vLLM 在流式结束时发送一个只包含 usage 的 chunk
@@ -382,6 +388,11 @@ class DirectPipeline(BasePipeline):
                 "completion_tokens": context.completion_tokens,
                 "total_tokens": context.total_tokens
             }
+
+        # 确保顶级 prompt_token_ids 包含在 raw_response 中（vLLM 扩展字段，仅用于 DB 存储）
+        # prompt_token_ids 是顶级字段（与 id/model/choices/usage 同级），不在 choices 内
+        if context.stream_prompt_token_ids is not None:
+            context.raw_response["prompt_token_ids"] = context.stream_prompt_token_ids
 
         # 直接转发模式下不构建 token_response（与非流式保持一致）
         # logprobs 和 token_ids 已包含在 raw_response 的 choices 中
