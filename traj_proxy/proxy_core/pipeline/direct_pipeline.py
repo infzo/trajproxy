@@ -263,9 +263,17 @@ class DirectPipeline(BasePipeline):
             if fc.get("arguments", None):
                 context.stream_function_call["arguments"] += fc["arguments"]
 
-        # 6. 累积 logprobs
+        # 6. 累积 logprobs（流式模式下每个 chunk 是增量 delta，需追加 content 列表）
         if "logprobs" in choice and choice["logprobs"]:
-            context.stream_logprobs = choice["logprobs"]
+            chunk_logprobs = choice["logprobs"]
+            if context.stream_logprobs is None:
+                context.stream_logprobs = chunk_logprobs
+            else:
+                # 合并 content 列表（增量追加，与 token_ids 的 extend 逻辑一致）
+                if chunk_logprobs.get("content"):
+                    if context.stream_logprobs.get("content") is None:
+                        context.stream_logprobs["content"] = []
+                    context.stream_logprobs["content"].extend(chunk_logprobs["content"])
 
         # 7. 累积 vLLM 扩展字段
         if "stop_reason" in choice and choice["stop_reason"] is not None:
