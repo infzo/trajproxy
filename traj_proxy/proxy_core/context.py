@@ -109,3 +109,7 @@ class ProcessContext:
     stream_logprobs: Optional[Dict[str, Any]] = None            # logprobs
     stream_stop_reason: Optional[Any] = None   # vLLM 扩展字段
     stream_token_ids: Optional[List[int]] = None                # vLLM 扩展字段
+
+    # 流式累积的顶级响应元数据（用于构建 raw_response，保持与非流式结构一致）
+    stream_response_metadata: Optional[Dict[str, Any]] = None  # 累积的顶级元数据字段（id, model, created, system_fingerprint 等）
+    stream_usage_full: Optional[Dict[str, Any]] = None  # 完整的 usage 对象（保留所有子字段，如 prompt_tokens_details 等）

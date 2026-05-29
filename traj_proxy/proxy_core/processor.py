@@ -162,6 +162,26 @@ class Processor:
         )
         return None
 
+    @staticmethod
+    def _warn_unsupported_params(context: "ProcessContext", request_params: Dict[str, Any]) -> None:
+        """警告：logprobs/return_token_ids 由 proxy 强制覆盖，不回传给客户端
+
+        无论客户端是否请求，proxy 都会向推理服务强制请求 logprobs=1 和
+        return_token_ids=True 用于轨迹记录，但不会将这些数据返回给客户端，
+        以确保直接转发模式与 TITO 模式的行为一致。
+        """
+        overridden = []
+        if request_params.get("logprobs"):
+            overridden.append("logprobs")
+        if request_params.get("return_token_ids"):
+            overridden.append("return_token_ids")
+
+        if overridden:
+            logger.warning(
+                f"[{context.unique_id}] 客户端请求了以下字段: {', '.join(overridden)}。"
+                "proxy 会强制向推理服务请求这些数据用于轨迹记录，但不会在客户端响应中返回。"
+            )
+
     # ==================== 非流式处理接口 ====================
 
     async def process_request(
@@ -205,6 +225,8 @@ class Processor:
             f"model={self.model}, messages_count={len(messages)}, "
             f"token_mode={self.token_in_token_out}"
         )
+
+        self._warn_unsupported_params(context, request_params)
 
         try:
             # 使用 Pipeline 处理
@@ -263,6 +285,8 @@ class Processor:
             f"model={self.model}, messages_count={len(messages)}, "
             f"token_mode={self.token_in_token_out}"
         )
+
+        self._warn_unsupported_params(context, request_params)
 
         try:
             # 使用 Pipeline 处理流式请求

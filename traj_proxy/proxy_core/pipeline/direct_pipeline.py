@@ -212,13 +212,27 @@ class DirectPipeline(BasePipeline):
     ):
         """累积流式响应字段
 
+        同时捕获顶级响应元数据（id, model, created, system_fingerprint 等）
+        和完整的 usage 对象，用于在 _finalize_stream 中构建与非流式一致的 raw_response。
+
         Args:
             context: 处理上下文
             chunk: 流式响应块
         """
+        # 累积顶级响应元数据（排除 choices 和 usage，这两个单独处理）
+        # 从每个 chunk 中捕获非 choices/usage 的字段，用于构建 raw_response
+        if context.stream_response_metadata is None:
+            context.stream_response_metadata = {}
+        for key, value in chunk.items():
+            if key not in ("choices", "usage") and value is not None:
+                context.stream_response_metadata[key] = value
+
         # 先处理 usage 信息（可能在没有 choices 的单独 chunk 中）
         # vLLM 在流式结束时发送一个只包含 usage 的 chunk
         if "usage" in chunk and chunk["usage"]:
+            # 捕获完整的 usage 对象，保留所有子字段（如 prompt_tokens_details 等）
+            context.stream_usage_full = chunk["usage"]
+            # 仍然提取个别字段用于 context 快捷访问
             usage = chunk["usage"]
             if usage.get("prompt_tokens", None) is not None:
                 context.prompt_tokens = usage["prompt_tokens"]
@@ -330,62 +344,47 @@ class DirectPipeline(BasePipeline):
             "finish_reason": context.stream_finish_reason or "stop"
         }
 
-        # logprobs 和 token_ids 仅用于数据库存储，不返回给客户端
+        # logprobs 和 token_ids 存入 raw_response 用于数据库轨迹记录，
+        # 客户端侧已在流式阶段通过 _strip_chunk_logprobs_token_ids 剥离，不会收到。
         if context.stream_logprobs:
             choice["logprobs"] = context.stream_logprobs
 
         # 添加 vLLM 扩展字段（stop_reason 总是返回）
         if context.stream_stop_reason is not None:
             choice["stop_reason"] = context.stream_stop_reason
-        # token_ids 仅用于数据库存储，不返回给客户端
+        # token_ids 同 logprobs，仅用于 DB 存储
         if context.stream_token_ids:
             choice["token_ids"] = context.stream_token_ids
 
-        # 构建最终响应
-        context.raw_response = {
-            "id": f"chatcmpl-{context.request_id}",
-            "object": "chat.completion",
-            "created": int(context.start_time.timestamp()),
-            "model": self.model,
-            "choices": [choice],
-            "usage": {
+        # 使用累积的响应元数据构建 raw_response，保持与非流式结构一致
+        # 流式 chunk 的 object 是 "chat.completion.chunk"，需改为非流式格式
+        if context.stream_response_metadata:
+            context.raw_response = dict(context.stream_response_metadata)
+            context.raw_response["object"] = "chat.completion"
+        else:
+            # 如果没有捕获元数据（不应发生），使用合成值兜底
+            context.raw_response = {
+                "id": f"chatcmpl-{context.request_id}",
+                "object": "chat.completion",
+                "created": int(context.start_time.timestamp()),
+                "model": self.model,
+            }
+
+        # 替换 choices（用累积数据重建）
+        context.raw_response["choices"] = [choice]
+
+        # 替换 usage（优先使用后端返回的完整 usage 对象）
+        if context.stream_usage_full:
+            context.raw_response["usage"] = context.stream_usage_full
+        else:
+            context.raw_response["usage"] = {
                 "prompt_tokens": context.prompt_tokens,
                 "completion_tokens": context.completion_tokens,
                 "total_tokens": context.total_tokens
             }
-        }
 
-        # 构建 token_response 用于数据库存储（总是包含 logprobs 和 token_ids）
-        context.token_response = {
-            "id": f"cmpl-{context.unique_id}",
-            "object": "text_completion",
-            "created": int(context.start_time.timestamp()),
-            "model": self.model,
-            "usage": {
-                "prompt_tokens": context.prompt_tokens,
-                "completion_tokens": context.completion_tokens,
-                "total_tokens": context.total_tokens
-            },
-            "choices": [{
-                "text": context.response_text or "",
-                "index": 0,
-                "finish_reason": context.stream_finish_reason or "stop"
-            }]
-        }
-
-        # 添加 logprobs 和 token_ids 到 token_response（用于轨迹存储，无论请求参数是否要求）
-        token_choice = context.token_response["choices"][0]
-        if context.stream_logprobs:
-            token_choice["logprobs"] = context.stream_logprobs
-        if context.stream_token_ids:
-            token_choice["token_ids"] = context.stream_token_ids
-        # 添加 prompt_token_ids（如果有的话）
-        if hasattr(context, 'prompt_token_ids') and context.prompt_token_ids:
-            token_choice["prompt_token_ids"] = context.prompt_token_ids
-
-        # 添加扩展字段
-        if context.stream_stop_reason is not None:
-            token_choice["stop_reason"] = context.stream_stop_reason
+        # 直接转发模式下不构建 token_response（与非流式保持一致）
+        # logprobs 和 token_ids 已包含在 raw_response 的 choices 中
 
         ttft_str = f"{context.ttft_ms:.2f}" if context.ttft_ms else "N/A"
         inference_str = f"{context.inference_duration_ms:.2f}" if context.inference_duration_ms else "N/A"

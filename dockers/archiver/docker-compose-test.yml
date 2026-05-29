@@ -7,6 +7,11 @@
 #
 # 前提:
 #   docker-compose -f dockers/compose/docker-compose.yml build traj_proxy
+#   docker-compose -f dockers/compose/docker-compose.yml up -d  # db 服务需要先启动
+#
+# 网络设计:
+#   - traj-proxy-archiver-network: archiver 自有网络，用于 minio 等测试服务互联
+#   - traj-proxy-compose-network: compose 主网络（external），用于 traj_archiver 访问 db
 
 services:
   minio:
@@ -27,7 +32,7 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - traj-proxy-network
+      - traj-proxy-archiver-network
 
   # MinIO bucket 初始化（启动时创建 bucket）
   minio_init:
@@ -42,7 +47,7 @@ services:
       echo 'MinIO bucket 初始化完成';
       "
     networks:
-      - traj-proxy-network
+      - traj-proxy-archiver-network
 
   traj_archiver:
     image: traj_proxy:latest
@@ -64,13 +69,18 @@ services:
     depends_on:
       minio_init:
         condition: service_completed_successfully
+    # 双网络: archiver 自有网络（访问 minio）+ compose 网络（访问 db）
     networks:
-      - traj-proxy-network
+      - traj-proxy-archiver-network
+      - traj-proxy-compose-network
 
 volumes:
   minio_data:
 
 networks:
-  traj-proxy-network:
+  traj-proxy-archiver-network:
     driver: bridge
-    name: traj-proxy-network
+    name: traj-proxy-archiver-network
+  traj-proxy-compose-network:
+    external: true
+    name: traj-proxy-compose-network

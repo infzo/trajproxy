@@ -32,9 +32,9 @@ services:
       # - AWS_DEFAULT_REGION=us-east-1
     command: python -m traj_archiver
     networks:
-      - traj-proxy-network
+      - traj-proxy-compose-network
 
 networks:
-  traj-proxy-network:
+  traj-proxy-compose-network:
     external: true
-    name: traj-proxy-network
+    name: traj-proxy-compose-network

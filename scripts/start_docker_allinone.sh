@@ -25,6 +25,7 @@ else
 fi
 
 CONTAINER_NAME="traj-proxy"
+NETWORK_NAME="traj-proxy-allinone-network"
 STOP_TIMEOUT=30  # 停止容器的超时时间（秒）
 
 # 显示帮助信息
@@ -124,6 +125,7 @@ stop_existing_container() {
 start_container() {
     echo "启动容器..."
     docker run -d --name "${CONTAINER_NAME}" \
+        --network "${NETWORK_NAME}" \
         --shm-size=1g \
         --add-host=host.docker.internal:host-gateway \
         -p 12345:12345 \
@@ -159,6 +161,9 @@ stop_service() {
         echo ""
         echo "=== TrajProxy 服务已停止 ==="
         echo "说明: 容器已停止并删除，数据卷已保留"
+
+        # 清理专属网络
+        cleanup_network
     else
         echo "容器 ${CONTAINER_NAME} 未在运行"
         echo ""
@@ -202,11 +207,34 @@ start_service() {
     # 创建必要的目录
     create_directories
 
+    # 确保专属网络存在
+    ensure_network_exists
+
     # 停止并删除旧容器
     stop_existing_container
 
     # 启动新容器
     start_container
+}
+
+# 确保专属网络存在（启动时调用）
+ensure_network_exists() {
+    if ! docker network ls --format '{{.Name}}' | grep -q "^${NETWORK_NAME}$"; then
+        echo "创建专属网络 '${NETWORK_NAME}'..."
+        docker network create "${NETWORK_NAME}" 2>/dev/null
+        echo "网络已创建"
+        echo ""
+    fi
+}
+
+# 清理专属网络（仅在停止时调用）
+cleanup_network() {
+    if docker network ls --format '{{.Name}}' | grep -q "^${NETWORK_NAME}$"; then
+        echo "清理专属网络 '${NETWORK_NAME}'..."
+        docker network rm "${NETWORK_NAME}" 2>/dev/null || true
+        echo "网络已清理"
+        echo ""
+    fi
 }
 
 # 主流程

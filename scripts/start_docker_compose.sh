@@ -86,9 +86,35 @@ show_services_status() {
     echo ""
 }
 
+# 清理不属于当前 compose 项目的残留网络
+# 解决警告: "a network exists but was not created for project"
+cleanup_stale_network() {
+    local network_name="traj-proxy-compose-network"
+
+    # 检查网络是否存在
+    if docker network ls --format '{{.Name}}' | grep -q "^${network_name}$"; then
+        # 检查是否有容器正在使用该网络
+        local connected_containers
+        connected_containers=$(docker network inspect "${network_name}" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | tr -d ' ')
+
+        if [ -z "${connected_containers}" ]; then
+            echo "检测到残留网络 '${network_name}'（无容器使用），正在删除..."
+            docker network rm "${network_name}" 2>/dev/null || true
+            echo "残留网络已清理。"
+        else
+            echo "网络 '${network_name}' 存在且有容器使用: ${connected_containers}"
+            echo "将尝试 docker-compose down 清理..."
+        fi
+        echo ""
+    fi
+}
+
 # 检查并清理已运行的服务容器
 # 如果存在运行中的容器，先执行 down 操作确保干净部署
 cleanup_running_services() {
+    # 先清理残留网络（解决 "not created for project" 警告）
+    cleanup_stale_network
+
     # 获取当前 compose 项目下的容器数量（包括运行和停止的）
     local running_containers
     running_containers=$(docker-compose ps -q 2>/dev/null | wc -l | tr -d ' ')

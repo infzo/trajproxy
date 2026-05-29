@@ -11,7 +11,7 @@ services:
       litellm:
         condition: service_healthy
     networks:
-      - traj-proxy-network
+      - traj-proxy-compose-network
     restart: always
 
   litellm:
@@ -34,7 +34,7 @@ services:
       traj_proxy:
         condition: service_started
     networks:
-      - traj-proxy-network
+      - traj-proxy-compose-network
     healthcheck:
       test:
         - CMD-SHELL
@@ -65,7 +65,7 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - traj-proxy-network
+      - traj-proxy-compose-network
 
   prometheus:
     privileged: true
@@ -81,7 +81,7 @@ services:
       - "--storage.tsdb.retention.time=15d"
     restart: always
     networks:
-      - traj-proxy-network
+      - traj-proxy-compose-network
 
   traj_proxy:
     privileged: true
@@ -116,7 +116,7 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - traj-proxy-network
+      - traj-proxy-compose-network
 
 volumes:
   prometheus_data:
@@ -125,6 +125,6 @@ volumes:
     name: litellm_postgres_data
 
 networks:
-  traj-proxy-network:
+  traj-proxy-compose-network:
     driver: bridge
-    name: traj-proxy-network
+    name: traj-proxy-compose-network
