@@ -112,19 +112,30 @@ class InferClient:
         }
 
     def _transform_chat_params_to_completion(self, kwargs: dict, request_id: str = None) -> dict:
-        """将 Chat Completions 参数转换为 Completions 兼容格式"""
+        """将 Chat Completions 参数转换为 Completions 兼容格式
+        
+        映射优先级高于直接传入：例如同时传入 max_completion_tokens=100 和 max_tokens=200 时，
+        映射后的 max_tokens=100 优先（max_completion_tokens 是 OpenAI 新标准参数名）。
+        """
         result = {}
         dropped = []
         mapped = []
 
+        # 1. 先处理映射参数（映射值优先写入 result）
+        for key, value in kwargs.items():
+            if key in self._CHAT_TO_COMPLETION_MAPPINGS:
+                new_key = self._CHAT_TO_COMPLETION_MAPPINGS[key]
+                result[new_key] = value
+                mapped.append(f"{key}->{new_key}")
+
+        # 2. 再处理其余参数（不兼容的丢弃，其余写入 result）
         for key, value in kwargs.items():
             if key in self._CHAT_TO_COMPLETION_INCOMPATIBLE:
                 dropped.append(key)
             elif key in self._CHAT_TO_COMPLETION_MAPPINGS:
-                new_key = self._CHAT_TO_COMPLETION_MAPPINGS[key]
-                result[new_key] = value
-                mapped.append(f"{key}->{new_key}")
-            else:
+                continue  # 已在步骤 1 处理
+            elif key not in result:
+                # 映射已占位的 key 不再覆盖（保证映射优先）
                 result[key] = value
 
         if dropped:
@@ -295,9 +306,12 @@ class InferClient:
             yield chunk
 
     def _build_completion_body(self, prompt, model, stream, request_id=None, **kwargs):
-        """构建 Completion 请求体（黑名单透传模式）"""
+        """构建 Completion 请求体（黑名单透传模式）
+
+        仅过滤由函数参数直接赋值的字段（model/prompt/stream）
+        和固定值字段（logprobs），其余参数一律透传。
+        """
         transformed = self._transform_chat_params_to_completion(kwargs, request_id)
-        handled_params = {"model", "prompt", "stream", "max_tokens", "temperature", "logprobs", "extra_body"}
 
         body = {
             "model": model,
@@ -307,6 +321,10 @@ class InferClient:
             "return_token_ids": True
         }
 
+        # 已由函数参数或固定值处理的字段，避免重复赋值
+        handled_params = {"model", "prompt", "stream", "logprobs"}
+
+        # 其余参数一律透传（包括 max_tokens、temperature 等）
         for k, v in transformed.items():
             if k not in handled_params and v is not None:
                 body[k] = v
@@ -327,7 +345,11 @@ class InferClient:
             yield chunk
 
     def _build_chat_body(self, messages, model, stream, **kwargs):
-        """构建 Chat 请求体（黑名单透传模式）"""
+        """构建 Chat 请求体（黑名单透传模式）
+
+        仅过滤由函数参数直接赋值的字段（model/messages/stream）
+        和固定值字段（logprobs/return_token_ids），其余参数一律透传。
+        """
         handled_params = {"model", "messages", "stream", "logprobs", "return_token_ids"}
 
         body = {
@@ -338,6 +360,7 @@ class InferClient:
             "return_token_ids": True
         }
 
+        # 其余参数一律透传
         for k, v in kwargs.items():
             if k not in handled_params and v is not None:
                 body[k] = v
