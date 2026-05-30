@@ -126,12 +126,15 @@ class StreamChunkBuilder(BaseResponseBuilder):
 
         delta = {}
 
-        # 第一个 chunk 包含 role
+        # 第一个 chunk 包含 role + content=""
+        # 对齐 vLLM 行为：DeltaMessage(role="assistant", content="")
         if context.stream_chunk_count == 0:
             delta["role"] = "assistant"
+            delta["content"] = ""
 
-        # 添加内容
-        if content:
+        # 添加内容（使用 is not None 判断，确保空字符串也能输出，
+        # 与 vllm exclude_unset=True 语义对齐）
+        if content is not None:
             delta["content"] = content
 
         # 添加推理内容（支持 reasoning 和 reasoning_content 两种格式）

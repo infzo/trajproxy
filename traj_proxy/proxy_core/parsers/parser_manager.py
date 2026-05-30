@@ -112,6 +112,66 @@ class Parser:
         if self._reasoning_parser and hasattr(self._reasoning_parser, 'reset_streaming_state'):
             self._reasoning_parser.reset_streaming_state()
 
+    # ==================== 推理阶段判断（对齐 vllm DelegatingParser 接口） ====================
+
+    def is_reasoning_end(self, input_ids: Sequence[int]) -> bool:
+        """判断推理阶段是否已结束（非流式）
+
+        对齐 vllm DelegatingParser.is_reasoning_end() 接口。
+        检查完整模型输出中是否包含推理结束标记。
+
+        Args:
+            input_ids: 完整模型输出的 token IDs
+
+        Returns:
+            如果推理已结束返回 True；无 reasoning parser 时返回 False
+        """
+        if not self._reasoning_parser:
+            return False
+        return self._reasoning_parser.is_reasoning_end(input_ids)
+
+    def is_reasoning_end_streaming(
+        self,
+        current_token_ids: Sequence[int],
+        delta_token_ids: Sequence[int]
+    ) -> bool:
+        """判断推理阶段是否在当前 delta 中结束（流式）
+
+        对齐 vllm DelegatingParser.is_reasoning_end_streaming() 接口。
+        在流式场景中，根据当前累积 token_ids 和增量 token_ids 判断
+        推理结束标记是否出现在最新 delta 中。
+
+        Args:
+            current_token_ids: 当前累积的全部 token IDs
+            delta_token_ids: 本次增量 token IDs
+
+        Returns:
+            如果推理在此 delta 中结束返回 True；无 reasoning parser 时返回 False
+        """
+        if not self._reasoning_parser:
+            return False
+        return self._reasoning_parser.is_reasoning_end_streaming(
+            current_token_ids, delta_token_ids
+        )
+
+    def extract_content_ids(self, input_ids: list) -> list:
+        """从 token IDs 中提取推理结束后的内容部分
+
+        参考 vllm ReasoningParser.extract_content_ids() 的设计。
+        推理结束时，delta 中可能同时包含推理和正式内容，
+        此方法去掉推理部分的 token IDs，只保留 content 部分，
+        使 text 和 token_ids 保持一致。
+
+        Args:
+            input_ids: 输入 token IDs（可能包含推理标记和推理内容）
+
+        Returns:
+            仅包含 content 部分的 token IDs；无 reasoning parser 时原样返回
+        """
+        if not self._reasoning_parser:
+            return list(input_ids)
+        return self._reasoning_parser.extract_content_ids(input_ids)
+
     def __enter__(self):
         """进入上下文管理器，自动重置流式状态"""
         self.reset_streaming_state()

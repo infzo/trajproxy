@@ -185,6 +185,17 @@ class TokenPipeline(BasePipeline):
             first_chunk_received = False
             infer_start_time = time.perf_counter()
 
+            # 重置推理阶段状态（三阶段状态机）
+            # 对齐 vLLM DelegatingParser.parse_delta() 的 prompt reasoning check：
+            # 如果没有 reasoning parser，或 prompt token_ids 中已包含 reasoning
+            # 结束标记，则 reasoning_ended 立即为 True，使 tool parser 可以工作。
+            if not self.parser.has_reasoning_parser:
+                context.reasoning_ended = True
+            elif context.token_ids and self.parser.is_reasoning_end(context.token_ids):
+                context.reasoning_ended = True
+            else:
+                context.reasoning_ended = False
+
             # 使用上下文管理器自动管理流式状态
             with self.parser:
                 # 阶段 3-5: 流式推理和响应
@@ -487,26 +498,37 @@ class TokenPipeline(BasePipeline):
         current_token_ids: list,
         delta_token_ids: list
     ) -> tuple:
-        """处理流式解析
+        """处理流式解析（三阶段状态机：reasoning → tool_call → content）
 
-        协调 Tool Parser 和 Reasoning Parser 的流式解析。
+        参考 vllm DelegatingParser.parse_delta() 的设计：
+        - reasoning 阶段：使用 reasoning parser 分离 reasoning 和 content
+        - reasoning 结束后进入 tool_call 阶段：使用 tool parser 分离 tool_calls
+        - 两个阶段的结果合并而非覆盖
+        - 无活跃阶段时直接 pass-through 为 content
 
         Returns:
             (content_delta, tool_calls_delta, reasoning_delta)
         """
         import traceback
 
-        # 按照 vLLM 的设计: 初始化为 None
-        # 只有在明确需要输出时才设置值
         content_delta = None
         tool_calls_delta = None
         reasoning_delta = None
 
+        # 追踪当前是否有活跃的解析阶段（参考 vllm DelegatingParser._in_reasoning_phase）
+        # 当有活跃阶段但 parser 返回 None（缓冲中）时，不应 pass-through 为 content
+        in_reasoning_phase = False
+        in_tool_call_phase = False
+
         tools = context.request_params.get("tools")
         include_reasoning = context.request_params.get("include_reasoning", True)
+        reasoning_ended_before = context.reasoning_ended  # 本次 delta 处理前的推理状态
 
-        # 1. 先处理推理解析（可能改变内容归属）
-        if self.parser.has_reasoning_parser and include_reasoning:
+        # ═══════════════════════════════════════
+        # 阶段 1: 推理解析（仅在推理阶段内执行）
+        # ═══════════════════════════════════════
+        if self.parser.has_reasoning_parser and include_reasoning and not reasoning_ended_before:
+            in_reasoning_phase = True  # 标记 reasoning 阶段活跃
             try:
                 delta_msg = self.parser.extract_reasoning_streaming(
                     previous_text=previous_text,
@@ -519,26 +541,76 @@ class TokenPipeline(BasePipeline):
                 if delta_msg:
                     content_delta = delta_msg.content
                     reasoning_delta = delta_msg.reasoning
+
+                # 检查推理是否在此 delta 中结束
+                if self.parser.is_reasoning_end_streaming(current_token_ids, delta_token_ids):
+                    context.reasoning_ended = True
+                    in_reasoning_phase = False  # reasoning 结束，退出活跃阶段
+                    # 推理结束边界：当前 delta 可能同时包含 reasoning 和 content
+                    # 如果 reasoning parser 返回了 content，保留它
+                    # 重置 tool parser 的输入参数（参考 vllm abstract_parser.py:689-698）
+                    if delta_msg and delta_msg.content:
+                        # 边界 delta：reasoning 结束标记之后的文本属于正式内容
+                        # tool parser 应只看到 content 部分，而不是整个 delta
+                        # 参考 vllm abstract_parser.py:691-698：
+                        # current_token_ids = extract_content_ids(delta_token_ids)
+                        # 使 text 和 token_ids 保持一致（去掉 reasoning tokens）
+                        tool_delta_text = delta_msg.content
+                        # 对于 tool parser，调整 previous_text 为空（新阶段开始）
+                        tool_previous_text = ""
+                        tool_previous_token_ids = []
+                        tool_current_text = tool_delta_text
+                        tool_current_token_ids = self.parser.extract_content_ids(
+                            delta_token_ids
+                        )
+                    else:
+                        # 推理结束但 content 为空，tool parser 使用原始参数
+                        tool_previous_text = previous_text
+                        tool_previous_token_ids = previous_token_ids
+                        tool_current_text = current_text
+                        tool_current_token_ids = current_token_ids
             except Exception as e:
                 logger.warning(
                     f"[{context.unique_id}] 推理流式解析失败: {e}\n"
                     f"{traceback.format_exc()}"
                 )
 
-        # 2. 处理工具调用解析（vLLM 风格）
-        if self.parser.has_tool_parser and tools:
+        # ═══════════════════════════════════════
+        # 阶段 2: 工具调用解析（仅在推理结束后执行）
+        # 包括推理在此 delta 中刚结束的情况（reasoning_ended_before=False 但 context.reasoning_ended=True）
+        # ═══════════════════════════════════════
+        reasoning_ended_now = context.reasoning_ended  # 阶段 1 可能已更新此状态
+        if self.parser.has_tool_parser and tools and reasoning_ended_now:
+            in_tool_call_phase = True  # 标记 tool_call 阶段活跃
             try:
+                # 保存 reasoning 阶段的 reasoning 结果（防止被覆盖）
+                saved_reasoning = reasoning_delta
+
+                # 推理刚结束时使用调整后的参数，否则使用原始参数
+                # reasoning_ended_before=False 且 context.reasoning_ended=True 表示推理在此 delta 中结束
+                if not reasoning_ended_before and context.reasoning_ended and content_delta is not None:
+                    # 推理在此 delta 中结束，使用边界调整后的参数
+                    tp_previous_text = tool_previous_text
+                    tp_previous_token_ids = tool_previous_token_ids
+                    tp_current_text = tool_current_text
+                    tp_current_token_ids = tool_current_token_ids
+                else:
+                    # 推理早已结束，使用原始参数
+                    tp_previous_text = previous_text
+                    tp_previous_token_ids = previous_token_ids
+                    tp_current_text = current_text
+                    tp_current_token_ids = current_token_ids
+
                 delta_msg = self.parser.extract_tool_calls_streaming(
-                    previous_text=previous_text,
-                    current_text=current_text,
+                    previous_text=tp_previous_text,
+                    current_text=tp_current_text,
                     delta_text=delta_text,
-                    previous_token_ids=previous_token_ids,
-                    current_token_ids=current_token_ids,
+                    previous_token_ids=tp_previous_token_ids,
+                    current_token_ids=tp_current_token_ids,
                     delta_token_ids=delta_token_ids,
                     request=context.raw_request
                 )
                 if delta_msg:
-                    # parser 返回了 delta_msg
                     if delta_msg.tool_calls:
                         tool_calls_delta = []
                         for tc in delta_msg.tool_calls:
@@ -556,28 +628,49 @@ class TokenPipeline(BasePipeline):
                                 if func_dict:
                                     tc_dict["function"] = func_dict
                             tool_calls_delta.append(tc_dict)
-                    # 使用 parser 返回的 content（可能是 None 或空字符串）
-                    # 注意：这里会覆盖 reasoning_parser 设置的 content_delta
-                    content_delta = delta_msg.content
+
+                    # 合而非覆盖：
+                    # - 如果 reasoning parser 设置了 content_delta 且 tool parser 的 content 为 None，
+                    #   保留 reasoning parser 的 content_delta
+                    # - 如果 tool parser 设置了 content，使用 tool parser 的 content
+                    if delta_msg.content is not None:
+                        content_delta = delta_msg.content
+                    # reasoning 不被 tool parser 覆盖
+                    if saved_reasoning:
+                        reasoning_delta = saved_reasoning
 
                     logger.debug(
                         f"[{context.unique_id}] tool parse result: "
                         f"content={repr(content_delta)}, tool_calls={len(tool_calls_delta) if tool_calls_delta else 0}"
                     )
                 else:
-                    # parser 返回 None = "等待更多数据" 或 "不输出"
-                    # 按照 vLLM 的设计：如果 parser 返回 None，不输出任何内容
-                    # 这意味着 content_delta 保持 None（即使 reasoning_parser 之前设置了值）
-                    content_delta = None
+                    # tool parser 返回 None = "等待更多数据"
+                    # 不清除 reasoning parser 的结果（只清除 content_delta）
+                    # 如果 reasoning parser 设置了 content，保留它
+                    # 但如果既没有 reasoning content 也没有 tool_calls，则不输出 content
+                    if saved_reasoning is None and content_delta is None:
+                        content_delta = None  # 不输出
 
             except Exception as e:
                 logger.warning(
                     f"[{context.unique_id}] 工具调用流式解析失败: {e}\n"
                     f"{traceback.format_exc()}"
                 )
-        elif content_delta is None and delta_text:
-            # 没有 tool parser 或没有 tools，且 content_delta 还没有被 reasoning_parser 设置
-            # 直接输出原始文本（vLLM 风格）
+
+        # ═══════════════════════════════════════
+        # 阶段 3: Pass-through（仅当没有任何活跃解析阶段时）
+        # 参考 vllm DelegatingParser.parse_delta()：
+        #   if (delta_message is None
+        #       and not self._in_reasoning_phase(state)
+        #       and not self._in_tool_call_phase(state)):
+        #       delta_message = DeltaMessage(content=delta_text)
+        # ═══════════════════════════════════════
+        if (not in_reasoning_phase
+            and not in_tool_call_phase
+            and content_delta is None
+            and reasoning_delta is None
+            and delta_text):
+            # 无活跃阶段 + 无产出内容 → 直接输出为 content
             content_delta = delta_text
 
         return content_delta, tool_calls_delta, reasoning_delta
