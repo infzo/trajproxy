@@ -1,6 +1,6 @@
 # Nginx 入口 API
 
-> **导航**: [文档中心](../README.md) | [TrajProxy API](api_proxy.md) | [ID 设计规范](../design/identifier_design.md)
+> **导航**: [文档中心](../README.md) | [TrajProxy API](proxy.md) | [ID 设计规范](../design/modules/identifiers.md)
 
 Nginx 作为统一入口，根据请求路径分发到 LiteLLM 网关或 TrajProxy 服务。
 
@@ -100,25 +100,12 @@ POST /s/task-123/v1/chat/completions
 
 Nginx 从 URL 路径提取 ID 并注入到请求头，LiteLLM 转发时保留这些 header。
 
-### run_id 提取优先级（TrajProxy 层面）
+> **完整优先级规则**参见 [ID 设计规范](../design/modules/identifiers.md)。下表仅列出 Nginx 注入的入口行为。
 
-```
-优先级1（最高）: 路径参数 /s/{run_id}/{session_id}/v1/... → Nginx 注入 x-run-id header
-优先级2: x-run-id Header（Nginx 注入或客户端直接传递）
-优先级3: model 参数逗号后：model: "gpt-4,run_001"
-优先级4（最低）: 空（不设默认值）
-```
-
-### session_id 提取优先级（TrajProxy 层面）
-
-```
-优先级1（最高）: 路径参数 /s/{run_id}/{session_id}/v1/... 或 /s/{session_id}/v1/... → Nginx 注入 x-session-id header
-优先级2: x-session-id Header（Nginx 注入或客户端直接传递）
-优先级3: x-sandbox-traj-id Header
-优先级4（最低）: 空
-```
-
-> **详细设计**：参见 [ID 设计规范](../design/identifier_design.md)
+| 字段 | Nginx 注入 source | 客户端可覆盖 |
+|------|------------------|-------------|
+| `x-run-id` | 两段路径 `/s/{run_id}/{session_id}/v1/...` 中的 `{run_id}` | 客户端 header 优先级低于路径参数 |
+| `x-session-id` | 一段或两段路径中的 `{session_id}` | 客户端 header 优先级低于路径参数 |
 
 ---
 

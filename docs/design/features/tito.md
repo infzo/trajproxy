@@ -1,6 +1,6 @@
 # TITO (Token-In-Token-Out) 前缀匹配方案
 
-> **导航**: [文档中心](../README.md) | [架构文档](architecture.md) | [Jinja 模板处理](jinja-process.md)
+> **导航**: [文档中心](../../README.md) | [架构文档](../architecture.md) | [Jinja 模板处理](jinja-template.md)
 
 ## 概述
 
@@ -213,7 +213,7 @@ OpenAI Request
 
 **核心思路**：使用 TITOTokenizer 进行增量 tokenization，基于 messages 匹配和 dummy-message diff。
 
-**项目来源**：/Users/liujiang/Workspace/Code/miles
+**项目来源**：[Miles 项目](https://github.com/miles-project/miles)（内部参考项目）
 
 **架构特点**：
 - LinearTrajectory 跟踪完整消息历史和 token IDs
@@ -290,6 +290,9 @@ models/
 ```
 
 **方案三参考项目**：
+
+> ⚠️ 以下目录结构为 Miles 项目内部结构，仅供架构参考。本项目（TrajProxy）未直接依赖 Miles。
+
 ```
 miles/
 ├── miles/utils/chat_template_utils/

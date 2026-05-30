@@ -1,6 +1,6 @@
 # Jinja 模板多轮一致性转换工作流
 
-> **导航**: [文档中心](../README.md) | [模板一致性](template_consistency.md) | [TITO 方案](tito.md)
+> **导航**: [文档中心](../../README.md) | [TITO 方案](tito.md)
 
 ## 1. 多轮一致性定义
 
@@ -273,7 +273,7 @@ trigger: 当用户需要转换 Jinja 模板以支持 RL 前缀匹配缓存时
 
 转换完成后，必须执行以下验证：
 
-- [ ] 多轮一致性测试：使用 `tests/test_template_consistency.py`
+- [ ] 多轮一致性测试：使用 `scripts/ensure_jinja_consistency.py`（内嵌 `get_test_cases()` 测试用例）
 - [ ] 首轮对话一致性测试：对比原始模板输出
 - [ ] Tool calls 场景测试
 - [ ] Reasoning content 场景测试
@@ -282,9 +282,21 @@ trigger: 当用户需要转换 Jinja 模板以支持 RL 前缀匹配缓存时
 
 ## 5. 参考
 
-- 测试定义：`tests/test_template_consistency.py`
-- 校验脚本：`scripts/verify_jinja_consistency.py`
-- 背景说明：`docs/design/tito.md`
+- 测试用例：内嵌于 `scripts/ensure_jinja_consistency.py` 的 `get_test_cases()` 函数
+- 校验脚本：`scripts/ensure_jinja_consistency.py`
+- 背景说明：`docs/design/features/tito.md`
 - 模板示例：
   - 原始：`models/Qwen/Qwen3.5-2B/chat_template.jinja`
   - TITO 一致性：`models/Qwen/Qwen3.5-2B/chat_template_tito.jinja`
+
+---
+
+## 6. 验证报告规范
+
+验证报告的标准分析流程、HTML 输出格式、样式规范等详细内容已拆分到独立文档：
+
+👉 **[Jinja 多轮一致性验证报告规范](../../tools/consistency-report.md)**
+
+快速入口：
+- 验证脚本：`scripts/ensure_jinja_consistency.py`（含 `get_test_cases()` 测试用例）
+- 报告生成脚本：`generate_consistency_report.py`（⚠️ 规划中）

@@ -1,6 +1,6 @@
 # TrajProxy API
 
-> **导航**: [文档中心](../README.md) | [Nginx 入口 API](api_nginx.md) | [ID 设计规范](../design/identifier_design.md)
+> **导航**: [文档中心](../README.md) | [Nginx 入口 API](nginx.md) | [ID 设计规范](../design/modules/identifiers.md)
 
 TrajProxy 提供模型管理、轨迹查询和聊天补全接口。直接访问 TrajProxy Worker 端口 (12300+)。
 
@@ -17,10 +17,19 @@ TrajProxy 提供模型管理、轨迹查询和聊天补全接口。直接访问 
 
 - [健康检查](#健康检查)
 - [聊天补全](#聊天补全)
+  - [ID 提取优先级](#id-提取优先级)
+  - [推荐使用模式](#推荐使用模式)
+  - [请求参数](#请求参数)
+  - [响应格式](#响应格式)
+  - [流式响应](#流式响应)
 - [模型管理](#模型管理)
+  - [注册模型](#注册模型)
+  - [删除模型](#删除模型)
+  - [查询模型](#查询模型)
 - [轨迹查询](#轨迹查询)
 - [错误响应](#错误响应)
 - [客户端示例](#客户端示例)
+- [数据库查询示例](#数据库查询示例)
 
 ---
 
@@ -49,25 +58,12 @@ TrajProxy 提供模型管理、轨迹查询和聊天补全接口。直接访问 
 
 ### ID 提取优先级
 
-#### run_id 提取优先级
+> **完整规则**（含路径/Header/model 参数优先级）参见 [ID 设计规范](../design/modules/identifiers.md)。
 
-```
-优先级1（最高）: 路径参数（FastAPI query 参数）
-优先级2: x-run-id Header（Nginx 注入或客户端传递）
-优先级3: model 参数逗号后：model: "gpt-4,run_001"
-优先级4（最低）: 空（不设默认值）
-```
-
-#### session_id 提取优先级
-
-```
-优先级1（最高）: 路径参数（FastAPI query 参数）
-优先级2: x-session-id Header（Nginx 注入或客户端传递）
-优先级3: x-sandbox-traj-id Header
-优先级4（最低）: 空
-```
-
-> **详细设计**：参见 [ID 设计规范](../design/identifier_design.md)
+| 字段 | 来源优先级（从高到低） |
+|------|----------------------|
+| `run_id` | 路径参数 > `x-run-id` header > `model` 逗号后部分 |
+| `session_id` | 路径参数 > `x-session-id` header > `x-sandbox-traj-id` header |
 
 ### 推荐使用模式
 
@@ -630,3 +626,7 @@ SELECT
 FROM request_metadata
 GROUP BY run_id;
 ```
+
+---
+
+↑ [返回顶部](#trajproxy-api)

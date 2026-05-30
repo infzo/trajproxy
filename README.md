@@ -39,10 +39,6 @@ graph TB
             end
         end
 
-        subgraph "prometheus容器"
-            Prom[Prometheus<br/>监控<br/>端口:9090]
-        end
-
         subgraph "db容器"
             DB[(PostgreSQL<br/>端口:5432)]
         end
@@ -66,9 +62,6 @@ graph TB
     PW0 -->|存储/查询轨迹| DB
     PW1 -->|存储/查询轨迹| DB
 
-    PW0 -->|指标| Prom
-    PW1 -->|指标| Prom
-
     WM -.->|管理| PW0
     WM -.->|管理| PW1
 
@@ -80,7 +73,7 @@ graph TB
     style PW1 fill:#ffcc80
     style DB fill:#d1ecf1
     style Infer fill:#f8d7da
-    style Prom fill:#e8f5e9
+    
 ```
 
 ## 请求处理流程
@@ -147,7 +140,6 @@ flowchart LR
 | LiteLLM | 4000 | API 网关，提供统一的 OpenAI 兼容接口 |
 | ProxyWorker | 12300-12320 | 统一的代理服务，集成 LLM 推理和轨迹查询功能 |
 | PostgreSQL | 5432 | 数据库存储 |
-| Prometheus | 9090 | 监控和指标收集 |
 
 ## 快速开始
 
@@ -206,6 +198,7 @@ TrajProxy/
 │   ├── archive/           # 归档模块（过期数据归档、调度器）
 │   ├── workers/           # Worker 管理（ProxyWorker、WorkerManager、路由注册）
 │   └── utils/             # 工具模块（配置、日志、校验）
+├── traj_archiver/         # 独立归档进程（与 traj_proxy 解耦，定时归档过期轨迹详情）
 ├── tests/                 # 测试
 ├── scripts/               # 工具脚本
 │   ├── init_db.py         # 数据库初始化（建表、分区、索引）
@@ -226,16 +219,17 @@ TrajProxy/
 
 | 文档 | 说明 |
 |------|------|
-| [文档中心](docs/README.md) | 文档索引和导航 |
+| [文档中心](docs/README.md) | 完整文档索引和导航 |
 | [架构设计](docs/design/architecture.md) | Pipeline 架构、核心组件、处理流程 |
-| [API 参考](docs/develop/api_reference.md) | API 文档索引 |
-| [Nginx 入口 API](docs/develop/api_nginx.md) | Nginx 入口 (端口 12345) |
-| [TrajProxy API](docs/develop/api_proxy.md) | 直接访问 Worker (端口 12300+) |
-| [ID 设计规范](docs/design/identifier_design.md) | run_id、session_id 语义定义 |
-| [数据库设计](docs/design/database.md) | 表结构、数据模型、归档机制 |
-| [配置详解](docs/develop/configuration.md) | 配置文件说明、环境变量 |
-| [部署指南](docs/develop/deployment.md) | 本地开发、Docker 部署 |
-| [开发指南](docs/develop/development.md) | 开发环境、测试运行 |
+| [API 概览](docs/api/overview.md) | Nginx 入口 vs TrajProxy 直连选型 |
+| [ID 设计规范](docs/design/modules/identifiers.md) | run_id、session_id 语义定义 |
+| [数据库设计](docs/design/data/schema.md) | 表结构、数据模型、归档机制 |
+| [配置详解](docs/guide/configuration.md) | 配置文件说明、环境变量 |
+| [部署指南](docs/guide/deployment.md) | 本地开发、Docker 部署 |
+| [开发指南](docs/guide/development.md) | 开发环境、测试运行 |
+| [Parser 设计](docs/design/modules/parser.md) | 工具调用与推理内容解析 |
+| [TITO 方案](docs/design/features/tito.md) | Token-in-Token-out 前缀匹配 |
+| [轨迹查看器](docs/tools/trajectory-viewer.md) | 对话轨迹可视化工具 |
 
 ## 端口说明
 

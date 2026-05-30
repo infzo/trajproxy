@@ -1,8 +1,8 @@
-# Run ID 和 Model Name 组合定义规则
+# ID 语义规范（run_id / session_id / model / request_id）
 
-> **导航**: [文档中心](../README.md) | [API 参考](../develop/api_reference.md)
+> **导航**: [文档中心](../../README.md) | [API 概览](../../api/overview.md)
 
-本文档定义了 TrajProxy 中 `run_id`、`session_id`、model`、`request_id` 的语义规范和组合行为。
+本文档定义了 TrajProxy 中 `run_id`、`session_id`、`model`、`request_id` 的语义规范和组合行为。
 
 ---
 

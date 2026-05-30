@@ -1,6 +1,6 @@
 # TrajProxy vs vLLM OpenAI Chat Completions 接口对比分析
 
-> **导航**: [文档中心](../README.md) | [API 参考](api_reference.md) | [Parser 设计](../design/parser.md)
+> **导航**: [文档中心](../README.md) | [API 概览](overview.md) | [Parser 设计](../design/modules/parser.md)
 
 > 对比版本: TrajProxy (当前) vs vLLM 0.16.0
 
@@ -11,10 +11,12 @@
 ## 2. 核心文件参考
 
 **TrajProxy:**
-- `traj_proxy/proxy_core/routes.py` - 路由定义
-- `traj_proxy/proxy_core/processor.py` - 非流式处理
-- `traj_proxy/proxy_core/streaming_processor.py` - 流式处理
-- `traj_proxy/proxy_core/prompt_builder.py` - 响应构建
+- `traj_proxy/serve/routes.py` - 路由定义
+- `traj_proxy/proxy_core/processor.py` - 统一请求处理器（根据配置选择 Pipeline）
+- `traj_proxy/proxy_core/pipeline/direct_pipeline.py` - 直接转发管道（非流式+流式）
+- `traj_proxy/proxy_core/pipeline/token_pipeline.py` - Token 模式管道（非流式+流式）
+- `traj_proxy/proxy_core/builders/openai_builder.py` - OpenAI 格式响应构建
+- `traj_proxy/proxy_core/builders/stream_builder.py` - 流式响应块构建
 - `traj_proxy/proxy_core/infer_client.py` - 推理服务客户端
 
 **vLLM:**
@@ -37,27 +39,27 @@
 | `temperature` | ✅ | ✅ (转发) | 一致 |
 | `top_p` | ✅ | ✅ (转发) | 一致 |
 | `max_tokens` | ✅ | ✅ (转发) | 一致 |
-| `max_completion_tokens` | ✅ 支持，优先于 max_tokens | ❌ 不支持 | **差异** |
+| `max_completion_tokens` | ✅ 支持，优先于 max_tokens | ⚠️ 部分支持 | **差异**: TokenPipeline 映射为 max_tokens；DirectPipeline 原样转发给后端 |
 | `n` | ✅ 支持多个 choices | ❌ 不支持 | **差异** |
 | `stream` | ✅ | ✅ | 一致 |
-| `stream_options` | ✅ 支持 include_usage, continuous_usage_stats | ❌ 不支持 | **差异** |
+| `stream_options` | ✅ 支持 include_usage, continuous_usage_stats | ⚠️ 部分支持 | **差异**: DirectPipeline 原样转发；TokenPipeline 在黑名单中丢弃 |
 | `stop` | ✅ 支持字符串或数组 | ✅ (转发) | 一致 |
 | `tools` | ✅ | ✅ | 一致 |
 | `tool_choice` | ✅ 支持 none/auto/required/命名工具 | ⚠️ 部分支持 | **差异**: TrajProxy 直接转发，不做本地验证 |
 | `parallel_tool_calls` | ✅ | ✅ (转发) | 一致 |
-| `response_format` | ✅ 支持 json_object/json_schema/structural_tag | ❌ 不支持 | **差异** |
-| `logprobs` | ✅ | ❌ 不支持 | **差异** |
-| `top_logprobs` | ✅ | ❌ 不支持 | **差异** |
-| `logit_bias` | ✅ | ❌ 不支持 | **差异** |
+| `response_format` | ✅ 支持 json_object/json_schema/structural_tag | ⚠️ 部分支持 | **差异**: DirectPipeline 原样转发；TokenPipeline 在黑名单中丢弃 |
+| `logprobs` | ✅ | ❌ 客户端侧不返回 | **差异**: proxy 内部强制请求用于轨迹记录，但不返回给客户端 |
+| `top_logprobs` | ✅ | ❌ 客户端侧不返回 | **差异**: 同 logprobs |
+| `logit_bias` | ✅ | ⚠️ 部分支持 | **差异**: DirectPipeline 原样转发；TokenPipeline 在黑名单中丢弃（token_id 映射不同） |
 | `seed` | ✅ | ✅ (转发) | 一致 |
 | `user` | ✅ (忽略) | ❌ 不支持 | 差异较小 |
-| `reasoning_effort` | ✅ 支持 low/medium/high | ❌ 不支持 | **差异** |
+| `reasoning_effort` | ✅ 支持 low/medium/high | ⚠️ 部分支持 | **差异**: DirectPipeline 原样转发；TokenPipeline 在黑名单中丢弃 |
 | `include_reasoning` | ✅ | ✅ | 一致 |
-| `echo` | ✅ | ❌ 不支持 | **差异** |
+| `echo` | ✅ | ⚠️ 部分支持 | **差异**: DirectPipeline 原样转发；TokenPipeline 在黑名单中丢弃（语义不同） |
 | `chat_template` | ✅ 支持自定义模板 | ❌ 不支持 | **差异** |
 | `chat_template_kwargs` | ✅ | ❌ 不支持 | **差异** |
 | `documents` | ✅ | ✅ 支持 RAG | 一致 |
-| `return_token_ids` | ✅ | ❌ 不支持 | **差异** |
+| `return_token_ids` | ✅ | ❌ 客户端侧不返回 | **差异**: proxy 内部强制请求用于轨迹记录，但不返回给客户端 |
 | `priority` | ✅ | ❌ 不支持 | **差异** |
 
 ### 3.2 高优先级缺失参数
@@ -65,8 +67,10 @@
 #### `max_completion_tokens`
 - **OpenAI 规范**: 新推荐的参数，用于替代 `max_tokens`
 - **vLLM 行为**: 优先使用 `max_completion_tokens`，回退到 `max_tokens`
-- **TrajProxy**: 不支持，仅转发 `max_tokens`
-- **影响**: 使用 OpenAI 最新 SDK 时可能出现参数不生效
+- **TrajProxy**: ⚠️ 部分支持
+  - **TokenPipeline**: `max_completion_tokens` 映射为 `max_tokens`（通过 `_CHAT_TO_COMPLETION_MAPPINGS`），传递给推理服务的 `/completions` 接口
+  - **DirectPipeline**: 原样转发给后端 `/chat/completions` 接口，由后端自行处理
+- **影响**: TokenPipeline 模式下可正常使用；DirectPipeline 模式下行为取决于后端推理服务
 
 #### `n`
 - **OpenAI 规范**: 生成 n 个不同的响应 choices
@@ -85,20 +89,26 @@
   }
   ```
 - **vLLM 行为**: 完整支持
-- **TrajProxy**: 不支持
-- **影响**: 流式请求无法获取 token 统计信息
+- **TrajProxy**: ⚠️ 部分支持
+  - **DirectPipeline**: 原样转发给后端，由后端自行处理
+  - **TokenPipeline**: 在 `_CHAT_TO_COMPLETION_INCOMPATIBLE` 黑名单中丢弃
+- **影响**: DirectPipeline 模式下可正常使用；TokenPipeline 模式下无法获取流式 token 统计
 
 #### `response_format`
 - **OpenAI 规范**: 支持 `json_object`, `json_schema`, `text`
 - **vLLM 行为**: 支持 `json_object`, `json_schema`, `structural_tag`
-- **TrajProxy**: 不支持
-- **影响**: 结构化输出场景受限
+- **TrajProxy**: ⚠️ 部分支持
+  - **DirectPipeline**: 原样转发给后端，由后端自行处理
+  - **TokenPipeline**: 在 `_CHAT_TO_COMPLETION_INCOMPATIBLE` 黑名单中丢弃（后端可能不支持）
+- **影响**: DirectPipeline 模式下可使用结构化输出；TokenPipeline 模式下受限
 
 #### `reasoning_effort`
 - **OpenAI 规范**: 控制 reasoning 模型的思考深度 (`low`/`medium`/`high`)
 - **vLLM 行为**: 支持，传递给 chat template
-- **TrajProxy**: 不支持
-- **影响**: DeepSeek-R1 等推理模型的思考深度无法控制
+- **TrajProxy**: ⚠️ 部分支持
+  - **DirectPipeline**: 原样转发给后端，由后端自行处理
+  - **TokenPipeline**: 在 `_CHAT_TO_COMPLETION_INCOMPATIBLE` 黑名单中丢弃
+- **影响**: DirectPipeline 模式下可控制思考深度；TokenPipeline 模式下无法控制
 
 ---
 
@@ -118,8 +128,8 @@
 | `choices[].message.reasoning` | ✅ vLLM 扩展字段 | ✅ TrajProxy 扩展字段 | 一致 |
 | `choices[].message.tool_calls` | ✅ 完整结构 | ✅ 完整结构 | 一致 |
 | `choices[].finish_reason` | `stop`/`tool_calls`/`length` | `stop`/`tool_calls` | 基本一致 |
-| `choices[].logprobs` | ✅ 支持 | ❌ 不支持 | **差异** |
-| `choices[].token_ids` | ✅ 支持 | ❌ 不支持 | **差异** |
+| `choices[].logprobs` | ✅ 支持 | ❌ 客户端侧不返回 | **差异**: proxy 内部保留用于轨迹记录 |
+| `choices[].token_ids` | ✅ 支持 | ❌ 客户端侧不返回 | **差异**: proxy 内部保留用于轨迹记录 |
 | `usage.prompt_tokens` | ✅ | ✅ | 一致 |
 | `usage.completion_tokens` | ✅ | ✅ | 一致 |
 | `usage.total_tokens` | ✅ | ✅ | 一致 |
@@ -132,8 +142,8 @@
 | 特性 | vLLM | TrajProxy | 差异说明 |
 |------|------|-----------|----------|
 | 第一个 chunk 包含 role | ✅ | ✅ | 一致 |
-| `stream_options.include_usage` | ✅ 流结束后发送 usage chunk | ❌ 不支持 | **差异** |
-| `stream_options.continuous_usage_stats` | ✅ 每个 chunk 包含 usage | ❌ 不支持 | **差异** |
+| `stream_options.include_usage` | ✅ 流结束后发送 usage chunk | ⚠️ DirectPipeline 透传；TokenPipeline 丢弃 | **差异** |
+| `stream_options.continuous_usage_stats` | ✅ 每个 chunk 包含 usage | ⚠️ DirectPipeline 透传；TokenPipeline 丢弃 | **差异** |
 | tool_calls 增量传输 | ✅ index 递增 | ✅ | 一致 |
 | reasoning 增量传输 | ✅ delta.reasoning | ✅ delta.reasoning | 一致 |
 | finish_reason 时机 | 最后一个 chunk | 最后一个 chunk | 一致 |
@@ -217,7 +227,7 @@ if isinstance(data["tool_choice"], dict):
 
 | 参数 | vLLM | TrajProxy |
 |------|------|-----------|
-| `reasoning_effort` | ✅ 支持 `low`/`medium`/`high` | ❌ 不支持 |
+| `reasoning_effort` | ✅ 支持 `low`/`medium`/`high` | ⚠️ DirectPipeline 透传；TokenPipeline 丢弃 |
 | `include_reasoning` | ✅ 控制是否返回 reasoning 字段 | ✅ 支持 |
 
 ### 6.3 响应格式
@@ -292,50 +302,52 @@ if isinstance(data["tool_choice"], dict):
 | 方面 | vLLM | TrajProxy |
 |------|------|-----------|
 | `n` 参数 | 支持多 choice | 不支持 |
-| `response_format` | 支持结构化输出 | 不支持 |
-| `logprobs` | 支持 | 不支持 |
-| `stream_options` | 支持流式 usage | 不支持 |
-| `reasoning_effort` | 支持 | 不支持 |
-| `max_completion_tokens` | 优先使用 | 不支持 |
+| `logprobs` | 支持 | 不支持（客户端侧不返回，proxy 内部强制请求用于轨迹记录） |
+| `max_completion_tokens` | 优先使用 | ⚠️ TokenPipeline 映射为 max_tokens；DirectPipeline 透传 |
+| `response_format` | 支持结构化输出 | ⚠️ DirectPipeline 透传；TokenPipeline 丢弃 |
+| `stream_options` | 支持流式 usage | ⚠️ DirectPipeline 透传；TokenPipeline 丢弃 |
+| `reasoning_effort` | 支持 | ⚠️ DirectPipeline 透传；TokenPipeline 丢弃 |
 
 ---
 
 ## 9. 改进建议
 
+> 📅 状态更新于 2026-05-29。标记说明：✅ 已实现 / ⏳ 规划中 / 🔍 待评估 / ❌ 暂不实现
+
 ### 9.1 高优先级 (影响核心功能)
 
-1. **支持 `max_completion_tokens`**
-   - 兼容 OpenAI 最新规范
-   - 优先级高于 `max_tokens`
+1. **增强 `max_completion_tokens` 支持** ✅ 已实现（当前行为可接受）
+   - 当前: TokenPipeline 映射为 `max_tokens`，DirectPipeline 透传
+   - 建议: 确保 DirectPipeline 场景下后端正确处理该参数
 
-2. **支持 `stream_options.include_usage`**
-   - 流式结束后返回 usage chunk
-   - 很多客户端依赖此功能统计 token
+2. **增强 `stream_options.include_usage` 支持** ⏳ 规划中
+   - 当前: DirectPipeline 透传，TokenPipeline 丢弃
+   - 建议: TokenPipeline 模式下支持流式结束后返回 usage chunk
 
-3. **支持 `response_format`**
-   - 至少支持 `json_object`
-   - 结构化输出是常见需求
+3. **增强 `response_format` 支持** ⏳ 规划中
+   - 当前: DirectPipeline 透传，TokenPipeline 丢弃
+   - 建议: TokenPipeline 模式下至少支持 `json_object`
 
 ### 9.2 中优先级 (提升兼容性)
 
-1. **支持 `n` 参数**
+1. **支持 `n` 参数** ❌ 暂不实现
    - 需要修改核心处理逻辑
    - 支持生成多个 choices
 
-2. **支持 `reasoning_effort`**
-   - 传递给 chat template
-   - 控制推理模型思考深度
+2. **增强 `reasoning_effort` 支持** ⏳ 规划中
+   - 当前: DirectPipeline 透传，TokenPipeline 丢弃
+   - 建议: TokenPipeline 模式下传递给 chat template
 
-3. **增强 `tool_choice` 本地验证**
+3. **增强 `tool_choice` 本地验证** 🔍 待评估
    - 验证 `tool_choice` 与 `tools` 的匹配
    - 本地处理 `none` 和 `required`
 
 ### 9.3 低优先级 (锦上添花)
 
-1. **支持 `logprobs`/`top_logprobs`**
-2. **支持 `logit_bias`**
-3. **支持 `echo` 参数**
-4. **统一错误响应格式**
+1. **增强 `logprobs`/`top_logprobs` 客户端返回** ❌ 暂不实现
+2. **增强 `logit_bias` 支持** ⏳ 规划中（当前: DirectPipeline 透传；TokenPipeline 丢弃）
+3. **增强 `echo` 参数支持** ⏳ 规划中（当前: DirectPipeline 透传；TokenPipeline 丢弃）
+4. **统一错误响应格式** 🔍 待评估
 
 ---
 

@@ -1,15 +1,16 @@
 # Parser 行为逻辑文档
 
-> **导航**: [文档中心](../README.md) | [架构文档](architecture.md) | [vLLM 对比](../develop/compare_vllm.md)
+> **导航**: [文档中心](../../README.md) | [架构文档](../architecture.md) | [vLLM 对比](../../api/vs-vllm.md)
 
 ## 概述
 
 TrajProxy 的 Parser 模块参考 vLLM 0.16.0 接口设计，提供统一的工具调用和推理内容解析能力。支持非流式和流式两种模式。
 
 **核心设计：**
-- 使用**适配器模式**封装 vLLM 原生 Parser
+- 使用**适配器模式**封装 vLLM 兼容层 Parser
 - 对外提供统一的 `Parser` 接口
 - 支持 vLLM 原始 parser 无需修改即可使用
+- **注意：项目不依赖 vLLM 包本身**，而是通过 `vllm_compat/` 兼容层（将 vllm_compat 目录注入 `sys.path`）提供 `from vllm.xxx import yyy` 的导入兼容，使得代码与 vLLM 接口兼容但无需安装 vLLM
 
 ---
 
@@ -138,7 +139,7 @@ class FunctionCall:
 # 工具调用（符合 OpenAI 规范）
 @dataclass
 class ToolCall:
-    id: str                          # 唯一标识，格式: "call_xxx"
+    id: str = field(default_factory=make_tool_call_id)  # 唯一标识，格式: "chatcmpl-tool-xxx"，自动生成
     type: str = "function"           # 类型固定为 "function"
     function: Optional[FunctionCall] = None  # 嵌套的函数对象
 
@@ -184,16 +185,9 @@ class DeltaMessage:
 
 | 名称 | 类名 | 格式特点 |
 |------|------|----------|
-| `deepseek_v3` | DeepSeekV3ToolParser | Unicode 标记 `<｜tool▁calls▁begin｜>` |
-| `deepseek_v31` | DeepSeekV31ToolParser | Unicode 标记变体 |
-| `deepseek_v32` | DeepSeekV32ToolParser | DSML 格式 `<｜DSML｜>` |
-| `qwen3_coder` | Qwen3CoderToolParser | `toral`/`Ranchi` 边界 + XML |
-| `qwen3_xml` | Qwen3XMLToolParser | Qwen3 XML 格式 |
-| `qwen_xml` | QwenXMLToolParser | `ournemouth`/`Ranchi` + XML |
-| `hermes` | Hermes2ProToolParser | Hermes 格式，使用特殊标记 |
-| `glm45` | GLM45ToolParser | GLM 格式 |
-| `glm47` | GLM47ToolParser | GLM 格式 |
-| `llama3_json` | Llama3JsonParser | JSON 格式 |
+| `qwen3_coder` | Qwen3CoderToolParser | <tool_call>/</tool_call> 边界标记 + `<function=>` XML |
+| `qwen3_xml` | Qwen3XMLToolParser | <tool_call>/</tool_call> 边界标记 + `<function=>` XML（使用 StreamingXMLToolCallParser） |
+| `hermes` | Hermes2ProToolParser | Hermes JSON 格式，使用 <tool_call>/</tool_call> 边界标记 |
 
 ### 4.2 非流式解析
 
@@ -209,18 +203,18 @@ def extract_tool_calls(
 
 **返回结构：** `ExtractedToolCallInformation`
 
-#### 场景1: 有工具调用
+#### 场景1: 有工具调用（Qwen3 Coder 格式）
 
 ```python
-# 输入 (DeepSeek V3 格式)
-'<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>get_weather\n```json\n{"city": "北京"}\n```<｜tool▁call▁end｜><｜tool▁calls▁end｜>'
+# 输入 (Qwen3 Coder 格式)
+'<tool_call><function=get_weather>\n<parameter=city>北京</parameter>\n</function> </tool_call>'
 
 # 返回
 ExtractedToolCallInformation(
     tools_called=True,
     tool_calls=[
         ToolCall(
-            id="call_abc123...",
+            id="chatcmpl-tool-xxx...",
             type="function",
             function=FunctionCall(
                 name="get_weather",
@@ -236,7 +230,7 @@ ExtractedToolCallInformation(
 
 ```python
 # 输入
-'好的，我来帮您查询。<｜tool▁calls▁begin｜>...<｜tool▁calls▁end｜>'
+'好的，我来帮您查询。<tool_call><function=get_weather>...</function> </tool_call>'
 
 # 返回
 ExtractedToolCallInformation(
@@ -267,8 +261,8 @@ ExtractedToolCallInformation(
 ExtractedToolCallInformation(
     tools_called=True,
     tool_calls=[
-        ToolCall(id="call_xxx1", function=FunctionCall(name="func1", arguments='{"a": 1}')),
-        ToolCall(id="call_xxx2", function=FunctionCall(name="func2", arguments='{"b": 2}'))
+        ToolCall(id="chatcmpl-tool-xxx1", function=FunctionCall(name="func1", arguments='{"a": 1}')),
+        ToolCall(id="chatcmpl-tool-xxx2", function=FunctionCall(name="func2", arguments='{"b": 2}'))
     ],
     content=None
 )
@@ -306,7 +300,7 @@ DeltaMessage(
     tool_calls=[
         DeltaToolCall(
             index=0,
-            id="call_abc123",
+            id="chatcmpl-tool-xxx",
             type="function",
             function=DeltaFunctionCall(
                 name="get_weather",
@@ -343,30 +337,25 @@ DeltaMessage(
 
 ### 4.4 不同模型格式示例
 
-#### DeepSeek V3
-```
-<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>func_name
-```json
-{"param": "value"}
-```
-<｜tool▁call▁end｜><｜tool▁calls▁end｜>
-```
-
-#### DeepSeek V3.2 DSML
-```
-<｜DSML｜function_calls>
-<｜DSML｜invoke name="get_weather">
-<｜DSML｜parameter name="location" string="true">杭州</｜DSML｜parameter>
-</｜DSML｜invoke>
-</｜DSML｜function_calls>
-```
-
 #### Qwen3 Coder XML
 ```
-toral<function=get_weather>
+<tool_call><function=get_weather>
 <parameter=city>北京</parameter>
 <parameter=unit>celsius</parameter>
-</function> Ranchi
+</function> </tool_call>
+```
+
+#### Qwen3 XML（与 Coder 相同的 XML 结构，使用 StreamingXMLToolCallParser）
+```
+<tool_call><function=get_weather>
+<parameter=city>北京</parameter>
+<parameter=unit>celsius</parameter>
+</function> </tool_call>
+```
+
+#### Hermes 格式
+```
+<tool_call>{"name": "get_weather", "arguments": {"city": "北京"}} </tool_call>
 ```
 
 ---
@@ -377,10 +366,7 @@ toral<function=get_weather>
 
 | 名称 | 类名 | 格式特点 |
 |------|------|----------|
-| `deepseek_r1` | DeepSeekR1ReasoningParser | `<thinky></thinke>` |
-| `deepseek_v3` | DeepSeekV3ReasoningParser | `<thinky></thinke>` |
-| `deepseek` | DeepSeekReasoningParser | `<｜begin▁of▁think｜>` Unicode |
-| `qwen3` | Qwen3ReasoningParser | `<thinky></thinke>` |
+| `qwen3` | Qwen3ReasoningParser | Qwen3 推理标记（继承 BaseThinkingReasoningParser） |
 
 ### 5.2 非流式解析
 
@@ -400,7 +386,7 @@ def extract_reasoning(
 
 ```python
 # 输入
-'<thinky>\n用户询问天气情况。\n需要确认城市。\n</thinke>请问您想查询哪个城市的天气？'
+'<think>\n用户询问天气情况。\n需要确认城市。\n</think>请问您想查询哪个城市的天气？'
 
 # 返回
 (
@@ -413,7 +399,7 @@ def extract_reasoning(
 
 ```python
 # 输入
-'<thinky>\n这是一个纯推理过程。\n</thinke>'
+'<think>\n这是一个纯推理过程。\n</think>'
 
 # 返回
 (
@@ -435,29 +421,31 @@ def extract_reasoning(
 )
 ```
 
-#### 场景4: 只有 end_token（无 start_token）
-
-```python
-# 输入（vLLM MiniMaxM2 模式）
-'这是推理内容</thinke>这是正常回复'
-
-# 返回
-(
-    '这是推理内容',     # end_token 前的内容作为 reasoning
-    '这是正常回复'      # end_token 后的内容作为 content
-)
-```
-
-#### 场景5: 推理未结束（无 end_token）
+#### 场景4: 只有 end_token（无 start_token）—— Qwen3 不匹配
 
 ```python
 # 输入
-'<thinky>\n推理内容没有结束\n持续推理中...'
+'这是推理内容</think>这是正常回复'
 
-# 返回
+# Qwen3ReasoningParser 返回（需要两个标记同时存在）
 (
-    '推理内容没有结束\n持续推理中...',  # 剩余内容作为 reasoning
-    None                                  # content 为 None
+    None,                       # reasoning 为 None（缺少 start_token）
+    '这是推理内容</think>这是正常回复'  # content 为原内容
+)
+```
+
+> **注意**：Qwen3ReasoningParser 严格要求 `<think>` 和 `</think>` 同时存在才能提取推理内容。这与某些其他 parser（如 BaseThinkingReasoningParser 的子类）不同，后者只需 end_token 即可提取。
+
+#### 场景5: 推理未结束（无 end_token）—— Qwen3 不匹配
+
+```python
+# 输入
+'<think>\n推理内容没有结束\n持续推理中...'
+
+# Qwen3ReasoningParser 返回（缺少 end_token）
+(
+    None,                       # reasoning 为 None
+    '<think>\n推理内容没有结束\n持续推理中...'  # content 为原内容
 )
 ```
 
@@ -499,16 +487,10 @@ DeltaMessage(
 )
 ```
 
-### 5.4 不同模型格式示例
+### 5.4 Qwen3 推理格式
 
-#### DeepSeek Reasoning (Unicode)
 ```
-<｜begin▁of▁think｜>推理过程<｜end▁of▁think｜>正常回复
-```
-
-#### Qwen3 / DeepSeek R1 Reasoning
-```
-<thinky>推理过程</thinke>正常回复
+<think>推理过程</think>正常回复
 ```
 
 ---
@@ -518,8 +500,8 @@ DeltaMessage(
 ### 6.1 典型组合格式
 
 ```python
-# 输入
-'<thinky>\n用户询问北京天气。\n需要调用 API。\n</thinke><｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>get_weather\n```json\n{"city": "北京"}\n```<｜tool▁call▁end｜><｜tool▁calls▁end｜>'
+# 输入（Qwen3 推理 + Qwen3 Coder 工具调用）
+'<think>\n用户询问北京天气。\n需要调用 API。\n</think><tool_call><function=get_weather>\n<parameter=city>北京</parameter>\n</function> </tool_call>'
 ```
 
 ### 6.2 解析流程
@@ -528,7 +510,7 @@ DeltaMessage(
 # 步骤1: 用 ReasoningParser 提取 reasoning
 reasoning, remaining = parser.extract_reasoning(output)
 # reasoning = '用户询问北京天气。\n需要调用 API。\n'
-# remaining = '<｜tool▁calls▁begin｜>...'
+# remaining = '<tool_call><function=get_weather>... </tool_call>'
 
 # 步骤2: 用 ToolParser 从 remaining 提取 tool_calls
 tool_result = parser.extract_tool_calls(remaining, request=raw_request)
@@ -546,7 +528,7 @@ tool_result = parser.extract_tool_calls(remaining, request=raw_request)
     "reasoning": reasoning,                 # 推理内容
     "tool_calls": [
         {
-            "id": "call_xxx",
+            "id": "chatcmpl-tool-xxx",
             "type": "function",
             "function": {
                 "name": "get_weather",
@@ -672,10 +654,10 @@ parser = ParserManager.create_parser(
 
 # 方式2: 列出已注册的 Parsers
 tool_parsers = ParserManager.list_tool_parsers()
-# ['deepseek_v3', 'deepseek_v31', 'deepseek_v32', 'qwen3_coder', 'qwen_xml', 'glm45', 'glm47', 'llama3_json']
+# ['qwen3_coder', 'qwen3_xml', 'hermes']
 
 reasoning_parsers = ParserManager.list_reasoning_parsers()
-# ['deepseek_r1', 'deepseek_v3', 'deepseek', 'qwen3']
+# ['qwen3']
 ```
 
 ### 10.2 非流式解析
@@ -748,6 +730,8 @@ reasoning_parser = parser.reasoning_parser
 
 ## 十一、注册自定义 Parser
 
+> **注意**：以下导入 `from vllm.xxx` 均通过 `vllm_compat/` 兼容层（`sys.path` 注入）实现，**无需安装 vLLM 包**。兼容层在模块加载时自动初始化。
+
 ### 11.1 注册 Tool Parser
 
 ```python
@@ -798,6 +782,7 @@ custom_parsers_dir: /app/custom_parsers
 **本地开发配置：**
 
 ```yaml
+# 本地开发时可配置为项目相对路径
 custom_parsers_dir: ./custom_parsers
 ```
 
@@ -889,9 +874,22 @@ curl -X POST 'http://localhost:12300/models/register' \
 
 首次请求时，系统自动发现并加载 `my_tool_parser.py`，后续请求直接使用缓存。
 
-### 12.5 注意事项
+### 12.5 示例 Parser
+
+项目自带了两个示例 Parser 文件，位于 `custom_parsers/` 目录下：
+
+- `custom_parsers/tool_parsers/test_tool_parser.py` — `TestToolParser`（基于 Qwen3CoderToolParser 的测试示例）
+- `custom_parsers/reasoning_parsers/test_reasoning_parser.py` — `TestReasoningParser`（基于 Qwen3ReasoningParser 的测试示例）
+
+这两个 Parser 可通过按需发现机制加载，名称分别为 `"test_tool_parser"` 和 `"test_reasoning_parser"`。
+
+### 12.6 注意事项
 
 1. **类定义要求**：Parser 类必须继承 `ToolParser` 或 `ReasoningParser` 基类
 2. **模块归属检查**：只注册在当前模块中定义的类（通过 `__module__` 属性检查），避免误注册导入的基类
 3. **命名一致性**：文件名与 parser 名称必须一致
 4. **错误处理**：加载失败会记录错误日志，返回 None
+
+---
+
+↑ [返回顶部](#parser-行为逻辑文档)

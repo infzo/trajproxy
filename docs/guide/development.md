@@ -73,18 +73,26 @@ python -m traj_proxy.app
 TrajProxy/
 ├── configs/                        # 配置文件目录
 │   ├── config.yaml                 # TrajProxy 主配置
-│   ├── litellm.yaml                # LiteLLM 网关配置
-│   ├── nginx.conf                  # Nginx 配置
-│   └── prometheus.yml              # Prometheus 配置
+│   ├── config.yaml.example         # 主配置示例文件
+│   ├── litellm.yaml.example        # LiteLLM 网关配置示例
+│   ├── nginx.conf.example          # Nginx 配置示例
+│   └── archiver.yaml               # 归档服务配置
 │
 ├── traj_proxy/                     # 主代码目录
 │   ├── app.py                      # 应用入口
 │   ├── exceptions.py               # 自定义异常
 │   │
 │   ├── serve/                      # API 服务层
+│   │   ├── __init__.py             # 模块初始化
 │   │   ├── routes.py               # API 路由定义
 │   │   ├── schemas.py              # 请求/响应模型
-│   │   └── dependencies.py         # FastAPI 依赖注入
+│   │   ├── dependencies.py         # FastAPI 依赖注入
+│   │   └── error_handler.py        # 全局错误处理
+│   │
+│   ├── archive/                    # 归档调度模块（轻量调度器）
+│   │   ├── __init__.py             # 模块初始化
+│   │   ├── archiver.py             # 归档调度入口
+│   │   └── scheduler.py            # 定时调度器
 │   │
 │   ├── proxy_core/                 # 推理核心模块
 │   │   ├── processor.py            # 统一请求处理器
@@ -93,29 +101,40 @@ TrajProxy/
 │   │   ├── infer_response_parser.py # Infer 响应解析器
 │   │   ├── context.py              # 处理上下文数据类
 │   │   ├── provider.py             # 轨迹查询提供者
+│   │   ├── tokenizer_cache.py      # Tokenizer 缓存
 │   │   │
 │   │   ├── pipeline/               # 处理管道
+│   │   │   ├── __init__.py         # 模块初始化
 │   │   │   ├── base.py             # 管道基类
 │   │   │   ├── direct_pipeline.py  # 直接转发管道
 │   │   │   └── token_pipeline.py   # Token 模式管道
 │   │   │
 │   │   ├── converters/             # 转换器
+│   │   │   ├── __init__.py         # 模块初始化
+│   │   │   ├── base.py             # 转换器基类
 │   │   │   ├── message_converter.py # 消息转换器
 │   │   │   └── token_converter.py  # Token 转换器
 │   │   │
 │   │   ├── builders/               # 响应构建器
+│   │   │   ├── __init__.py         # 模块初始化
+│   │   │   ├── base.py             # 构建器基类
 │   │   │   ├── openai_builder.py   # OpenAI 响应构建器
 │   │   │   └── stream_builder.py   # 流式响应构建器
 │   │   │
 │   │   ├── cache/                  # 缓存
+│   │   │   ├── __init__.py         # 模块初始化
+│   │   │   ├── base.py             # 缓存基类
 │   │   │   └── prefix_cache.py     # 前缀匹配缓存
 │   │   │
 │   │   └── parsers/                # 解析器模块
+│   │       ├── __init__.py         # 模块初始化
 │   │       ├── base.py             # 基础数据结构
 │   │       ├── parser_manager.py   # 解析器管理器
 │   │       └── vllm_compat/        # vLLM 兼容解析器
+│   │           ├── __init__.py     # 模块初始化
 │   │           ├── tool_parsers/   # 工具解析器
-│   │           └── reasoning_parsers/ # 推理解析器
+│   │           ├── reasoning_parsers/ # 推理解析器
+│   │           └── vllm/           # vLLM 原生兼容层
 │   │
 │   ├── store/                      # 存储模块
 │   │   ├── database_manager.py     # 数据库连接池管理
@@ -135,30 +154,73 @@ TrajProxy/
 │       ├── logger.py               # 日志系统
 │       └── validators.py           # 参数校验器
 │
+├── traj_archiver/                  # 归档服务独立包
+│   ├── __init__.py                 # 模块初始化
+│   ├── __main__.py                 # 入口脚本
+│   ├── archiver.py                 # 归档核心逻辑
+│   ├── config.py                   # 归档配置
+│   ├── scheduler.py                # 归档调度器
+│   ├── session_worker.py           # 会话工作器
+│   ├── storage.py                  # 存储抽象基类
+│   ├── s3_storage.py               # S3 存储实现
+│   ├── csb_storage.py              # CSB 存储实现
+│
 ├── tests/                          # 测试目录
 │   └── e2e/                        # 端到端测试
 │       ├── run_tests.sh            # 测试运行脚本
 │       ├── layers/                 # 分层测试
 │       │   ├── nginx/              # Nginx 入口层测试
-│       │   └── proxy/              # Proxy 直连层测试
+│       │   ├── proxy/              # Proxy 直连层测试
+│       │   └── archive/            # Archive 归档层测试
 │       └── utils.sh                # 测试工具函数
 │
-├── scripts/                        # 脚本目录
-│   ├── docker-compose/             # Docker Compose 部署
-│   │   ├── start.sh               # 启动脚本
-│   │   ├── build_image.sh         # 构建镜像
-│   │   └── entrypoint.sh          # 容器入口点
-│   ├── docker-allinone/            # 混合容器部署
-│   │   ├── build.sh               # 构建镜像
-│   │   └── entrypoint.sh          # 容器入口点
-│   └── tools/                      # 工具脚本
-│       ├── archive_records.py      # 详情数据归档脚本
-│       ├── download_tokenizer.py   # Tokenizer 下载
-│       └── verify_jinja_consistency.py # Jinja 模板一致性验证
+├── scripts/                        # 脚本目录（扁平结构）
+│   ├── download_tokenizer.py       # Tokenizer 下载
+│   ├── ensure_jinja_consistency.py # Jinja 模板一致性验证
+│   ├── export_database.py          # 数据库导出
+│   ├── replay_trajectory_viewer.html # 轨迹回放可视化
+│   ├── start_docker_allinone.sh    # 启动 All-in-One 容器
+│   ├── start_docker_archiver.sh    # 启动归档服务容器
+│   └── start_docker_compose.sh     # 启动 Compose 容器
 │
 ├── dockers/                        # Docker 相关
-│   ├── docker-compose.yml          # 容器编排
-│   └── Dockerfile                  # 镜像构建
+│   ├── allinone/                   # All-in-One 容器
+│   │   ├── Dockerfile              # 镜像构建文件
+│   │   ├── configs/                # 容器内配置
+│   │   │   ├── archiver.yaml       # 归档配置
+│   │   │   ├── config.yaml         # 主配置
+│   │   │   ├── litellm.yaml        # LiteLLM 配置
+│   │   │   ├── nginx.conf          # Nginx 配置
+│   │   │   └── supervisord.conf    # Supervisord 配置
+│   │   └── scripts/                # 容器脚本
+│   │       ├── build_image.sh      # 构建镜像
+│   │       └── entrypoint.sh       # 容器入口点
+│   │
+│   ├── archiver/                   # 归档服务容器
+│   │   ├── docker-compose.yml      # 容器编排
+│   │   ├── docker-compose-test.yml # 测试编排
+│   │   ├── configs/                # 容器内配置
+│   │   │   ├── archiver.yaml       # 归档配置
+│   │   │   └── archiver-test-s3.yaml # S3 测试配置
+│   │   └── scripts/                # 容器脚本
+│   │       └── entrypoint.sh       # 容器入口点
+│   │
+│   ├── compose/                    # Docker Compose 部署
+│   │   ├── Dockerfile              # 镜像构建文件
+│   │   ├── docker-compose.yml      # 容器编排
+│   │   ├── configs/                # 容器内配置
+│   │   │   ├── config.yaml         # 主配置
+│   │   │   ├── litellm.yaml        # LiteLLM 配置
+│   │   │   ├── nginx.conf          # Nginx 配置
+│   │   │   └── prometheus.yml      # Prometheus 配置
+│   │   └── scripts/                # 容器脚本
+│   │       ├── build_image.sh      # 构建镜像
+│   │       └── entrypoint.sh       # 容器入口点
+│   │
+│   └── images/                     # 预构建镜像
+│       ├── traj-proxy.arm64.025.tar # ARM64 镜像
+│       ├── traj-proxy.amd64.025.tar # AMD64 镜像
+│       └── python.3.11-slim.tar    # Python 基础镜像
 │
 ├── models/                         # Tokenizer 模型目录
 ├── docs/                           # 文档目录
@@ -265,7 +327,7 @@ python scripts/init_db.py
 ```bash
 cd tests/e2e
 
-# 运行全部两层测试（Nginx + Proxy）
+# 运行全部三层测试（Nginx + Proxy + Archive）
 ./run_tests.sh
 
 # 仅运行 Nginx 层测试（port 12345）
@@ -273,6 +335,9 @@ cd tests/e2e
 
 # 仅运行 Proxy 层测试（port 12300）
 ./run_tests.sh --layer proxy
+
+# 仅运行 Archive 层测试
+./run_tests.sh --layer archive
 
 # 按编号搜索运行
 ./run_tests.sh F100
@@ -298,11 +363,22 @@ tests/e2e/
     │       ├── F101_claude_scenario.sh
     │       ├── F102_streaming_chat.sh
     │       └── ...
-    └── proxy/            # Proxy 直连层测试 (port 12300)
+    ├── proxy/            # Proxy 直连层测试 (port 12300)
+    │   ├── run_layer.sh
+    │   └── scenarios/
+    │       ├── F200_model_register_list_delete.sh
+    │       ├── F201_pangu_integration.sh
+    │       └── ...
+    └── archive/          # Archive 归档层测试
         ├── run_layer.sh
+        ├── config.sh
+        ├── utils.sh
         └── scenarios/
-            ├── F200_model_register_list_delete.sh
-            ├── F201_pangu_integration.sh
+            ├── A100_archive_config.sh
+            ├── A101_manual_archive.sh
+            ├── A102_scheduled_archive.sh
+            ├── A103_archive_recovery.sh
+            ├── A104_scheduled_polling.sh
             └── ...
 ```
 
@@ -312,6 +388,7 @@ tests/e2e/
 |------|------|------|
 | F1xx | 功能测试 | Nginx 层基础功能 |
 | F2xx | 功能测试 | Proxy 层功能 |
+| A1xx | 归档测试 | Archive 归档层功能 |
 | P1xx | 性能测试 | 并发、稳定性测试 |
 
 ---

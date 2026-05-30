@@ -1,6 +1,6 @@
 # 数据库归档机制设计文档 v2
 
-> **导航**: [文档中心](../README.md) | [数据库设计](database.md)
+> **导航**: [文档中心](../../README.md) | [数据库设计](schema.md)
 
 版本: v2.2 | 最后更新: 2026-05-26
 
@@ -21,7 +21,7 @@
 
 ```
                     ┌─────────┐
-                    │ 独立进程 │ -- traj_archiver, 与核心业务零耦合
+                    │ 独立进程 │ -- traj_archiver, 与核心业务独立运行
                     └────┬────┘
                ┌─────────┴─────────┐
                │  最小化 DB 压力   │ -- 小批量 DELETE, 无大 JOIN
@@ -41,14 +41,19 @@
 
 ### 2.1 独立进程架构
 
-归档进程 `traj_archiver` 与核心业务 `traj_proxy` 完全独立，共享同一 Docker 镜像，通过启动命令区分角色:
+归档进程 `traj_archiver` 与核心业务 `traj_proxy` 独立运行，共享同一 Docker 镜像，通过启动命令区分角色:
 
 ```
 核心业务容器 * N (traj-proxy)       归档容器 * 1 (traj-archiver)
   -- 仅处理推理请求                   -- 仅处理数据归档
-  -- 不包含归档代码                   -- 独立配置、独立调度
-  -- 零依赖 traj_archiver             -- 零依赖 traj_proxy
+  -- 内嵌旧版归档代码(traj_proxy/archive/)  -- 独立配置、独立调度
+  -- 推荐使用 traj_archiver          -- 零依赖 traj_proxy 业务代码
 ```
+
+> **注意**: `traj_proxy/archive/` 目录下仍保留了旧版嵌入式归档代码（cron 调度模式），
+> 作为遗留兼容。推荐使用独立的 `traj_archiver/` 包，两种调度模式共存：
+> - **traj_proxy/archive/scheduler.py**: cron 表达式调度（依赖 croniter），嵌入主进程
+> - **traj_archiver/scheduler.py**: 轮询调度（poll_interval），独立进程
 
 ### 2.2 协调器-Worker 架构
 
@@ -205,7 +210,11 @@ async with conn.transaction():
 
 ## 6. 调度器
 
-轮询模式，固定间隔:
+系统支持两种调度模式：
+
+### 6.1 独立进程轮询调度器（推荐）
+
+位于 `traj_archiver/scheduler.py`，固定间隔轮询:
 
 ```yaml
 archive:
@@ -217,6 +226,26 @@ archive:
 主循环: `execute() -> sleep(poll_interval) -> execute()`
 失败: 等 5 分钟重试
 状态查询: `get_status()` 返回运行状态、Worker 数量和统计
+
+### 6.2 嵌入式 cron 调度器（遗留）
+
+位于 `traj_proxy/archive/scheduler.py`，使用 croniter 实现定时调度:
+
+```yaml
+archive:
+  schedule: "0 2 * * *"  # cron 表达式（每天凌晨 2 点）
+  timezone: "Asia/Shanghai"
+  retention_days: 30
+  storage_path: "/data/archives"
+```
+
+特点:
+- 嵌入主进程运行，与业务共享进程
+- 支持 cron 表达式（更灵活的时间控制）
+- 支持心跳状态日志（每小时输出一次）
+- 手动触发: `trigger_now()`
+
+> **注意**: 建议使用独立进程轮询调度器（6.1），嵌入式 cron 调度器作为遗留方案保留。
 
 ---
 
@@ -271,6 +300,11 @@ JSONL + GZIP，每行一个请求记录:
 ```yaml
 database:
   url: "postgresql://..."
+  pool:
+    min_size: 2        # 连接池最小连接数
+    max_size: 10       # 连接池最大连接数
+    timeout: 30        # 获取连接超时（秒）
+    max_idle: 60       # 最大空闲时间（秒），超时后连接回收
 archive:
   retention_days: 30
   poll_interval: 3600
@@ -300,11 +334,13 @@ archive:
 | `traj_archiver/__main__.py` | 进程入口，Ray 初始化 + Worker 创建 + 调度器启动 |
 | `traj_archiver/archiver.py` | 协调器 (run 判定、动态分发 Worker、DELETE+UPDATE) |
 | `traj_archiver/session_worker.py` | Ray Actor Worker (读 DB → 写文件 → 上传) |
-| `traj_archiver/scheduler.py` | 轮询调度器 |
+| `traj_archiver/scheduler.py` | 轮询调度器（独立进程，推荐） |
 | `traj_archiver/storage.py` | 存储工厂 (本地/S3/CSB 自动选择) |
 | `traj_archiver/s3_storage.py` | S3 存储实现 (boto3) |
 | `traj_archiver/csb_storage.py` | CSB 网关存储实现 (原生 REST API) |
 | `traj_archiver/config.py` | 独立配置加载 |
+| `traj_proxy/archive/archiver.py` | 嵌入式归档执行器（遗留，月分区粒度） |
+| `traj_proxy/archive/scheduler.py` | 嵌入式 cron 调度器（遗留，依赖 croniter） |
 | `configs/archiver.yaml` | 归档配置文件 |
 | `dockers/archiver/` | 独立 compose 部署 |
 | `scripts/start_docker_archiver.sh` | 启停脚本 |
@@ -324,5 +360,5 @@ archive:
 | 磁盘保护 | 无 (可能打爆磁盘) | 有界队列 | Worker 同一时刻只处理一个 session |
 | DB 连接 | 共享连接池 | 共享连接池 | 协调器用连接池，Worker 每次新建 |
 | 配置 | config.yaml archive 段 | 独立 archiver.yaml | 独立 archiver.yaml |
-| CLI | scripts/archive_records.py | python -m traj_archiver | python -m traj_archiver |
+| CLI | traj_proxy/archive/archiver.py (嵌入) | python -m traj_archiver | python -m traj_archiver |
 | 留存期 | 30 天固定 | 7/10/30 天灵活配置 | 7/10/30 天灵活配置 |

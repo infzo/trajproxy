@@ -2,7 +2,7 @@
 
 > **导航**: [文档中心](../README.md) | [开发环境](development.md) | [配置说明](configuration.md)
 
-TrajProxy 支持两种部署方式：本地开发模式和 Docker 容器化部署。
+TrajProxy 支持三种部署方式：本地开发模式、Docker Compose 容器化部署和 All-in-One 单容器部署。
 
 ---
 
@@ -161,7 +161,117 @@ curl http://localhost:12300/health
 
 ---
 
-## 方式三：归档进程独立部署
+## 方式三：All-in-One 单容器部署
+
+适用于不支持 Docker Compose 的环境（如某些内网服务器、单机部署），将 nginx + LiteLLM + PostgreSQL + TrajProxy + 归档进程打包为一个镜像，通过 supervisord 管理所有服务。
+
+### 1. 构建镜像
+
+```bash
+cd dockers/allinone
+./scripts/build_image.sh
+
+# 或手动构建
+docker build -t traj_proxy_allinone:latest -f dockers/allinone/Dockerfile .
+```
+
+### 2. 配置
+
+编辑 `dockers/allinone/configs/config.yaml`：
+
+```yaml
+proxy_workers:
+  count: 2
+  base_port: 12300
+  max_concurrent_requests: 4096
+  models:
+    - model_name: qwen3.5-2b
+      url: http://host.docker.internal:8000/v1
+      api_key: sk-1234
+
+database:
+  url: "postgresql://llmproxy:dbpassword9090@127.0.0.1:5432/traj_proxy"
+  pool:
+    min_size: 50
+    max_size: 100
+    timeout: 60
+```
+
+归档进程配置编辑 `dockers/allinone/configs/archiver.yaml`，详见下方归档进程章节。
+
+### 3. 启动
+
+```bash
+# 基本启动
+docker run -d --name trajproxy-allinone \
+    -p 12345:12345 \
+    --shm-size=2g \
+    traj_proxy_allinone:latest
+
+# 自定义数据库凭证
+docker run -d --name trajproxy-allinone \
+    -p 12345:12345 \
+    --shm-size=2g \
+    -e POSTGRES_USER=myuser \
+    -e POSTGRES_PASSWORD=mysecretpassword \
+    -e POSTGRES_DB=litellm \
+    -e TRAJ_PROXY_DB=traj_proxy \
+    traj_proxy_allinone:latest
+
+# 数据持久化（推荐生产环境）
+docker run -d --name trajproxy-allinone \
+    -p 12345:12345 \
+    --shm-size=2g \
+    -v trajproxy_postgres:/data/postgres \
+    -v trajproxy_archives:/data/archives \
+    -v trajproxy_logs:/app/logs \
+    traj_proxy_allinone:latest
+```
+
+> **重要**：必须设置 `--shm-size=2g`（或更大），Ray 需要共享内存。默认 64MB 会导致性能严重下降。
+
+### 4. 服务架构
+
+All-in-One 容器内由 supervisord 管理 5 个服务：
+
+| 服务 | 说明 | 通信方式 |
+|------|------|----------|
+| PostgreSQL | 数据库 | 容器内 127.0.0.1:5432 |
+| LiteLLM | API 网关 | 容器内 127.0.0.1:4000 |
+| TrajProxy | 主应用 | 容器内 12300+ 端口 |
+| 归档进程 | 定时归档 | 容器内独立进程 |
+| Nginx | 反向代理 | 对外暴露 12345 |
+
+所有内部服务通过 localhost 通信，对外仅暴露 Nginx 端口 12345。
+
+### 5. 环境变量
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `POSTGRES_USER` | llmproxy | PostgreSQL 用户名 |
+| `POSTGRES_PASSWORD` | dbpassword9090 | PostgreSQL 密码 |
+| `POSTGRES_DB` | litellm | LiteLLM 数据库名 |
+| `TRAJ_PROXY_DB` | traj_proxy | TrajProxy 数据库名 |
+| `DATABASE_URL` | 自动生成 | 数据库连接 URL（自动从上述变量拼接） |
+| `LITELLM_MASTER_KEY` | sk-1234 | LiteLLM 管理密钥 |
+| `LITELLM_SALT_KEY` | sk-1234 | LiteLLM 加密盐值 |
+
+### 6. 验证
+
+```bash
+# 检查 Nginx 健康状态
+curl http://localhost:12345/health
+
+# 查看所有服务日志
+docker logs -f trajproxy-allinone
+
+# 进入容器查看各服务状态
+docker exec trajproxy-allinone supervisorctl status
+```
+
+---
+
+## 方式四：归档进程独立部署
 
 归档进程与核心业务独立部署，1 个数据库实例对应 1 个归档容器。
 
@@ -171,11 +281,19 @@ curl http://localhost:12300/health
 ```yaml
 database:
   url: "postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy"
+  pool:
+    min_size: 2
+    max_size: 10
+    timeout: 30
+    max_idle: 900
 
 archive:
   retention_days: 30
   poll_interval: 3600
+  num_workers: 1                 # Ray Worker 进程数，默认 1（顺序）
+  compress: true                 # 是否 gzip 压缩，false 则直接上传 jsonl
   storage_path: "/data/archives"
+  local_temp_path: "/tmp/archives"
   # S3 模式 (可选):
   # s3:
   #   bucket: "my-bucket"
@@ -379,9 +497,12 @@ cd dockers/compose && docker-compose exec traj_proxy cat /app/configs/config.yam
 
 ## 配置差异对照
 
-| 配置项 | 本地开发 | Docker 部署 |
-|--------|----------|-------------|
-| `url` (推理服务) | `http://localhost:1234` | `http://host.docker.internal:1234` |
-| `database.url` | `...localhost:5432...` | `...db:5432...` |
-| `ray.working_dir` | `.` | `/app` |
-| `ray.pythonpath` | `.` | `/app` |
+| 配置项 | 本地开发 | Docker Compose | All-in-One |
+|--------|----------|----------------|------------|
+| `url` (推理服务) | `http://localhost:1234` | `http://host.docker.internal:1234` | `http://host.docker.internal:1234` |
+| `database.url` | `...localhost:5432...` | `...db:5432...` | `...127.0.0.1:5432...` |
+| `ray.working_dir` | `.` | `/app` | `/app` |
+| `ray.pythonpath` | `.` | `/app` | `/app` |
+| `max_concurrent_requests` | 4096 | 4096 | 4096 |
+| `pool.min_size` | 2 | 10 | 50 |
+| `pool.max_size` | 4 | 30 | 100 |

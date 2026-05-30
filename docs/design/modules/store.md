@@ -1,6 +1,6 @@
 # Store 模块文档
 
-> **导航**: [文档中心](../README.md) | [数据库设计](../design/database.md)
+> **导航**: [文档中心](../../README.md) | [数据库设计](../data/schema.md)
 
 ## 概述
 
@@ -8,7 +8,9 @@
 
 **依赖**: PostgreSQL、psycopg (async)、psycopg_pool
 
-**相关文档**: 数据库 Schema 详见 [database.md](database.md)
+**相关文档**: 数据库 Schema 详见 [数据库设计](../data/schema.md)
+
+> **注意**: `ModelSynchronizer` 未在 `__init__.py` 中导出，需直接从 `traj_proxy.store.model_synchronizer` 导入。
 
 ---
 
@@ -89,7 +91,7 @@ class ModelConfig:
     url: str                           # 推理服务 URL
     api_key: str                       # API 密钥
     tokenizer_path: Optional[str]      # Tokenizer 路径
-    run_id: str = ""                   # 运行 ID，空字符串 = 全局模型
+    run_id: Optional[str] = None          # 运行 ID，None = 全局模型
     model_name: str = ""               # 模型名称
     token_in_token_out: bool = False   # 是否启用 Token 模式
     tool_parser: str = ""              # 工具解析器名称
@@ -109,7 +111,7 @@ class RequestRecord:
     session_id: str                    # 会话 ID
     model: str                         # 模型名称
     messages: List[Any]                # 消息列表
-    # ... 完整字段见 database.md
+    # ... 完整字段见 schema.md
     archive_location: Optional[str]    # NULL=活跃, 非空=已归档
     archived_at: Optional[datetime]    # 归档时间
 ```
@@ -133,10 +135,11 @@ class RequestRecord:
 | 方法 | 签名 | 说明 |
 |------|------|------|
 | `insert` | `async (context: ProcessContext, tokenizer_path: Optional[str], run_id: Optional[str]) -> None` | 事务双写 metadata + details 表 |
+| `get_prefix_candidates` | `async (session_id: str) -> List[Dict]` | 查询前缀匹配候选记录（仅 full_conversation_text + full_conversation_token_ids），按 start_time 倒序 |
 | `get_by_session` | `async (session_id: str, limit: int = 100) -> List[Dict]` | JOIN 查询活跃记录，按 start_time 倒序 |
-| `get_all_by_session` | `async (session_id: str) -> List[Dict]` | JOIN 查询活跃记录（无 limit） |
+| `get_all_by_session` | `async (session_id: str, fields: Optional[str] = None) -> List[Dict]` | JOIN 查询活跃记录（无 limit），fields 支持字段选择 |
 | `list_sessions` | `async (run_id: str) -> List[Dict]` | 按 run_id 分组查询 session 列表 |
-| `get_metadata_by_session` | `async (session_id: str, limit: int = 10000) -> List[Dict]` | 轻量元数据查询（含活跃+已归档） |
+| `get_metadata_by_session` | `async (session_id: str, limit: int = 10000, fields: Optional[str] = None) -> List[Dict]` | 轻量元数据查询（含活跃+已归档），fields 支持字段选择 |
 | `get_statistics` | `async (model, start_time, end_time) -> Dict` | 聚合统计查询 |
 
 **写入机制**：`insert()` 在同一事务中写入 `request_metadata` 和 `request_details_active`，任一失败则整体回滚。
@@ -227,39 +230,24 @@ class RequestRecord:
 
 ### 5.4 LISTEN/NOTIFY
 
+NotificationListener 构造参数（非配置文件项，由 ModelSynchronizer 传入）:
+
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `reconnect_delay` | 5 | LISTEN 重连初始延迟（秒） |
-| `max_reconnect_delay` | 60 | LISTEN 重连最大延迟（秒） |
+| `reconnect_delay` | 5.0 | LISTEN 重连初始延迟（秒），由 ModelSynchronizer 的 `sync_retry_delay` 传入 |
+| `max_reconnect_delay` | 60.0 | LISTEN 重连最大延迟（秒），硬编码默认值 |
 
 ---
 
 ## 六、数据同步机制
 
-### 6.1 双通道同步
+> **完整架构图、Payload 格式、配置项**参见 [模型同步机制](../architecture.md#十四模型同步机制)。
 
-```
-         ┌────────── 主通道 ──────────┐
-         │                            │
-Worker A ──► UPSERT + NOTIFY ──► PostgreSQL ──► Worker B/C LISTEN
-                                                       │
-                                           ┌── 兜底通道 ──┐
-                                           │              │
-                                  Worker B/C 定期 get_all()
-                                  对比内存 → 增删 Processor
-```
+核心设计：双通道同步
+- **主通道 - LISTEN/NOTIFY**：`ModelRepository.register()` 执行 UPSERT + NOTIFY（同事务），`NotificationListener` 收到通知后通过 `ModelSynchronizer` 回调 ProcessorManager 增量更新，延迟毫秒级
+- **兜底通道 - 定期全量同步**：`_periodic_sync()` 定期 `get_all()` 对比所有字段，有差异则重建 Processor，防止 NOTIFY 丢失
 
-- **主通道**: LISTEN/NOTIFY，延迟毫秒级
-- **兜底通道**: 定期全量同步，防止 NOTIFY 丢失
-
-### 6.2 同步流程
-
-1. **注册**: `ModelRepository.register()` 执行 UPSERT + NOTIFY（同一事务内）
-2. **监听**: `NotificationListener` 收到通知，解析 payload
-3. **增量更新**: `ProcessorManager._handle_notification()` 调用 `get_by_key()` 获取最新配置，重建 Processor
-4. **兜底**: `_periodic_sync()` 定期调用 `get_all()`，对比所有字段（url、api_key、tokenizer_path 等），有差异则重建
-
-### 6.3 初始化顺序
+### 6.2 初始化顺序
 
 ```python
 # worker.py: ProxyWorker.initialize()
