@@ -14,11 +14,11 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 TOOL_TEST_BASE_URL="${BASE_URL}"
-TOOL_TEST_MODEL_NAME="tool-test-model"
+TOOL_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TOOL_TEST_RUN_ID="run-${SCENARIO_ID}"
 TOOL_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
-TOOL_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
-TOOL_TEST_TOOL_PARSER="qwen3_coder"
+TOOL_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
+TOOL_TEST_TOOL_PARSER="${DEFAULT_TOOL_PARSER}"
 
 # 步骤 1: 注册模型（带 run_id、tool_parser 和 token_in_token_out）
 # 注意：tool_parser 只在 token_in_token_out=true 模式下生效
@@ -76,7 +76,7 @@ sleep 3
 echo ""
 
 # 步骤 2: 发送带 tools 的非流式推理请求（使用特定提示词引导模型输出工具调用格式）
-# qwen3_coder parser 期望格式: toral<function=func_name>\n<parameter=param_name>value</parameter>\n</function> Ranchi
+# hermes parser 期望格式:  tantefunc{"name": "func_name", "arguments": {...}} tantefunc
 log_step "步骤 2: 发送带 tools 的非流式推理请求（run_id: ${TOOL_TEST_RUN_ID}, session_id: ${TOOL_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -X POST '${TOOL_TEST_BASE_URL}/s/${TOOL_TEST_RUN_ID}/${TOOL_TEST_SESSION_ID}/v1/chat/completions' \\
@@ -84,7 +84,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly: toral<function=get_weather>\\n<parameter=location>Beijing</parameter>\\n</function> Ranchi\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  tantefunc{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Beijing\"}} tantefunc\"}],
         \"tools\": [
             {
                 \"type\": \"function\",
@@ -113,7 +113,7 @@ CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/${T
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly: toral<function=get_weather>\\n<parameter=location>Beijing</parameter>\\n</function> Ranchi\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  tantefunc{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Beijing\"}} tantefunc\"}],
         \"tools\": [
             {
                 \"type\": \"function\",

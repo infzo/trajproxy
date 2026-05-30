@@ -1,0 +1,25 @@
+#!/bin/bash
+# Layer 4 配置: 对比测试层（vLLM port 8000 vs trajproxy port 12300）
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../../config.sh"
+
+# trajproxy 地址（复用全局配置）
+PROXY_URL="${TRAJ_PROXY_URL:-http://127.0.0.1:12300}"
+PROXY_API_MODELS="${PROXY_URL}/models"
+
+# vLLM 原始推理服务地址
+VLLM_URL="${VLLM_URL:-http://127.0.0.1:8000}"
+VLLM_API_MODELS="${VLLM_URL}/v1/models"
+
+# 对比测试通用配置（引用全局 DEFAULT_* 变量，支持环境变量覆盖）
+COMPARISON_MODEL_NAME="${DEFAULT_MODEL_NAME}"
+COMPARISON_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
+COMPARISON_TOOL_PARSER="${DEFAULT_TOOL_PARSER}"
+COMPARISON_REASONING_PARSER="${DEFAULT_REASONING_PARSER}"
+
+# 固化采样参数（消除推理随机性）
+COMPARISON_SAMPLING_PARAMS='"temperature": 0.0, "seed": 42'
+
+# 推理请求 API Key
+COMPARISON_CHAT_API_KEY="${CHAT_API_KEY:-sk-1234}"

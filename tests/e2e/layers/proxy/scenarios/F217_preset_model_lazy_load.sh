@@ -16,7 +16,7 @@ echo ""
 # 测试配置
 TEST_BASE_URL="${BASE_URL}"
 # 使用 config.yaml 中预置的静态模型
-PRESET_MODEL="qwen3.5-2b"
+PRESET_MODEL="${DEFAULT_MODEL_NAME}"
 PRESET_RUN_ID_APP="app-001"
 TEST_SESSION_ID="session-f217-$(date +%s%N | md5sum | head -c 8)"
 

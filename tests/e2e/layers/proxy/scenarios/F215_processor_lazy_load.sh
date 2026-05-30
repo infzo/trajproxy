@@ -14,7 +14,7 @@ echo ""
 
 # 测试配置
 TEST_BASE_URL="${BASE_URL}"
-TEST_MODEL_NAME="test-lazy-model"
+TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TEST_RUN_ID="run-lazy-001"
 TEST_SESSION_ID="session-f215-$(date +%s%N | md5sum | head -c 8)"
 

@@ -19,10 +19,10 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 REASONING_TEST_BASE_URL="${BASE_URL}"
-REASONING_TEST_MODEL_NAME="custom-reasoning-test-model"
+REASONING_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 REASONING_TEST_RUN_ID="run-${SCENARIO_ID}"
 REASONING_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
-REASONING_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
+REASONING_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 REASONING_TEST_REASONING_PARSER="test_reasoning_parser"  # 使用自定义 parser
 
 # 步骤 1: 注册模型（带自定义 reasoning_parser）

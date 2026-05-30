@@ -16,10 +16,10 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 TEST_BASE_URL="${BASE_URL}"
-TEST_MODEL_NAME="eos-consistency-model"
+TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TEST_RUN_ID="run-${SCENARIO_ID}"
 TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
-TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
+TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 
 # ========== 步骤 1: 注册模型 ==========
 

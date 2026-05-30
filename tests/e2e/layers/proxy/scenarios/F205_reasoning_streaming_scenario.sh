@@ -14,11 +14,11 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 REASONING_STREAM_TEST_BASE_URL="${BASE_URL}"
-REASONING_STREAM_TEST_MODEL_NAME="reasoning-stream-test-model"
+REASONING_STREAM_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 REASONING_STREAM_TEST_RUN_ID="run-${SCENARIO_ID}"
 REASONING_STREAM_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
-REASONING_STREAM_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
-REASONING_STREAM_TEST_REASONING_PARSER="qwen3"
+REASONING_STREAM_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
+REASONING_STREAM_TEST_REASONING_PARSER="${DEFAULT_REASONING_PARSER}"
 
 # 步骤 1: 注册模型（带 run_id、reasoning_parser 和 token_in_token_out）
 # 注意：reasoning_parser 只在 token_in_token_out=true 模式下生效

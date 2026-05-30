@@ -17,7 +17,7 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 TRAJ_API_BASE_URL="${BASE_URL}"
-TRAJ_API_MODEL_NAME="traj-api-test-model"
+TRAJ_API_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TRAJ_API_RUN_ID="run-${SCENARIO_ID}"
 
 # 生成多个 session_id 用于测试

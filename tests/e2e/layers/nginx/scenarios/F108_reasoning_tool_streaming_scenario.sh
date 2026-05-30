@@ -14,12 +14,12 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 COMBO_STREAM_TEST_BASE_URL="${BASE_URL}"
-COMBO_STREAM_TEST_MODEL_NAME="reasoning-tool-stream-test-model"
+COMBO_STREAM_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 COMBO_STREAM_TEST_RUN_ID="run-${SCENARIO_ID}"
 COMBO_STREAM_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
-COMBO_STREAM_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
-COMBO_STREAM_TEST_TOOL_PARSER="qwen3_coder"
-COMBO_STREAM_TEST_REASONING_PARSER="qwen3"
+COMBO_STREAM_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
+COMBO_STREAM_TEST_TOOL_PARSER="${DEFAULT_TOOL_PARSER}"
+COMBO_STREAM_TEST_REASONING_PARSER="${DEFAULT_REASONING_PARSER}"
 
 # 步骤 1: 注册模型（同时配置 reasoning_parser 和 tool_parser）
 # 注意：parser 只在 token_in_token_out=true 模式下生效
@@ -84,7 +84,7 @@ echo ""
 
 # 步骤 2: 发送带推理内容和工具调用的流式请求
 # qwen3 reasoning parser 使用 <think\>...</think\> 标签包裹推理内容
-# qwen3_coder tool parser 期望格式: toral<function=func_name>\n<parameter=param_name>value</parameter>\n</function> Ranchi
+# hermes tool parser 期望格式: tantefunc{"name": "func_name", "arguments": {...}} tantefunc
 # 组合格式: 先推理后工具调用
 log_step "步骤 2: 发送带推理内容和工具调用的流式请求（session_id: ${COMBO_STREAM_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s --no-buffer \\
@@ -93,7 +93,7 @@ log_curl_cmd "curl -s --no-buffer \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
         \"model\": \"${COMBO_STREAM_TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly: Let me think about the weather.\\nFirst, I will check the location.\\n\\n\\nNow I will call the weather function.\\n\\ntoral<function=get_weather>\\n<parameter=location>Beijing</parameter>\\n</function> Ranchi\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  Let me think about the weather.\\nFirst, I will check the location.\\n\\n\\nNow I will call the weather function.\\n\\ntantefunc{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {\\\"location\\\": \\\"Beijing\\\"}} tantefunc\"}],
         \"tools\": [
             {
                 \"type\": \"function\",
@@ -124,7 +124,7 @@ STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${COMBO_STREAM_TEST_BASE_URL}/s/$
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${COMBO_STREAM_TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly: Let me think about the weather.\\nFirst, I will check the location.\\n\\n\\nNow I will call the weather function.\\n\\ntoral<function=get_weather>\\n<parameter=location>Beijing</parameter>\\n</function> Ranchi\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  Let me think about the weather.\\nFirst, I will check the location.\\n\\n\\nNow I will call the weather function.\\n\\ntantefunc{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {\\\"location\\\": \\\"Beijing\\\"}} tantefunc\"}],
         \"tools\": [
             {
                 \"type\": \"function\",

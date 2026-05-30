@@ -24,7 +24,7 @@ TEST_RUN_ID="run-${SCENARIO_ID}"
 TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 
 # TITO模式需要tokenizer路径
-TEST_TOKENIZER_PATH="${TEST_TOKENIZER_PATH:-Qwen/Qwen3.5-2B}"
+TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 
 # Mock服务配置
 MOCK_PORT=19991

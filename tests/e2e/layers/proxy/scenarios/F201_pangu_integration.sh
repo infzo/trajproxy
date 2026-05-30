@@ -15,7 +15,7 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 PANGU_TEST_BASE_URL="${BASE_URL}"
-PANGU_TEST_MODEL_NAME="pangu-model"
+PANGU_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 PANGU_TEST_RUN_ID="run-${SCENARIO_ID}"
 PANGU_TEST_MODEL_PARAM="${PANGU_TEST_MODEL_NAME},${PANGU_TEST_RUN_ID}"
 

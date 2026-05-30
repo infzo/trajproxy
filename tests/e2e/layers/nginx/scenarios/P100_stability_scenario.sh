@@ -14,7 +14,7 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 STABILITY_TEST_BASE_URL="${BASE_URL}"
-STABILITY_TEST_MODEL_NAME="stability-test-model"
+STABILITY_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 STABILITY_TEST_RUN_ID="run-${SCENARIO_ID}"
 STABILITY_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 STABILITY_TEST_REQUEST_COUNT=100

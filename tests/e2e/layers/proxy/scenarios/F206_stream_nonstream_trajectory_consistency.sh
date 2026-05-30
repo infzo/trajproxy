@@ -14,12 +14,12 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 CONSISTENCY_TEST_BASE_URL="${BASE_URL}"
-CONSISTENCY_TEST_MODEL_NAME="consistency-test-model"
+CONSISTENCY_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 CONSISTENCY_TEST_RUN_ID="run-${SCENARIO_ID}"
 CONSISTENCY_TEST_SESSION_ID_STREAM="session-${SCENARIO_ID}-stream-$(date +%s%N | md5sum | head -c 8)"
 CONSISTENCY_TEST_SESSION_ID_NONSTREAM="session-${SCENARIO_ID}-nonstream-$(date +%s%N | md5sum | head -c 8)"
 CONSISTENCY_TEST_PROMPT="What is 2+2? Answer briefly."
-CONSISTENCY_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
+CONSISTENCY_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 
 # ========================================
 # 步骤 1: 注册模型

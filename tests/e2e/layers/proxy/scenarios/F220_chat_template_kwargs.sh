@@ -29,7 +29,7 @@ DIRECT_SESSION_ID="session-${SCENARIO_ID}-direct-$(date +%s%N | md5sum | head -c
 TITO_MODEL_NAME="ctk-tito-model"
 TITO_RUN_ID="run-${SCENARIO_ID}-tito"
 TITO_SESSION_ID="session-${SCENARIO_ID}-tito-$(date +%s%N | md5sum | head -c 8)"
-TITO_TOKENIZER_PATH="${TEST_TOKENIZER_PATH:-Qwen/Qwen3.5-2B}"
+TITO_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 
 # Mock服务配置（两个独立端口）
 MOCK_PORT_DIRECT=19993

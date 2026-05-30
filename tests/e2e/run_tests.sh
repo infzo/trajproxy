@@ -33,9 +33,10 @@ print_usage() {
     echo "  $0 --layer nginx F100 F101  指定层内特定用例"
     echo ""
     echo "可用层:"
-    echo "  nginx   - Nginx 入口层测试 (port 12345)"
-    echo "  proxy   - 直连 Proxy 层测试 (port 12300)"
-    echo "  archive - 归档调度层测试"
+    echo "  nginx      - Nginx 入口层测试 (port 12345)"
+    echo "  proxy      - 直连 Proxy 层测试 (port 12300)"
+    echo "  archive    - 归档调度层测试"
+    echo "  comparison - 对比测试层 (vLLM:8000 vs Proxy:12300)"
 }
 
 # 运行指定层
@@ -61,7 +62,7 @@ run_scenario_cross_layer() {
     local scenario_id="$1"
     local found=0
 
-    for layer_dir in "${SCRIPT_DIR}/layers/nginx" "${SCRIPT_DIR}/layers/proxy" "${SCRIPT_DIR}/layers/archive"; do
+    for layer_dir in "${SCRIPT_DIR}/layers/nginx" "${SCRIPT_DIR}/layers/proxy" "${SCRIPT_DIR}/layers/archive" "${SCRIPT_DIR}/layers/comparison"; do
         local matches=("${layer_dir}/scenarios/${scenario_id}"*.sh)
         if [ -f "${matches[0]}" ]; then
             if run_layer "$layer_dir" "$scenario_id"; then
@@ -161,8 +162,16 @@ main() {
                 fi
                 TOTAL_SCENARIOS=$?
                 ;;
+            comparison|4)
+                if [ ${#SCENARIO_IDS[@]} -gt 0 ]; then
+                    run_layer "${SCRIPT_DIR}/layers/comparison" "${SCENARIO_IDS[@]}"
+                else
+                    run_layer "${SCRIPT_DIR}/layers/comparison"
+                fi
+                TOTAL_SCENARIOS=$?
+                ;;
             *)
-                echo -e "${RED}未知层: ${LAYER}（可用: nginx, proxy, archive）${NC}"
+                echo -e "${RED}未知层: ${LAYER}（可用: nginx, proxy, archive, comparison）${NC}"
                 exit 1
                 ;;
         esac
@@ -173,8 +182,8 @@ main() {
         done
         print_final_summary
     else
-        # 无参数 -> 运行全部三层
-        echo -e "${YELLOW}运行全部三层测试...${NC}"
+        # 无参数 -> 运行全部四层
+        echo -e "${YELLOW}运行全部四层测试...${NC}"
 
         echo ""
         echo "=========================================="
@@ -194,7 +203,12 @@ main() {
         echo "=========================================="
         run_layer "${SCRIPT_DIR}/layers/archive" || true
 
-        # 汇总（简单方式：依赖子进程的退出码输出）
+        echo ""
+        echo -e "${BLUE}Layer 4: Comparison (vLLM:8000 vs Proxy:12300)${NC}"
+        echo "=========================================="
+        run_layer "${SCRIPT_DIR}/layers/comparison" || true
+
+        # 汇总
         echo ""
         echo -e "${GREEN}全部层测试执行完毕${NC}"
     fi

@@ -15,11 +15,11 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 TOOL_TEST_BASE_URL="${BASE_URL}"
-TOOL_TEST_MODEL_NAME="multi-turn-tool-test-model"
+TOOL_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TOOL_TEST_RUN_ID="run-${SCENARIO_ID}"
 TOOL_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
-TOOL_TEST_TOKENIZER_PATH="Qwen/Qwen3.5-2B"
-TOOL_TEST_TOOL_PARSER="qwen3_coder"
+TOOL_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
+TOOL_TEST_TOOL_PARSER="${DEFAULT_TOOL_PARSER}"
 
 # ========== 步骤 1: 注册模型 ==========
 
@@ -130,7 +130,7 @@ FULL_TOOLS='[
 # ========== 步骤 2: 第1轮对话（工具调用：get_weather） ==========
 
 log_step "步骤 2: 第1轮对话（工具调用：get_weather）"
-ROUND1_MESSAGES='[{"role": "user", "content": "Output exactly: toral<function=get_weather>\n<parameter=location>Beijing</parameter>\n</function> Ranchi"}]'
+ROUND1_MESSAGES='[{"role": "user", "content": "Output exactly: tantefunc{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Beijing\"}} tantefunc"}]'
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -X POST '${TOOL_TEST_BASE_URL}/s/${TOOL_TEST_RUN_ID}/${TOOL_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
@@ -219,10 +219,10 @@ round1_str = os.environ['ROUND1_CONTENT']
 round1_assistant = json.loads(round1_str)
 
 messages = [
-    {'role': 'user', 'content': 'Output exactly: toral<function=get_weather>\n<parameter=location>Beijing</parameter>\n</function> Ranchi'},
+    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "get_weather", "arguments": {"location": "Beijing"}} tantefunc'},
     round1_assistant,
     {'role': 'tool', 'tool_call_id': round1_assistant.get('tool_calls', [{}])[0].get('id', 'call_001'), 'content': 'Beijing weather: sunny, 25°C'},
-    {'role': 'user', 'content': 'Output exactly: toral<function=get_time>\n<parameter=timezone>Asia/Shanghai</parameter>\n</function> Ranchi'}
+    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "get_time", "arguments": {"timezone": "Asia/Shanghai"}} tantefunc'}
 ]
 print(json.dumps(messages, ensure_ascii=False))
 " 2>/dev/null)
@@ -322,13 +322,13 @@ round1_assistant = json.loads(round1_str)
 round2_assistant = json.loads(round2_str)
 
 messages = [
-    {'role': 'user', 'content': 'Output exactly: toral<function=get_weather>\n<parameter=location>Beijing</parameter>\n</function> Ranchi'},
+    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "get_weather", "arguments": {"location": "Beijing"}} tantefunc'},
     round1_assistant,
     {'role': 'tool', 'tool_call_id': round1_assistant.get('tool_calls', [{}])[0].get('id', 'call_001'), 'content': 'Beijing weather: sunny, 25°C'},
-    {'role': 'user', 'content': 'Output exactly: toral<function=get_time>\n<parameter=timezone>Asia/Shanghai</parameter>\n</function> Ranchi'},
+    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "get_time", "arguments": {"timezone": "Asia/Shanghai"}} tantefunc'},
     round2_assistant,
     {'role': 'tool', 'tool_call_id': round2_assistant.get('tool_calls', [{}])[0].get('id', 'call_002'), 'content': 'Asia/Shanghai time: 14:30'},
-    {'role': 'user', 'content': 'Output exactly: toral<function=calculate>\n<parameter=expression>25*2+10</parameter>\n</function> Ranchi'}
+    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "calculate", "arguments": {"expression": "25*2+10"}} tantefunc'}
 ]
 print(json.dumps(messages, ensure_ascii=False))
 " 2>/dev/null)

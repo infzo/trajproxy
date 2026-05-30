@@ -15,7 +15,7 @@ echo ""
 # 测试配置
 SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
 DIRECT_TEST_BASE_URL="${BASE_URL}"
-DIRECT_TEST_MODEL_NAME="direct-forward-test-model"
+DIRECT_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 DIRECT_TEST_RUN_ID="run-${SCENARIO_ID}"
 DIRECT_TEST_SESSION_ID_STREAM="session-${SCENARIO_ID}-stream-$(date +%s%N | md5sum | head -c 8)"
 DIRECT_TEST_SESSION_ID_NONSTREAM="session-${SCENARIO_ID}-nonstream-$(date +%s%N | md5sum | head -c 8)"
