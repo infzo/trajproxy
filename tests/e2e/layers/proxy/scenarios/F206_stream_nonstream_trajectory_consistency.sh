@@ -213,6 +213,15 @@ import sys
 SKIP_FIELDS = {
     "id", "unique_id", "request_id", "session_id",
     "start_time", "end_time", "processing_duration_ms", "created_at",
+    "system_fingerprint",  # 仅非流式首个响应包含，流式聚合后丢失
+}
+
+# 流式/非流式天然不同的字段子树（跳过递归比较 — TITO 强制注入 logprobs 导致两路不同）
+STREAM_DIVERGENT_PATHS = {
+    "token_response.choices.logprobs",  # top_logprobs 每次生成不同
+    "raw_response.choices.logprobs",    # TITO 模式下 logprobs 由 token_response 重建，流/非流不同
+    "raw_response.choices.token_ids",   # 同上
+    "token_response.choices.token_ids", # 流式聚合与非流式长度不同
 }
 
 def is_empty(val):
@@ -232,6 +241,16 @@ def compare_recursive(ns_val, s_val, path, errors, info, *,
         value_eq: 是否要求值完全相等（标量字段适用）
         check_both_nonempty: 是否检查"两者都非空"
     """
+    # 跳过流式/非流式天然不同的字段子树
+    # 路径格式含数组索引如 token_response.choices[0].logprobs，需归一化后匹配
+    import re
+    normalized = re.sub(r'\[\d+\]', '[*]', path)
+    for prefix in STREAM_DIVERGENT_PATHS:
+        norm_prefix = re.sub(r'\[\d+\]', '[*]', prefix)
+        if normalized == norm_prefix or normalized.startswith(norm_prefix + ".") or normalized.startswith(norm_prefix + "[*]"):
+            info.append(f"  {path}: 流式/非流式天然不同 (跳过比较)")
+            return
+
     ns_emp = is_empty(ns_val)
     s_emp = is_empty(s_val)
 

@@ -19,6 +19,16 @@ proxy_workers:
   max_concurrent_requests: 4096  # 单 Worker 最大并发请求数（超限返回 429）
   semaphore_acquire_timeout: 5.0  # 信号量获取超时（秒），超时返回 429
   models:                     # 预置模型配置
+        - model_name: Qwen/Qwen3-0.6B
+          url: http://host.docker.internal:8000/v1
+          api_key: sk-1234
+        - model_name: Qwen/Qwen3-0.6B
+          run_id: app-001
+          url: http://host.docker.internal:8000/v1
+          api_key: sk-1234
+          tokenizer_path: Qwen/Qwen3-0.6B
+          token_in_token_out: true
+          tool_parser: "hermes"
     - model_name: qwen3.5-2b
       url: http://host.docker.internal:8000/v1
       api_key: sk-1234

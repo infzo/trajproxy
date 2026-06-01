@@ -19,6 +19,7 @@ TOOL_STREAM_TEST_RUN_ID="run-${SCENARIO_ID}"
 TOOL_STREAM_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 TOOL_STREAM_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 TOOL_STREAM_TEST_TOOL_PARSER="${DEFAULT_TOOL_PARSER}"
+TOOL_STREAM_TEST_MAX_TOKENS="${E2E_MAX_TOKENS:-2048}"
 
 # 步骤 1: 注册模型（带 run_id、tool_parser 和 token_in_token_out）
 # 注意：tool_parser 只在 token_in_token_out=true 模式下生效
@@ -104,7 +105,8 @@ log_curl_cmd "curl -s --no-buffer \\
                 }
             }
         ],
-        \"stream\": true
+        \"stream\": true,
+        \"max_tokens\": ${TOOL_STREAM_TEST_MAX_TOKENS}
     }'"
 log_separator
 
@@ -134,7 +136,8 @@ STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${TOOL_STREAM_TEST_BASE_URL}/s/${
                 }
             }
         ],
-        \"stream\": true
+        \"stream\": true,
+        \"max_tokens\": ${TOOL_STREAM_TEST_MAX_TOKENS}
     }")
 
 log_response "流式响应内容:"

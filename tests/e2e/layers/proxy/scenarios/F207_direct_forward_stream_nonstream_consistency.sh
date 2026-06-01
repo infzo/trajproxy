@@ -219,6 +219,12 @@ DIRECT_MODE_OPTIONAL_FIELDS = {
     "token_request", "token_response",
 }
 
+# 流式/非流式天然不同的字段子树（跳过递归比较）
+STREAM_DIVERGENT_PATHS = {
+    "raw_response.choices.logprobs",       # 流式聚合 vs 非流式长度不同
+    "raw_response.choices.token_ids",      # 同上
+}
+
 def is_empty(val):
     """判断值是否为空"""
     return val is None or val == "" or val == [] or val == {}
@@ -238,6 +244,17 @@ def compare_recursive(ns_val, s_val, path, errors, info, *,
         check_both_nonempty: 是否检查"两者都非空"
         allow_optional_empty: 是否允许一方为空（直接转发模式可选字段）
     """
+    # 跳过流式/非流式天然不同的字段子树
+    # 路径格式含数组索引如 raw_response.choices[0].logprobs，需归一化后匹配
+    normalized = path
+    import re
+    normalized = re.sub(r'\[\d+\]', '[*]', normalized)
+    for prefix in STREAM_DIVERGENT_PATHS:
+        norm_prefix = re.sub(r'\[\d+\]', '[*]', prefix)
+        if normalized == norm_prefix or normalized.startswith(norm_prefix + ".") or normalized.startswith(norm_prefix + "[*]"):
+            info.append(f"  {path}: 流式/非流式天然不同 (跳过比较)")
+            return
+
     ns_emp = is_empty(ns_val)
     s_emp = is_empty(s_val)
 
