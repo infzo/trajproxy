@@ -20,6 +20,7 @@ COMBO_STREAM_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | hea
 COMBO_STREAM_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 COMBO_STREAM_TEST_TOOL_PARSER="${DEFAULT_TOOL_PARSER}"
 COMBO_STREAM_TEST_REASONING_PARSER="${DEFAULT_REASONING_PARSER}"
+COMBO_STREAM_MAX_TOKENS="${E2E_MAX_TOKENS:-2048}"
 
 # 步骤 1: 注册模型（同时配置 reasoning_parser 和 tool_parser）
 # 注意：parser 只在 token_in_token_out=true 模式下生效
@@ -114,7 +115,7 @@ log_curl_cmd "curl -s --no-buffer \\
             }
         ],
         \"stream\": true,
-        \"max_tokens\": 1024
+        \"max_tokens\": ${COMBO_STREAM_MAX_TOKENS}
     }'"
 log_separator
 
@@ -145,7 +146,7 @@ STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${COMBO_STREAM_TEST_BASE_URL}/s/$
             }
         ],
         \"stream\": true,
-        \"max_tokens\": 1024
+        \"max_tokens\": ${COMBO_STREAM_MAX_TOKENS}
     }")
 
 log_response "流式响应内容:"

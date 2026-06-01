@@ -20,6 +20,7 @@ TOOL_TEST_RUN_ID="run-${SCENARIO_ID}"
 TOOL_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 TOOL_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 TOOL_TEST_TOOL_PARSER="${DEFAULT_TOOL_PARSER}"
+TOOL_TEST_MAX_TOKENS="${E2E_MAX_TOKENS:-2048}"
 
 # ========== 步骤 1: 注册模型 ==========
 
@@ -139,7 +140,8 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
         \"messages\": ${ROUND1_MESSAGES},
         \"tools\": ${FULL_TOOLS},
-        \"stream\": false
+        \"stream\": false,
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
     }'"
 log_separator
 
@@ -150,7 +152,8 @@ ROUND1_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/$
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
         \"messages\": ${ROUND1_MESSAGES},
         \"tools\": ${FULL_TOOLS},
-        \"stream\": false
+        \"stream\": false,
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
     }")
 
 ROUND1_BODY=$(echo "$ROUND1_RESPONSE" | sed '$d')
@@ -240,7 +243,8 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
         \"messages\": ${ROUND2_MESSAGES},
         \"tools\": ${FULL_TOOLS},
-        \"stream\": false
+        \"stream\": false,
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
     }'"
 log_separator
 
@@ -252,7 +256,8 @@ ROUND2_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/$
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
         \"messages\": ${ROUND2_MESSAGES},
         \"tools\": ${FULL_TOOLS},
-        \"stream\": false
+        \"stream\": false,
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
     }")
 
 ROUND2_BODY=$(echo "$ROUND2_RESPONSE" | sed '$d')
@@ -346,7 +351,8 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
         \"messages\": ${ROUND3_MESSAGES},
         \"tools\": ${FULL_TOOLS},
-        \"stream\": false
+        \"stream\": false,
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
     }'"
 log_separator
 
@@ -358,7 +364,8 @@ ROUND3_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/$
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
         \"messages\": ${ROUND3_MESSAGES},
         \"tools\": ${FULL_TOOLS},
-        \"stream\": false
+        \"stream\": false,
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
     }")
 
 ROUND3_BODY=$(echo "$ROUND3_RESPONSE" | sed '$d')
