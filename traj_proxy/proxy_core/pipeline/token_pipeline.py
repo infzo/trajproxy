@@ -564,11 +564,27 @@ class TokenPipeline(BasePipeline):
                             delta_token_ids
                         )
                     else:
-                        # 推理结束但 content 为空，tool parser 使用原始参数
-                        tool_previous_text = previous_text
-                        tool_previous_token_ids = previous_token_ids
-                        tool_current_text = current_text
-                        tool_current_token_ids = current_token_ids
+                        # 纯 </think> token：reasoning parser 返回 None（吞掉结束标记）
+                        # 清除推理残余，让 tool parser 从干净状态开始
+                        # 对齐 vLLM abstract_parser.py:691-696
+                        tool_previous_text = ""
+                        tool_previous_token_ids = []
+                        tool_current_token_ids = (
+                            self.parser.extract_content_ids(delta_token_ids)
+                            if self.parser.has_reasoning_parser
+                            else []
+                        )
+                        # 从 content token_ids 解码文本，确保 tool parser 能
+                        # 看到 </think> 之后的 <tool_call> 文本。
+                        # 纯 token_ids 对 hermes parser 不可见（它依赖文本检测）。
+                        tool_current_text = (
+                            self.token_converter.tokenizer.decode(
+                                tool_current_token_ids,
+                                skip_special_tokens=False
+                            )
+                            if tool_current_token_ids
+                            else ""
+                        )
             except Exception as e:
                 logger.warning(
                     f"[{context.unique_id}] 推理流式解析失败: {e}\n"
@@ -588,26 +604,32 @@ class TokenPipeline(BasePipeline):
 
                 # 推理刚结束时使用调整后的参数，否则使用原始参数
                 # reasoning_ended_before=False 且 context.reasoning_ended=True 表示推理在此 delta 中结束
-                if not reasoning_ended_before and context.reasoning_ended and content_delta is not None:
-                    # 推理在此 delta 中结束，使用边界调整后的参数
+                if not reasoning_ended_before and context.reasoning_ended:
+                    # 推理在此 delta 中结束，使用边界调整后的参数（含纯 </think> 边界）
                     tp_previous_text = tool_previous_text
                     tp_previous_token_ids = tool_previous_token_ids
                     tp_current_text = tool_current_text
                     tp_current_token_ids = tool_current_token_ids
+                    # delta_text 对齐 vLLM：推理刚结束时使用调整后的 current_text
+                    # 纯 </think> 边界时 tool_current_text=""，避免 </think> 残余进入 tool parser
+                    tp_delta_text = tool_current_text
+                    tp_delta_token_ids = tool_current_token_ids
                 else:
                     # 推理早已结束，使用原始参数
                     tp_previous_text = previous_text
                     tp_previous_token_ids = previous_token_ids
                     tp_current_text = current_text
                     tp_current_token_ids = current_token_ids
+                    tp_delta_text = delta_text
+                    tp_delta_token_ids = delta_token_ids
 
                 delta_msg = self.parser.extract_tool_calls_streaming(
                     previous_text=tp_previous_text,
                     current_text=tp_current_text,
-                    delta_text=delta_text,
+                    delta_text=tp_delta_text,
                     previous_token_ids=tp_previous_token_ids,
                     current_token_ids=tp_current_token_ids,
-                    delta_token_ids=delta_token_ids,
+                    delta_token_ids=tp_delta_token_ids,
                     request=context.raw_request
                 )
                 if delta_msg:
@@ -621,10 +643,18 @@ class TokenPipeline(BasePipeline):
                                 tc_dict["type"] = tc.type
                             if tc.function:
                                 func_dict = {}
-                                if tc.function.name is not None:
-                                    func_dict["name"] = tc.function.name
-                                if tc.function.arguments is not None:
-                                    func_dict["arguments"] = tc.function.arguments
+                                # tc.function 可能是 DeltaFunctionCall 对象或 .model_dump() 返回的 dict
+                                if isinstance(tc.function, dict):
+                                    # hermes parser 新版使用 .model_dump(exclude_none=True)
+                                    func_name = tc.function.get("name")
+                                    func_args = tc.function.get("arguments")
+                                else:
+                                    func_name = tc.function.name
+                                    func_args = tc.function.arguments
+                                if func_name is not None:
+                                    func_dict["name"] = func_name
+                                if func_args is not None:
+                                    func_dict["arguments"] = func_args
                                 if func_dict:
                                     tc_dict["function"] = func_dict
                             tool_calls_delta.append(tc_dict)

@@ -23,11 +23,13 @@ from vllm.entrypoints.openai.engine.protocol import (
 )
 from vllm.logger import init_logger
 from vllm.tokenizers import TokenizerLike
-from vllm.tool_parsers.utils import get_json_schema_from_tools
+from vllm.tool_parsers.utils import Tool, get_json_schema_from_tools
 from vllm.utils.collection_utils import is_list_of
 from vllm.utils.import_utils import import_from_path
 
 logger = init_logger(__name__)
+
+__all__ = ["Tool", "ToolParser", "ToolParserManager"]
 
 
 class ToolParser:
@@ -36,12 +38,13 @@ class ToolParser:
     提供的属性和方法应在子类中使用。
     """
 
-    def __init__(self, tokenizer: TokenizerLike):
+    def __init__(self, tokenizer: TokenizerLike, tools: list[Tool] | None = None):
         self.prev_tool_call_arr: list[dict] = []
         # 当前正在解析的工具调用索引
         self.current_tool_id: int = -1
         self.current_tool_name_sent: bool = False
         self.streamed_args_for_tool: list[str] = []
+        self.tools = tools
 
         self.model_tokenizer = tokenizer
 

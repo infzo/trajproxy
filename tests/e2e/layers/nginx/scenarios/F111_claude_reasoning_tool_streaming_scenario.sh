@@ -96,6 +96,7 @@ log_curl_cmd "curl -s --no-buffer \\
     -d '{
         \"model\": \"${CLAUDE_COMBO_STREAM_TEST_MODEL_NAME}\",
         \"max_tokens\": ${CLAUDE_COMBO_STREAM_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS},
         \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
@@ -124,6 +125,7 @@ STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${CLAUDE_COMBO_STREAM_TEST_BASE_U
     -d "{
         \"model\": \"${CLAUDE_COMBO_STREAM_TEST_MODEL_NAME}\",
         \"max_tokens\": ${CLAUDE_COMBO_STREAM_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS},
         \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
@@ -269,3 +271,8 @@ echo ""
 
 # 打印测试摘要
 print_summary
+
+# 检查手动设置的失败标志（TEST_FAILED 不影响 assert_* 系列函数）
+if [ "${TEST_FAILED:-0}" = "1" ]; then
+    exit 1
+fi

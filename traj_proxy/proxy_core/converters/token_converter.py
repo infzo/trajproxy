@@ -88,8 +88,11 @@ class TokenConverter(BaseConverter):
         Returns:
             解码后的文本
         """
-        # 与 vllm 行为对齐：默认跳过特殊 token（如 <|im_end|>）
-        return self.tokenizer.decode(token_ids, skip_special_tokens=True)
+        # 与 vllm 行为对齐：保留特殊 token（如 <tool_call>、</tool_call>），
+        # 确保 tool parser 文本检测正常工作。
+        # hermes tool parser 依赖文本中的 <tool_call> 标记检测工具调用，
+        # skip_special_tokens=True 会剔除这些标记。
+        return self.tokenizer.decode(token_ids, skip_special_tokens=False)
 
     def decode_streaming(
         self,
@@ -111,10 +114,10 @@ class TokenConverter(BaseConverter):
         context.stream_buffer_ids.extend(token_ids)
 
         # 尝试解码整个缓冲区
-        # 与 vllm 行为对齐：默认跳过特殊 token
+        # 保留特殊 token（如 <tool_call>、</tool_call>），确保 tool parser 文本检测正常工作
         full_text = self.tokenizer.decode(
             context.stream_buffer_ids,
-            skip_special_tokens=True
+            skip_special_tokens=False
         )
 
         # 计算新增的文本

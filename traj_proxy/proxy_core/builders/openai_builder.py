@@ -109,6 +109,9 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
 
         if reasoning:
             message["reasoning"] = reasoning
+            # LiteLLM 的 OpenAI→Claude 适配器只检查 reasoning_content 字段
+            # 同时设置 reasoning 和 reasoning_content 确保兼容
+            message["reasoning_content"] = reasoning
 
         if tool_calls:
             message["tool_calls"] = tool_calls

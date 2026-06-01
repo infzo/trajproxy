@@ -115,7 +115,8 @@ log_curl_cmd "curl -s --no-buffer \\
             }
         ],
         \"stream\": true,
-        \"max_tokens\": ${COMBO_STREAM_MAX_TOKENS}
+        \"max_tokens\": ${COMBO_STREAM_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS}
     }'"
 log_separator
 
@@ -146,7 +147,8 @@ STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${COMBO_STREAM_TEST_BASE_URL}/s/$
             }
         ],
         \"stream\": true,
-        \"max_tokens\": ${COMBO_STREAM_MAX_TOKENS}
+        \"max_tokens\": ${COMBO_STREAM_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS}
     }")
 
 log_response "流式响应内容:"
@@ -270,3 +272,8 @@ echo ""
 
 # 打印测试摘要
 print_summary
+
+# 检查手动设置的失败标志（TEST_FAILED 不影响 assert_* 系列函数）
+if [ "${TEST_FAILED:-0}" = "1" ]; then
+    exit 1
+fi

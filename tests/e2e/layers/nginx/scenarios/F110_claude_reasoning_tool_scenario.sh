@@ -97,6 +97,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -d '{
         \"model\": \"${CLAUDE_COMBO_TEST_MODEL_NAME}\",
         \"max_tokens\": ${CLAUDE_COMBO_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS},
         \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
@@ -123,6 +124,7 @@ CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CLAUDE_COMBO_TEST_BASE_UR
     -d "{
         \"model\": \"${CLAUDE_COMBO_TEST_MODEL_NAME}\",
         \"max_tokens\": ${CLAUDE_COMBO_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS},
         \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
@@ -264,3 +266,8 @@ echo ""
 
 # 打印测试摘要
 print_summary
+
+# 检查手动设置的失败标志（TEST_FAILED 不影响 assert_* 系列函数）
+if [ "${TEST_FAILED:-0}" = "1" ]; then
+    exit 1
+fi

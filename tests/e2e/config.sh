@@ -23,6 +23,9 @@ DEFAULT_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH:-Qwen/Qwen3-0.6B}"
 DEFAULT_TOOL_PARSER="${DEFAULT_TOOL_PARSER:-hermes}"
 DEFAULT_REASONING_PARSER="${DEFAULT_REASONING_PARSER:-qwen3}"
 
+# 确定性采样参数（消除推理随机性，确保 E2E 测试可复现）
+E2E_SAMPLING_PARAMS='"temperature": 0.0, "seed": 42'
+
 # 测试数据
 TEST_MODEL_A_NAME="test-model-default"
 TEST_MODEL_A_RUN_ID=""  # 空字符串，使用默认 DEFAULT

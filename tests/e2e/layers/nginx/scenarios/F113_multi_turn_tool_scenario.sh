@@ -141,7 +141,8 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
         \"messages\": ${ROUND1_MESSAGES},
         \"tools\": ${FULL_TOOLS},
         \"stream\": false,
-        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS}
     }'"
 log_separator
 
@@ -153,7 +154,8 @@ ROUND1_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/$
         \"messages\": ${ROUND1_MESSAGES},
         \"tools\": ${FULL_TOOLS},
         \"stream\": false,
-        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS}
     }")
 
 ROUND1_BODY=$(echo "$ROUND1_RESPONSE" | sed '$d')
@@ -244,7 +246,8 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
         \"messages\": ${ROUND2_MESSAGES},
         \"tools\": ${FULL_TOOLS},
         \"stream\": false,
-        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS}
     }'"
 log_separator
 
@@ -257,7 +260,8 @@ ROUND2_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/$
         \"messages\": ${ROUND2_MESSAGES},
         \"tools\": ${FULL_TOOLS},
         \"stream\": false,
-        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS}
     }")
 
 ROUND2_BODY=$(echo "$ROUND2_RESPONSE" | sed '$d')
@@ -352,7 +356,8 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
         \"messages\": ${ROUND3_MESSAGES},
         \"tools\": ${FULL_TOOLS},
         \"stream\": false,
-        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS}
     }'"
 log_separator
 
@@ -365,7 +370,8 @@ ROUND3_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/$
         \"messages\": ${ROUND3_MESSAGES},
         \"tools\": ${FULL_TOOLS},
         \"stream\": false,
-        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS},
+        ${E2E_SAMPLING_PARAMS}
     }")
 
 ROUND3_BODY=$(echo "$ROUND3_RESPONSE" | sed '$d')
@@ -505,3 +511,8 @@ fi
 
 # 打印测试摘要
 print_summary
+
+# 检查手动设置的失败标志（TEST_FAILED 不影响 assert_* 系列函数）
+if [ "${TEST_FAILED:-0}" = "1" ]; then
+    exit 1
+fi
