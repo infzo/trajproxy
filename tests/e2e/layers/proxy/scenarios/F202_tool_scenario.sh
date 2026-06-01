@@ -76,7 +76,7 @@ sleep 3
 echo ""
 
 # 步骤 2: 发送带 tools 的非流式推理请求（使用特定提示词引导模型输出工具调用格式）
-# hermes parser 期望格式:  tantefunc{"name": "func_name", "arguments": {...}} tantefunc
+# hermes parser 期望格式:  ⟨\n{"name": "func_name", "arguments": {...}}\n⟩（由 chat template 系统指令引导）
 log_step "步骤 2: 发送带 tools 的非流式推理请求（run_id: ${TOOL_TEST_RUN_ID}, session_id: ${TOOL_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -X POST '${TOOL_TEST_BASE_URL}/s/${TOOL_TEST_RUN_ID}/${TOOL_TEST_SESSION_ID}/v1/chat/completions' \\
@@ -84,7 +84,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  tantefunc{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Beijing\"}} tantefunc\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
                 \"type\": \"function\",
@@ -113,7 +113,7 @@ CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/${T
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${TOOL_TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  tantefunc{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Beijing\"}} tantefunc\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
                 \"type\": \"function\",

@@ -84,8 +84,8 @@ echo ""
 
 # 步骤 2: 发送带推理内容和工具调用的流式请求
 # qwen3 reasoning parser 使用 <think\>...</think\> 标签包裹推理内容
-# hermes tool parser 期望格式: tantefunc{"name": "func_name", "arguments": {...}} tantefunc
-# 组合格式: 先推理后工具调用
+# hermes tool parser 期望格式: ⟨\n{"name": "func_name", "arguments": {...}}\n⟩（由 chat template 系统指令引导）
+# 自然 prompt 会触发 reasoning + tool_calls 组合输出
 log_step "步骤 2: 发送带推理内容和工具调用的流式请求（session_id: ${COMBO_STREAM_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s --no-buffer \\
     -X POST '${COMBO_STREAM_TEST_BASE_URL}/s/${COMBO_STREAM_TEST_RUN_ID}/${COMBO_STREAM_TEST_SESSION_ID}/v1/chat/completions' \\
@@ -93,7 +93,7 @@ log_curl_cmd "curl -s --no-buffer \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
         \"model\": \"${COMBO_STREAM_TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  Let me think about the weather.\\nFirst, I will check the location.\\n\\n\\nNow I will call the weather function.\\n\\ntantefunc{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {\\\"location\\\": \\\"Beijing\\\"}} tantefunc\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
                 \"type\": \"function\",
@@ -124,7 +124,7 @@ STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${COMBO_STREAM_TEST_BASE_URL}/s/$
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${COMBO_STREAM_TEST_MODEL_NAME}\",
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  Let me think about the weather.\\nFirst, I will check the location.\\n\\n\\nNow I will call the weather function.\\n\\ntantefunc{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {\\\"location\\\": \\\"Beijing\\\"}} tantefunc\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
                 \"type\": \"function\",

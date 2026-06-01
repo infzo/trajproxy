@@ -75,7 +75,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -d '{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": ${ROUND1_MESSAGES},
-        \"max_tokens\": 2048,
+        \"max_tokens\": 256,
         \"stream\": false
     }'"
 log_separator
@@ -86,7 +86,7 @@ ROUND1_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": ${ROUND1_MESSAGES},
-        \"max_tokens\": 2048,
+        \"max_tokens\": 256,
         \"stream\": false
     }")
 
@@ -258,7 +258,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -d '{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": ${ROUND2_MESSAGES},
-        \"max_tokens\": 2048,
+        \"max_tokens\": 256,
         \"stream\": false
     }'"
 log_separator
@@ -270,7 +270,7 @@ ROUND2_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": ${ROUND2_MESSAGES},
-        \"max_tokens\": 2048,
+        \"max_tokens\": 256,
         \"stream\": false
     }")
 

@@ -70,7 +70,7 @@ log_curl_cmd "curl -s --no-buffer \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
         \"model\": \"${CLAUDE_TEST_MODEL_NAME}\",
-        \"max_tokens\": 1024,
+        \"max_tokens\": 256,
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
         \"stream\": true
     }'"
@@ -82,7 +82,7 @@ STREAM_RESPONSE=$(curl -s --no-buffer -X POST "${CLAUDE_TEST_BASE_URL}/s/${CLAUD
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${CLAUDE_TEST_MODEL_NAME}\",
-        \"max_tokens\": 1024,
+        \"max_tokens\": 256,
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}],
         \"stream\": true
     }")
@@ -118,6 +118,23 @@ if [ "$EVENT_COUNT" -gt 0 ]; then
     log_success "Claude流式响应包含多个事件"
 else
     log_error "Claude流式响应未包含有效事件"
+fi
+
+# 追加断言：验证流式有实际内容且无错误
+if echo "$STREAM_RESPONSE" | grep -q "content_block_delta"; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}[PASS]${NC} Claude流式应有 content_block_delta 内容增量"
+else
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}[FAIL]${NC} Claude流式缺少 content_block_delta 内容增量"
+fi
+
+if echo "$STREAM_RESPONSE" | grep -q "MidStreamFallbackError\|error.*message"; then
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    echo -e "${RED}[FAIL]${NC} Claude流式不应以 MidStreamFallbackError 结束"
+else
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+    echo -e "${GREEN}[PASS]${NC} Claude流式无 MidStreamFallbackError"
 fi
 
 echo ""

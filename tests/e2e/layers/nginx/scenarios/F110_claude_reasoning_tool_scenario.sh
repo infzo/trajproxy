@@ -87,7 +87,7 @@ echo ""
 # Claude API tools 格式与 OpenAI 不同，使用 tool_choice 和 tools 数组
 # LiteLLM 会将其转换为后端模型格式
 # qwen3 reasoning parser 使用 标签包裹推理内容
-# hermes tool parser 期望格式: tantefunc{"name": "func_name", "arguments": {...}} tantefunc
+# hermes tool parser 期望格式: ⟨\n{"name": "func_name", "arguments": {...}}\n⟩（由 chat template 系统指令引导）
 log_step "步骤 2: 发送Claude格式带推理内容和工具调用的非流式请求（session_id: ${CLAUDE_COMBO_TEST_SESSION_ID}）"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -X POST '${CLAUDE_COMBO_TEST_BASE_URL}/s/${CLAUDE_COMBO_TEST_RUN_ID}/${CLAUDE_COMBO_TEST_SESSION_ID}/v1/messages' \\
@@ -96,7 +96,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -d '{
         \"model\": \"${CLAUDE_COMBO_TEST_MODEL_NAME}\",
         \"max_tokens\": 1024,
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  Let me think about the weather.\\nFirst, I will check the location.\\n\\n\\nNow I will call the weather function.\\n\\ntantefunc{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {\\\"location\\\": \\\"Beijing\\\"}} tantefunc\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
                 \"name\": \"get_weather\",
@@ -122,7 +122,7 @@ CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CLAUDE_COMBO_TEST_BASE_UR
     -d "{
         \"model\": \"${CLAUDE_COMBO_TEST_MODEL_NAME}\",
         \"max_tokens\": 1024,
-        \"messages\": [{\"role\": \"user\", \"content\": \"Output exactly:  Let me think about the weather.\\nFirst, I will check the location.\\n\\n\\nNow I will call the weather function.\\n\\ntantefunc{\\\"name\\\": \\\"get_weather\\\", \\\"arguments\\\": {\\\"location\\\": \\\"Beijing\\\"}} tantefunc\"}],
+        \"messages\": [{\"role\": \"user\", \"content\": \"Beijing天气怎么样？\"}],
         \"tools\": [
             {
                 \"name\": \"get_weather\",

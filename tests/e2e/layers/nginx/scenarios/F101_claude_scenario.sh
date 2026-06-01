@@ -70,7 +70,7 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
     -d '{
         \"model\": \"${CLAUDE_TEST_MODEL_NAME}\",
-        \"max_tokens\": 1024,
+        \"max_tokens\": 256,
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]
     }'"
 log_separator
@@ -80,7 +80,7 @@ CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${CLAUDE_TEST_BASE_URL}/s/$
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
         \"model\": \"${CLAUDE_TEST_MODEL_NAME}\",
-        \"max_tokens\": 1024,
+        \"max_tokens\": 256,
         \"messages\": [{\"role\": \"user\", \"content\": \"Hello\"}]
     }")
 

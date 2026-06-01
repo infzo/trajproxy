@@ -130,7 +130,7 @@ FULL_TOOLS='[
 # ========== 步骤 2: 第1轮对话（工具调用：get_weather） ==========
 
 log_step "步骤 2: 第1轮对话（工具调用：get_weather）"
-ROUND1_MESSAGES='[{"role": "user", "content": "Output exactly: tantefunc{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Beijing\"}} tantefunc"}]'
+ROUND1_MESSAGES='[{"role": "user", "content": "Beijing天气怎么样？"}]'
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -X POST '${TOOL_TEST_BASE_URL}/s/${TOOL_TEST_RUN_ID}/${TOOL_TEST_SESSION_ID}/v1/chat/completions' \\
     -H 'Content-Type: application/json' \\
@@ -219,10 +219,10 @@ round1_str = os.environ['ROUND1_CONTENT']
 round1_assistant = json.loads(round1_str)
 
 messages = [
-    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "get_weather", "arguments": {"location": "Beijing"}} tantefunc'},
+    {'role': 'user', 'content': 'Beijing天气怎么样？'},
     round1_assistant,
     {'role': 'tool', 'tool_call_id': round1_assistant.get('tool_calls', [{}])[0].get('id', 'call_001'), 'content': 'Beijing weather: sunny, 25°C'},
-    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "get_time", "arguments": {"timezone": "Asia/Shanghai"}} tantefunc'}
+    {'role': 'user', 'content': '上海现在几点了？'}
 ]
 print(json.dumps(messages, ensure_ascii=False))
 " 2>/dev/null)
@@ -322,13 +322,13 @@ round1_assistant = json.loads(round1_str)
 round2_assistant = json.loads(round2_str)
 
 messages = [
-    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "get_weather", "arguments": {"location": "Beijing"}} tantefunc'},
+    {'role': 'user', 'content': 'Beijing天气怎么样？'},
     round1_assistant,
     {'role': 'tool', 'tool_call_id': round1_assistant.get('tool_calls', [{}])[0].get('id', 'call_001'), 'content': 'Beijing weather: sunny, 25°C'},
-    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "get_time", "arguments": {"timezone": "Asia/Shanghai"}} tantefunc'},
+    {'role': 'user', 'content': '上海现在几点了？'},
     round2_assistant,
     {'role': 'tool', 'tool_call_id': round2_assistant.get('tool_calls', [{}])[0].get('id', 'call_002'), 'content': 'Asia/Shanghai time: 14:30'},
-    {'role': 'user', 'content': 'Output exactly: tantefunc{"name": "calculate", "arguments": {"expression": "25*2+10"}} tantefunc'}
+    {'role': 'user', 'content': '帮我计算 25乘2加10'}
 ]
 print(json.dumps(messages, ensure_ascii=False))
 " 2>/dev/null)
