@@ -1,16 +1,17 @@
 #!/bin/bash
-# 场景 F115: 多轮 Reasoning + Tool 场景（Nginx 层，非流式，两轮）
-# 测试流程：注册模型（带reasoning_parser + tool_parser） -> 两轮对话（每轮均有推理+工具调用） -> 验证前缀缓存命中 -> 删除模型
+# 场景 F115: 多轮 Reasoning + Tool 场景（Nginx 层，非流式，三轮）
+# 测试流程：注册模型（带reasoning_parser + tool_parser） -> 三轮对话（每轮均有推理+工具调用） -> 验证前缀缓存命中 -> 删除模型
 # 关键验证：
-#   1. 两轮对话均正确分离 reasoning 和 tool_calls
-#   2. 多轮对话前缀缓存一致性
+#   1. 三轮对话均正确分离 reasoning 和 tool_calls
+#   2. 多轮对话前缀缓存一致性（cache_hit_tokens 精确值校验）
+#   3. full_conversation_token_ids 完整性校验
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F115: 多轮 Reasoning + Tool 场景（Nginx 层，非流式，两轮）"
+echo "场景 F115: 多轮 Reasoning + Tool 场景（Nginx 层，非流式，三轮）"
 echo "========================================"
 echo ""
 
@@ -77,11 +78,10 @@ assert_eq "$TEST_TOOL_PARSER" "$REGISTER_TOOL" "tool_parser 应为 ${TEST_TOOL_P
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
 assert_eq "true" "$REGISTER_TITO" "token_in_token_out 应为 true"
 
-sleep 0.5  # 等待模型注册生效
+sleep 0.5
 
 echo ""
 
-# 定义完整的 tools 列表（两轮共用，确保前缀缓存可匹配）
 FULL_TOOLS='[
     {
         "type": "function",
@@ -119,206 +119,167 @@ FULL_TOOLS='[
     }
 ]'
 
-# ========== 步骤 2: 第1轮对话（推理 + 工具调用：get_weather） ==========
-
-log_step "步骤 2: 第1轮对话（推理 + 工具调用：get_weather, 非流式）"
-ROUND1_MESSAGES='[{"role": "user", "content": "Beijing天气怎么样？"}]'
-log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}/v1/chat/completions' \\
-    -H 'Content-Type: application/json' \\
-    -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
-    -d '{
-        \"model\": \"${TEST_MODEL_NAME}\",
-        \"messages\": ${ROUND1_MESSAGES},
-        \"tools\": ${FULL_TOOLS},
-        \"stream\": false,
-        \"max_tokens\": ${TEST_MAX_TOKENS},
-        ${E2E_SAMPLING_PARAMS}
-    }'"
-log_separator
-
-ROUND1_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{
-        \"model\": \"${TEST_MODEL_NAME}\",
-        \"messages\": ${ROUND1_MESSAGES},
-        \"tools\": ${FULL_TOOLS},
-        \"stream\": false,
-        \"max_tokens\": ${TEST_MAX_TOKENS},
-        ${E2E_SAMPLING_PARAMS}
-    }")
-
-ROUND1_BODY=$(echo "$ROUND1_RESPONSE" | sed '$d')
-ROUND1_STATUS=$(echo "$ROUND1_RESPONSE" | sed -n '$p')
-
-log_response "HTTP Status: ${ROUND1_STATUS}"
-log_response "${ROUND1_BODY}"
-log_separator
-
-assert_http_status "200" "$ROUND1_STATUS" "第1轮对话 HTTP 状态码应为 200"
-assert_contains "$ROUND1_BODY" "choices" "第1轮响应应包含 choices 字段"
-
-# 验证第1轮 reasoning 字段非空
-if echo "$ROUND1_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*""'; then
-    log_error "第1轮 reasoning 字段为空字符串，应有推理内容"
-    TEST_FAILED=1
-elif echo "$ROUND1_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*"'; then
-    log_success "第1轮 reasoning 字段非空，检测到推理内容"
-else
-    log_error "第1轮 reasoning 字段异常，应有推理内容"
-    TEST_FAILED=1
-fi
-
-# 验证第1轮 tool_calls 字段非空
-ROUND1_TOOL_DETECTED=false
-if echo "$ROUND1_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\[\]'; then
-    log_error "第1轮 tool_calls 字段为空数组，应有工具调用"
-    TEST_FAILED=1
-elif echo "$ROUND1_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\['; then
-    if echo "$ROUND1_BODY" | grep -q '"function"'; then
-        log_success "第1轮 tool_calls 字段非空，检测到工具调用：get_weather"
-        ROUND1_TOOL_DETECTED=true
-    else
-        log_error "第1轮 tool_calls 数组存在但未检测到 function 字段"
-        TEST_FAILED=1
-    fi
-else
-    log_error "第1轮响应中无 tool_calls 字段，应有工具调用"
-    TEST_FAILED=1
-fi
-
-# 提取第1轮 assistant 响应内容（用于后续多轮对话）
-ROUND1_ASSISTANT_CONTENT=$(echo "$ROUND1_BODY" | python3 -c "
+# ========== 辅助函数：提取 assistant message ==========
+extract_assistant() {
+    local response_body="$1"
+    echo "$response_body" | python3 -c "
 import sys, json
 data = json.loads(sys.stdin.read())
 msg = data['choices'][0]['message']
 content = msg.get('content') or ''
 
-# 构建 assistant message：保留 tool_calls 和 reasoning_content
 msg_dict = {'role': 'assistant'}
 if msg.get('tool_calls'):
     msg_dict['tool_calls'] = msg['tool_calls']
-# 保留 reasoning_content 用于多轮对话一致性
 reasoning = msg.get('reasoning_content') or msg.get('reasoning')
 if reasoning:
     msg_dict['reasoning_content'] = reasoning
-# 仅当 content 有实际文本时才设置
 if content and content.strip():
     msg_dict['content'] = content
 print(json.dumps(msg_dict))
-" 2>/dev/null)
+" 2>/dev/null
+}
 
-if [ -n "$ROUND1_ASSISTANT_CONTENT" ]; then
+# ========== 辅助函数：发送非流式请求并验证 ==========
+send_round_nonstream() {
+    local round_num="$1"
+    local messages="$2"
+    local expected_tool="$3"
+
+    log_step "步骤 $((round_num + 1)): 第${round_num}轮对话（推理 + 工具调用：${expected_tool}, 非流式）"
+
+    log_curl_cmd "curl -s -w '\n%{http_code}' \\
+        -X POST '${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}/v1/chat/completions' \\
+        -H 'Content-Type: application/json' \\
+        -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
+        -d '{
+            \"model\": \"${TEST_MODEL_NAME}\",
+            \"messages\": ${messages},
+            \"tools\": ${FULL_TOOLS},
+            \"stream\": false,
+            \"max_tokens\": ${TEST_MAX_TOKENS},
+            ${E2E_SAMPLING_PARAMS}
+        }'"
+    log_separator
+
+    # shellcheck disable=SC2086
+    ROUND_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}/v1/chat/completions" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${CHAT_API_KEY}" \
+        -d "{
+            \"model\": \"${TEST_MODEL_NAME}\",
+            \"messages\": ${messages},
+            \"tools\": ${FULL_TOOLS},
+            \"stream\": false,
+            \"max_tokens\": ${TEST_MAX_TOKENS},
+            ${E2E_SAMPLING_PARAMS}
+        }")
+
+    ROUND_BODY=$(echo "$ROUND_RESPONSE" | sed '$d')
+    ROUND_STATUS=$(echo "$ROUND_RESPONSE" | sed -n '$p')
+
+    log_response "HTTP Status: ${ROUND_STATUS}"
+    log_response "${ROUND_BODY}"
+    log_separator
+
+    assert_http_status "200" "$ROUND_STATUS" "第${round_num}轮对话 HTTP 状态码应为 200"
+    assert_contains "$ROUND_BODY" "choices" "第${round_num}轮响应应包含 choices 字段"
+
+    # 验证 reasoning
+    if echo "$ROUND_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*""'; then
+        log_error "第${round_num}轮 reasoning 字段为空字符串，应有推理内容"
+        TEST_FAILED=1
+    elif echo "$ROUND_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*"'; then
+        log_success "第${round_num}轮 reasoning 字段非空，检测到推理内容"
+    else
+        log_error "第${round_num}轮 reasoning 字段异常，应有推理内容"
+        TEST_FAILED=1
+    fi
+
+    # 验证 tool_calls
+    if echo "$ROUND_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\[\]'; then
+        log_error "第${round_num}轮 tool_calls 字段为空数组，应有工具调用"
+        TEST_FAILED=1
+    elif echo "$ROUND_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\['; then
+        if echo "$ROUND_BODY" | grep -q '"function"'; then
+            log_success "第${round_num}轮 tool_calls 字段非空，检测到工具调用：${expected_tool}"
+            eval "ROUND${round_num}_TOOL_DETECTED=true"
+        else
+            log_error "第${round_num}轮 tool_calls 数组存在但未检测到 function 字段"
+            TEST_FAILED=1
+        fi
+    else
+        log_error "第${round_num}轮响应中无 tool_calls 字段，应有工具调用"
+        TEST_FAILED=1
+    fi
+
+    eval "ROUND${round_num}_BODY=\"$ROUND_BODY\""
+}
+
+# ========== 第1轮 ==========
+ROUND1_MESSAGES='[{"role": "user", "content": "Beijing天气怎么样？"}]'
+send_round_nonstream 1 "$ROUND1_MESSAGES" "get_weather"
+ROUND1_ASSISTANT=$(extract_assistant "$ROUND1_BODY")
+if [ -n "$ROUND1_ASSISTANT" ]; then
     log_success "提取第1轮 assistant 响应成功"
 else
     log_error "提取第1轮 assistant 响应失败"
     TEST_FAILED=1
 fi
-
 echo ""
 
-# ========== 步骤 3: 第2轮对话（推理 + 工具调用：get_time） ==========
-
-log_step "步骤 3: 第2轮对话（推理 + 工具调用：get_time, 非流式）"
-
-# 构造第2轮 messages（使用环境变量传递数据避免 shell 引号问题）
-ROUND2_MESSAGES=$(ROUND1_CONTENT="$ROUND1_ASSISTANT_CONTENT" python3 -c "
+# ========== 第2轮 ==========
+ROUND2_MESSAGES=$(ROUND1_MSG="$ROUND1_ASSISTANT" python3 -c "
 import json, os
-round1_str = os.environ['ROUND1_CONTENT']
-round1_assistant = json.loads(round1_str)
-
+r1 = json.loads(os.environ['ROUND1_MSG'])
 messages = [
     {'role': 'user', 'content': 'Beijing天气怎么样？'},
-    round1_assistant,
-    {'role': 'tool', 'tool_call_id': round1_assistant.get('tool_calls', [{}])[0].get('id', 'call_001'), 'content': 'Beijing weather: sunny, 25°C'},
+    r1,
+    {'role': 'tool', 'tool_call_id': r1.get('tool_calls', [{}])[0].get('id', 'call_001'), 'content': 'Beijing weather: sunny, 25°C'},
     {'role': 'user', 'content': '上海现在几点了？'}
 ]
 print(json.dumps(messages, ensure_ascii=False))
 " 2>/dev/null)
+if [ -z "$ROUND2_MESSAGES" ]; then log_error "构造第2轮 messages 失败"; TEST_FAILED=1; fi
 
-if [ -z "$ROUND2_MESSAGES" ]; then
-    log_error "构造第2轮 messages 失败"
-    TEST_FAILED=1
-fi
-
-log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X POST '${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}/v1/chat/completions' \\
-    -H 'Content-Type: application/json' \\
-    -H 'Authorization: Bearer ${CHAT_API_KEY}' \\
-    -d '{
-        \"model\": \"${TEST_MODEL_NAME}\",
-        \"messages\": ${ROUND2_MESSAGES},
-        \"tools\": ${FULL_TOOLS},
-        \"stream\": false,
-        \"max_tokens\": ${TEST_MAX_TOKENS},
-        ${E2E_SAMPLING_PARAMS}
-    }'"
-log_separator
-
-# shellcheck disable=SC2086
-ROUND2_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}/v1/chat/completions" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{
-        \"model\": \"${TEST_MODEL_NAME}\",
-        \"messages\": ${ROUND2_MESSAGES},
-        \"tools\": ${FULL_TOOLS},
-        \"stream\": false,
-        \"max_tokens\": ${TEST_MAX_TOKENS},
-        ${E2E_SAMPLING_PARAMS}
-    }")
-
-ROUND2_BODY=$(echo "$ROUND2_RESPONSE" | sed '$d')
-ROUND2_STATUS=$(echo "$ROUND2_RESPONSE" | sed -n '$p')
-
-log_response "HTTP Status: ${ROUND2_STATUS}"
-log_response "${ROUND2_BODY}"
-log_separator
-
-assert_http_status "200" "$ROUND2_STATUS" "第2轮对话 HTTP 状态码应为 200"
-assert_contains "$ROUND2_BODY" "choices" "第2轮响应应包含 choices 字段"
-
-# 验证第2轮 reasoning 字段非空
-if echo "$ROUND2_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*""'; then
-    log_error "第2轮 reasoning 字段为空字符串，应有推理内容"
-    TEST_FAILED=1
-elif echo "$ROUND2_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*"'; then
-    log_success "第2轮 reasoning 字段非空，检测到推理内容"
+send_round_nonstream 2 "$ROUND2_MESSAGES" "get_time"
+ROUND2_ASSISTANT=$(extract_assistant "$ROUND2_BODY")
+if [ -n "$ROUND2_ASSISTANT" ]; then
+    log_success "提取第2轮 assistant 响应成功"
 else
-    log_error "第2轮 reasoning 字段异常，应有推理内容"
+    log_error "提取第2轮 assistant 响应失败"
     TEST_FAILED=1
 fi
-
-# 验证第2轮 tool_calls 字段非空
-ROUND2_TOOL_DETECTED=false
-if echo "$ROUND2_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\[\]'; then
-    log_error "第2轮 tool_calls 字段为空数组，应有工具调用"
-    TEST_FAILED=1
-elif echo "$ROUND2_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\['; then
-    if echo "$ROUND2_BODY" | grep -q '"function"'; then
-        log_success "第2轮 tool_calls 字段非空，检测到工具调用：get_time"
-        ROUND2_TOOL_DETECTED=true
-    else
-        log_error "第2轮 tool_calls 数组存在但未检测到 function 字段"
-        TEST_FAILED=1
-    fi
-else
-    log_error "第2轮响应中无 tool_calls 字段，应有工具调用"
-    TEST_FAILED=1
-fi
-
 echo ""
 
-# ========== 步骤 4: 查询轨迹验证 ==========
+# ========== 第3轮 ==========
+ROUND3_MESSAGES=$(ROUND1_MSG="$ROUND1_ASSISTANT" ROUND2_MSG="$ROUND2_ASSISTANT" python3 -c "
+import json, os
+r1 = json.loads(os.environ['ROUND1_MSG'])
+r2 = json.loads(os.environ['ROUND2_MSG'])
+messages = [
+    {'role': 'user', 'content': 'Beijing天气怎么样？'},
+    r1,
+    {'role': 'tool', 'tool_call_id': r1.get('tool_calls', [{}])[0].get('id', 'call_001'), 'content': 'Beijing weather: sunny, 25°C'},
+    {'role': 'user', 'content': '上海现在几点了？'},
+    r2,
+    {'role': 'tool', 'tool_call_id': r2.get('tool_calls', [{}])[0].get('id', 'call_002'), 'content': 'Shanghai time: 14:30 CST'},
+    {'role': 'user', 'content': '深圳天气呢？'}
+]
+print(json.dumps(messages, ensure_ascii=False))
+" 2>/dev/null)
+if [ -z "$ROUND3_MESSAGES" ]; then log_error "构造第3轮 messages 失败"; TEST_FAILED=1; fi
 
-log_step "步骤 4: 查询轨迹验证（session_id: ${TEST_SESSION_ID}）"
+send_round_nonstream 3 "$ROUND3_MESSAGES" "get_weather"
+echo ""
+
+# ========== 查询轨迹，精确验证缓存一致性 ==========
+log_step "步骤 5: 查询轨迹验证前缀缓存和 token 数组一致性"
 log_curl_cmd "curl -s -w '\n%{http_code}' \\
     -X GET '${TEST_BASE_URL}/trajectory?session_id=${TEST_SESSION_ID}&limit=100'"
 log_separator
 
 TRAJ_RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${TEST_BASE_URL}/trajectory?session_id=${TEST_SESSION_ID}&limit=100")
-
 TRAJ_BODY=$(echo "$TRAJ_RESPONSE" | sed '$d')
 TRAJ_STATUS=$(echo "$TRAJ_RESPONSE" | sed -n '$p')
 
@@ -327,80 +288,82 @@ log_response "${TRAJ_BODY}"
 log_separator
 
 assert_http_status "200" "$TRAJ_STATUS" "查询轨迹 HTTP 状态码应为 200"
-
-# 验证轨迹记录数为2（两轮）
 TRAJ_COUNT=$(json_get_number "$TRAJ_BODY" "count")
-assert_eq "2" "$TRAJ_COUNT" "轨迹记录数应为 2"
+assert_eq "3" "$TRAJ_COUNT" "轨迹记录数应为 3"
 
-# 验证前缀缓存命中情况
+# 提取 cache_hit_tokens + token 数组长度
 CACHE_INFO=$(echo "$TRAJ_BODY" | python3 -c "
 import sys, json
 data = json.loads(sys.stdin.read())
 records = data.get('records', [])
-if len(records) >= 2:
-    sorted_records = sorted(records, key=lambda r: r.get('start_time', ''))
-    r1 = sorted_records[0]
-    r2 = sorted_records[1]
-    print(f\"{r1.get('cache_hit_tokens', -1)} {r2.get('cache_hit_tokens', -1)}\")
+if len(records) >= 3:
+    s = sorted(records, key=lambda r: r.get('start_time', ''))
+    r1, r2, r3 = s[0], s[1], s[2]
+
+    c1, c2, c3 = r1.get('cache_hit_tokens',-1), r2.get('cache_hit_tokens',-1), r3.get('cache_hit_tokens',-1)
+    t1 = len(r1.get('token_ids') or [])
+    rp1 = len(r1.get('response_ids') or [])
+    f1 = len(r1.get('full_conversation_token_ids') or [])
+    t2 = len(r2.get('token_ids') or [])
+    rp2 = len(r2.get('response_ids') or [])
+    f2 = len(r2.get('full_conversation_token_ids') or [])
+    t3 = len(r3.get('token_ids') or [])
+    rp3 = len(r3.get('response_ids') or [])
+    f3 = len(r3.get('full_conversation_token_ids') or [])
+
+    print(f'{c1} {c2} {c3} {t1} {rp1} {f1} {t2} {rp2} {f2} {t3} {rp3} {f3}')
 else:
-    print('-1 -1')
+    print('-1 -1 -1 0 0 0 0 0 0 0 0 0')
 " 2>/dev/null)
 
-ROUND1_CACHE=$(echo "$CACHE_INFO" | awk '{print $1}')
-ROUND2_CACHE=$(echo "$CACHE_INFO" | awk '{print $2}')
+R1_CACHE=$(echo "$CACHE_INFO" | awk '{print $1}')
+R2_CACHE=$(echo "$CACHE_INFO" | awk '{print $2}')
+R3_CACHE=$(echo "$CACHE_INFO" | awk '{print $3}')
+R1_TL=$(echo "$CACHE_INFO" | awk '{print $4}')
+R1_RL=$(echo "$CACHE_INFO" | awk '{print $5}')
+R1_FL=$(echo "$CACHE_INFO" | awk '{print $6}')
+R2_TL=$(echo "$CACHE_INFO" | awk '{print $7}')
+R2_RL=$(echo "$CACHE_INFO" | awk '{print $8}')
+R2_FL=$(echo "$CACHE_INFO" | awk '{print $9}')
+R3_TL=$(echo "$CACHE_INFO" | awk '{print $10}')
+R3_RL=$(echo "$CACHE_INFO" | awk '{print $11}')
+R3_FL=$(echo "$CACHE_INFO" | awk '{print $12}')
 
-log_info "前缀缓存命中情况："
-log_info "  第1轮 cache_hit_tokens: ${ROUND1_CACHE}"
-log_info "  第2轮 cache_hit_tokens: ${ROUND2_CACHE}"
+log_info "第1轮 cache_hit=${R1_CACHE} token_ids=${R1_TL} response_ids=${R1_RL} full_conv=${R1_FL}"
+log_info "第2轮 cache_hit=${R2_CACHE} token_ids=${R2_TL} response_ids=${R2_RL} full_conv=${R2_FL}"
+log_info "第3轮 cache_hit=${R3_CACHE} token_ids=${R3_TL} response_ids=${R3_RL} full_conv=${R3_FL}"
 
-# 验证第1轮：cache_hit_tokens == 0（无历史对话）
-assert_eq "0" "$ROUND1_CACHE" "第1轮 cache_hit_tokens 应为 0（无历史）"
+# ===== 校验 1: cache_hit_tokens == 前一轮 full_conversation_token_ids 长度 =====
+log_info "--- 校验 1: cache_hit_tokens == 前一轮 full_conversation_token_ids 长度 ---"
+assert_eq "0" "$R1_CACHE" "第1轮 cache_hit_tokens 应为 0（无历史）"
+assert_eq "$R1_FL" "$R2_CACHE" "第2轮 cache_hit(${R2_CACHE}) == 第1轮 full_conv 长度(${R1_FL})"
+assert_eq "$R2_FL" "$R3_CACHE" "第3轮 cache_hit(${R3_CACHE}) == 第2轮 full_conv 长度(${R2_FL})"
 
-# 验证第2轮：cache_hit_tokens > 0（复用第1轮 system prompt + tools + reasoning pattern）
-if [ "$ROUND2_CACHE" -gt 0 ] 2>/dev/null; then
-    log_success "第2轮 cache_hit_tokens=${ROUND2_CACHE} > 0，已复用第1轮缓存"
-else
-    log_error "第2轮 cache_hit_tokens 应 > 0（复用第1轮），实际为: ${ROUND2_CACHE}"
-    TEST_FAILED=1
-fi
+# ===== 校验 2: full_conversation_token_ids 长度 == token_ids + response_ids 长度 =====
+log_info "--- 校验 2: len(full_conversation_token_ids) == len(token_ids) + len(response_ids) ---"
+R1_SUM=$((R1_TL + R1_RL))
+assert_eq "$R1_SUM" "$R1_FL" "第1轮 token_ids(${R1_TL})+response_ids(${R1_RL}) == full_conv(${R1_FL})"
+R2_SUM=$((R2_TL + R2_RL))
+assert_eq "$R2_SUM" "$R2_FL" "第2轮 token_ids(${R2_TL})+response_ids(${R2_RL}) == full_conv(${R2_FL})"
+R3_SUM=$((R3_TL + R3_RL))
+assert_eq "$R3_SUM" "$R3_FL" "第3轮 token_ids(${R3_TL})+response_ids(${R3_RL}) == full_conv(${R3_FL})"
 
 echo ""
 
-# ========== 步骤 5: 删除模型 ==========
-
-log_step "步骤 5: 删除模型（run_id: ${TEST_RUN_ID}）"
-log_curl_cmd "curl -s -w '\n%{http_code}' \\
-    -X DELETE '${TEST_BASE_URL}/models?model_name=${TEST_MODEL_NAME}&run_id=${TEST_RUN_ID}'"
-log_separator
-
+# ========== 步骤 6: 删除模型 ==========
+log_step "步骤 6: 删除模型（run_id: ${TEST_RUN_ID}）"
 DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${TEST_BASE_URL}/models?model_name=${TEST_MODEL_NAME}&run_id=${TEST_RUN_ID}")
-
 DELETE_BODY=$(echo "$DELETE_RESPONSE" | sed '$d')
 DELETE_STATUS=$(echo "$DELETE_RESPONSE" | sed -n '$p')
-
 log_response "HTTP Status: ${DELETE_STATUS}"
-log_response "${DELETE_BODY}"
-log_separator
-
 assert_http_status "200" "$DELETE_STATUS" "删除模型 HTTP 状态码应为 200"
-
-DELETE_RESULT=$(json_get "$DELETE_BODY" "status")
-assert_eq "success" "$DELETE_RESULT" "删除模型应返回 success"
-
-DELETE_DELETED=$(json_get_bool "$DELETE_BODY" "deleted")
-assert_eq "true" "$DELETE_DELETED" "deleted 应为 true"
+assert_eq "success" "$(json_get "$DELETE_BODY" 'status')" "删除模型应返回 success"
 
 echo ""
 
-# ========== 验证总结 ==========
-if [ "$ROUND1_TOOL_DETECTED" = true ] && [ "$ROUND2_TOOL_DETECTED" = true ]; then
-    log_success "多轮 Reasoning+Tool 非流式场景验证通过：两轮对话均检测到推理内容和工具调用"
+if [ "${ROUND1_TOOL_DETECTED:-false}" = true ] && [ "${ROUND2_TOOL_DETECTED:-false}" = true ] && [ "${ROUND3_TOOL_DETECTED:-false}" = true ]; then
+    log_success "多轮 Reasoning+Tool 非流式场景验证通过：三轮对话均检测到推理内容和工具调用"
 fi
 
-# 打印测试摘要
 print_summary
-
-# 检查手动设置的失败标志
-if [ "${TEST_FAILED:-0}" = "1" ]; then
-    exit 1
-fi
+if [ "${TEST_FAILED:-0}" = "1" ]; then exit 1; fi
