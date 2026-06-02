@@ -314,6 +314,17 @@ class Parser:
         state.previous_token_ids = current_token_ids
         return delta_message
 
+    def _get_function_name(
+        self, request: ChatCompletionRequest
+    ) -> str:
+        """从 tool_choice 中提取函数名（对齐 vLLM DelegatingParser._get_function_name）"""
+        if request.tool_choice:
+            if hasattr(request.tool_choice, 'function'):
+                return request.tool_choice.function.name
+            if hasattr(request.tool_choice, 'name'):
+                return request.tool_choice.name
+        return ""
+
     def _extract_tool_calls_streaming(
         self,
         previous_text: str,
@@ -329,30 +340,60 @@ class Parser:
     ) -> tuple:
         """调用底层 tool parser 的流式提取方法。
 
-        对齐 vLLM DelegatingParser._extract_tool_calls_streaming() 接口。
+        严格对齐 vLLM DelegatingParser._extract_tool_calls_streaming()：
+        先检查 supports_required_and_named，不支持的 parser（如 hermes）
+        使用标准接口，不传 tool_call_idx 等扩展参数。
         """
         if self._tool_parser is None:
             return None, function_name_returned
 
-        # 转换 request 为 ChatCompletionRequest（tool parser 需要）
         req = self._build_request(request)
+        supports_required_and_named = getattr(
+            self._tool_parser, 'supports_required_and_named', False
+        )
 
-        # 使用 tool parser 的 extract_tool_calls_streaming 方法
-        if hasattr(self._tool_parser, 'extract_tool_calls_streaming'):
-            return self._tool_parser.extract_tool_calls_streaming(
-                previous_text=previous_text,
-                current_text=current_text,
+        # Named tool choice（如 tool_choice={"function": {"name": "get_weather"}}）
+        if (
+            supports_required_and_named
+            and req.tool_choice
+            and hasattr(req.tool_choice, 'function')
+        ):
+            from vllm.parser.utils import extract_named_tool_call_streaming
+            delta_message, function_name_returned = extract_named_tool_call_streaming(
                 delta_text=delta_text,
-                previous_token_ids=previous_token_ids,
-                current_token_ids=current_token_ids,
-                delta_token_ids=delta_token_ids,
-                request=req,
+                function_name=self._get_function_name(req),
+                function_name_returned=function_name_returned,
                 tool_call_idx=tool_call_idx,
                 tool_call_id_type=tool_call_id_type,
-                function_name_returned=function_name_returned,
-            ), function_name_returned
+                tokenizer=getattr(self._tool_parser, 'model_tokenizer', None),
+            )
+            return delta_message, function_name_returned
 
-        return None, function_name_returned
+        # Required tool choice
+        if supports_required_and_named and req.tool_choice == "required":
+            from vllm.parser.utils import extract_required_tool_call_streaming
+            delta_message, function_name_returned = (
+                extract_required_tool_call_streaming(
+                    previous_text=previous_text,
+                    current_text=current_text,
+                    delta_text=delta_text,
+                    function_name_returned=function_name_returned,
+                    tool_call_idx=tool_call_idx,
+                    tool_call_id_type=tool_call_id_type,
+                )
+            )
+            return delta_message, function_name_returned
+
+        # 标准接口（hermes 等 parser）：仅传基础参数
+        return self.extract_tool_calls_streaming(
+            previous_text=previous_text,
+            current_text=current_text,
+            delta_text=delta_text,
+            previous_token_ids=previous_token_ids,
+            current_token_ids=current_token_ids,
+            delta_token_ids=delta_token_ids,
+            request=req,  # type: ignore[arg-type]
+        ), function_name_returned
 
     def __enter__(self):
         """进入上下文管理器，自动重置流式状态"""
