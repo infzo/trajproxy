@@ -110,7 +110,7 @@ for line in sys.stdin:
 msg = {'role': 'assistant'}
 tcs = [tool_calls_map[k] for k in sorted(tool_calls_map.keys())]
 if tcs: msg['tool_calls'] = tcs
-if reasoning_parts: msg['reasoning_content'] = ''.join(reasoning_parts)
+# 注意: reasoning_content 仅用于验证，不放入重建消息，避免污染下轮 prompt
 c = ''.join(content_parts)
 if c and c.strip(): msg['content'] = c
 print(json.dumps(msg, ensure_ascii=False))
@@ -166,7 +166,7 @@ send_round_stream() {
         TEST_FAILED=1
     fi
 
-    eval "ROUND${round_num}_STREAM=\"$STREAM_RESP\""
+    printf -v "ROUND${round_num}_STREAM" '%s' "$STREAM_RESP"
 }
 
 # ========== 第1轮 ==========

@@ -213,7 +213,7 @@ send_round_nonstream() {
         TEST_FAILED=1
     fi
 
-    eval "ROUND${round_num}_BODY=\"$ROUND_BODY\""
+    printf -v "ROUND${round_num}_BODY" '%s' "$ROUND_BODY"
 }
 
 # ========== 第1轮 ==========
