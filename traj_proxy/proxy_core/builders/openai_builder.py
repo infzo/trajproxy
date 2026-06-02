@@ -102,9 +102,11 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
             logger.warning(f"[{context.unique_id}] 推理解析失败: {e}\n{traceback.format_exc()}")
 
         # 构建消息体
+        # 将空白/空内容规范化为 None，与 vLLM 行为一致
+        normalized_content = final_content if (final_content and final_content.strip()) else None
         message = {
             "role": "assistant",
-            "content": final_content
+            "content": normalized_content
         }
 
         if reasoning:
