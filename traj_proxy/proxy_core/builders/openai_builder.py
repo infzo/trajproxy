@@ -131,7 +131,8 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
             "usage": {
                 "prompt_tokens": context.prompt_tokens or 0,
                 "completion_tokens": context.completion_tokens or 0,
-                "total_tokens": context.total_tokens or 0
+                "total_tokens": context.total_tokens or 0,
+                "prompt_tokens_details": None
             }
         }
 
