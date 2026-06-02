@@ -20,7 +20,7 @@ TEST_SESSION_PATH="s/${TEST_RUN_ID}/${TEST_SESSION_ID}"
 # 步骤 1: 注册模型（TITO + hermes tool_parser）
 # ========================================
 log_step "步骤 1: 注册模型（TITO + hermes tool_parser）"
-register_model "$TEST_RUN_ID" "$COMPARISON_MODEL_NAME" "true" "${COMPARISON_TOOL_PARSER}"
+register_model "$TEST_RUN_ID" "$COMPARISON_MODEL_NAME" "true" "${COMPARISON_TOOL_PARSER}" "${COMPARISON_REASONING_PARSER}"
 
 echo ""
 
