@@ -27,12 +27,10 @@ _REASONING_PARSERS_TO_REGISTER = {
         "reasoning_parsers.qwen3_reasoning_parser",
         "Qwen3ReasoningParser",
     ),
-    # 添加更多 parser 到这里
-    # 示例：
-    # "deepseek_r1": (
-    #     "reasoning_parsers.deepseek_r1_reasoning_parser",
-    #     "DeepSeekR1ReasoningParser",
-    # ),
+    "deepseek_r1": (
+        "reasoning_parsers.deepseek_r1_reasoning_parser",
+        "DeepSeekR1ReasoningParser",
+    ),
 }
 
 
