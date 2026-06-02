@@ -71,7 +71,7 @@ register_model() {
         -d "{
             \"run_id\": \"${run_id}\",
             \"model_name\": \"${model_name}\",
-            \"url\": \"${VLLM_URL}/v1\",
+            \"url\": \"${BACKEND_MODEL_URL}\",
             \"api_key\": \"${COMPARISON_CHAT_API_KEY}\",
             \"token_in_token_out\": ${tito}${extra_fields}
         }")
@@ -116,14 +116,20 @@ delete_model() {
 # 请求发送
 # ========================================
 
-# 发送非流式请求到指定端点，返回响应体
-# 参数: $1=endpoint_url, $2=model_name, $3=request_body_json
+# 发送非流式请求到指定端点，返回响应体临时文件路径
+# 参数: $1=endpoint_url, $2=model_name, $3=request_body_json, $4=session_path(可选,如 "s/run_id/sess_id")
 send_nonstream_request() {
     local url="$1"
     local model="$2"
     local body="$3"
+    local session_path="${4:-}"
 
-    local full_url="${url}/v1/chat/completions"
+    local full_url
+    if [ -n "$session_path" ]; then
+        full_url="${url}/${session_path}/v1/chat/completions"
+    else
+        full_url="${url}/v1/chat/completions"
+    fi
 
     local response=$(curl -s --noproxy '*' --max-time 120 -w "\n%{http_code}" \
         -X POST "$full_url" \
@@ -134,8 +140,9 @@ send_nonstream_request() {
     local body_part=$(echo "$response" | sed '$d')
     local status=$(echo "$response" | sed -n '$p')
 
-    log_response "HTTP Status: ${status}"
-    log_response "${body_part}"
+    # 日志输出到 stderr，避免污染 stdout（调用者通过 $(...) 捕获 tmpfile 路径）
+    >&2 log_response "HTTP Status: ${status}"
+    >&2 log_response "${body_part}"
 
     # 保存到临时文件供 compare.py 使用
     local tmpfile=$(mktemp)
@@ -144,13 +151,19 @@ send_nonstream_request() {
 }
 
 # 发送流式请求到指定端点，收集所有 SSE chunks
-# 参数: $1=endpoint_url, $2=model_name, $3=request_body_json
+# 参数: $1=endpoint_url, $2=model_name, $3=request_body_json, $4=session_path(可选,如 "s/run_id/sess_id")
 send_stream_request() {
     local url="$1"
     local model="$2"
     local body="$3"
+    local session_path="${4:-}"
 
-    local full_url="${url}/v1/chat/completions"
+    local full_url
+    if [ -n "$session_path" ]; then
+        full_url="${url}/${session_path}/v1/chat/completions"
+    else
+        full_url="${url}/v1/chat/completions"
+    fi
 
     local stream_response=$(curl -s --noproxy '*' --no-buffer --max-time 120 \
         -X POST "$full_url" \
