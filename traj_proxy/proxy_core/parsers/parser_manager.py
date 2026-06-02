@@ -10,6 +10,7 @@ Parser 管理器
 import sys
 import importlib.util
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Any, Dict, Sequence, Union, Tuple
 
@@ -45,6 +46,22 @@ def _get_custom_parsers_dirs() -> Tuple[Path, Path]:
     return base_dir / "tool_parsers", base_dir / "reasoning_parsers"
 
 
+@dataclass
+class StreamState:
+    """Mutable state for Parser.parse_delta(). One per stream.
+
+    对齐 vLLM DelegatingParser.StreamState 设计。
+    """
+    reasoning_ended: bool = False
+    tool_call_text_started: bool = False
+    prompt_reasoning_checked: bool = False
+    previous_text: str = ""
+    previous_token_ids: list = field(default_factory=list)
+    history_tool_call_cnt: int = 0
+    tool_call_id_type: str = "random"
+    function_name_returned: bool = False
+
+
 class Parser:
     """Parser 统一接口（适配器模式）
 
@@ -65,6 +82,7 @@ class Parser:
     ):
         self._tool_parser = tool_parser
         self._reasoning_parser = reasoning_parser
+        self._stream_state = StreamState()
 
     @staticmethod
     def _build_request(request: Union[Dict[str, Any], ChatCompletionRequest]) -> ChatCompletionRequest:
@@ -105,8 +123,9 @@ class Parser:
     # ==================== 流式状态管理 ====================
 
     def reset_streaming_state(self):
-        """重置流式解析状态（兼容 vLLM 原始 parser）"""
-        # 使用 hasattr 检查，适配不同的 vLLM parser 实现
+        """重置流式解析状态"""
+        self._stream_state = StreamState()
+        # 兼容 vLLM 原始 parser 的内部状态
         if self._tool_parser and hasattr(self._tool_parser, 'reset_streaming_state'):
             self._tool_parser.reset_streaming_state()
         if self._reasoning_parser and hasattr(self._reasoning_parser, 'reset_streaming_state'):
@@ -171,6 +190,172 @@ class Parser:
         if not self._reasoning_parser:
             return list(input_ids)
         return self._reasoning_parser.extract_content_ids(input_ids)
+
+    # ==================== 流式阶段判断 ====================
+
+    def _in_reasoning_phase(self, state: StreamState) -> bool:
+        if self._reasoning_parser is None:
+            return False
+        return not state.reasoning_ended
+
+    def _in_tool_call_phase(self, state: StreamState) -> bool:
+        if self._tool_parser is None:
+            return False
+        return state.reasoning_ended
+
+    # ==================== parse_delta (对齐 vLLM DelegatingParser) ====================
+
+    def parse_delta(
+        self,
+        delta_text: str,
+        delta_token_ids: list,
+        request: Union[Dict[str, Any], ChatCompletionRequest],
+        prompt_token_ids: Optional[list] = None,
+    ) -> DeltaMessage | None:
+        """流式解析单个 delta，对齐 vLLM DelegatingParser.parse_delta()。
+
+        状态管理完全在 Parser 内部，按 reasoning → tool → pass-through
+        三阶段处理。每次调用后自动更新 previous_text/previous_token_ids。
+
+        Args:
+            delta_text: 增量文本
+            delta_token_ids: 增量 token IDs
+            request: 请求对象
+            prompt_token_ids: prompt token IDs（仅首次调用需要，用于判断
+                              reasoning 是否已在 prompt 中结束）
+
+        Returns:
+            DeltaMessage 或 None（当 chunk 应被跳过时）
+        """
+        state = self._stream_state
+
+        # Prompt reasoning check（仅首次调用）
+        if not state.prompt_reasoning_checked and prompt_token_ids is not None:
+            state.prompt_reasoning_checked = True
+            if self._reasoning_parser is None or self.is_reasoning_end(
+                prompt_token_ids
+            ):
+                state.reasoning_ended = True
+
+        current_text = state.previous_text + delta_text
+        current_token_ids = state.previous_token_ids + delta_token_ids
+        delta_message: DeltaMessage | None = None
+
+        # === Reasoning extraction ===
+        if self._in_reasoning_phase(state):
+            delta_message = self.extract_reasoning_streaming(
+                previous_text=state.previous_text,
+                current_text=current_text,
+                delta_text=delta_text,
+                previous_token_ids=state.previous_token_ids,
+                current_token_ids=current_token_ids,
+                delta_token_ids=delta_token_ids,
+            )
+            if self.is_reasoning_end_streaming(current_token_ids, delta_token_ids):
+                state.reasoning_ended = True
+                # 边界 delta：</think> 之后的内容仅保留给 tool parser
+                current_token_ids = self.extract_content_ids(delta_token_ids)
+                current_text = (
+                    delta_message.content
+                    if delta_message and delta_message.content
+                    else ""
+                )
+                delta_text = current_text
+                delta_token_ids = current_token_ids
+
+        # === Tool call extraction ===
+        if self._in_tool_call_phase(state):
+            if not state.tool_call_text_started:
+                state.tool_call_text_started = True
+                state.previous_text = ""
+                state.previous_token_ids = []
+                delta_text = current_text
+                delta_token_ids = current_token_ids
+
+            # 保存 reasoning（边界 delta 可能同时有 reasoning 和 tool_call）
+            reasoning = delta_message.reasoning if delta_message else None
+            delta_message, state.function_name_returned = (
+                self._extract_tool_calls_streaming(
+                    previous_text=state.previous_text,
+                    current_text=current_text,
+                    delta_text=delta_text,
+                    previous_token_ids=state.previous_token_ids,
+                    current_token_ids=current_token_ids,
+                    delta_token_ids=delta_token_ids,
+                    request=request,
+                    tool_call_idx=state.history_tool_call_cnt,
+                    tool_call_id_type=state.tool_call_id_type,
+                    function_name_returned=state.function_name_returned,
+                )
+            )
+            if reasoning:
+                if not delta_message:
+                    delta_message = DeltaMessage()
+                delta_message.reasoning = reasoning
+
+            if (
+                delta_message
+                and delta_message.tool_calls
+                and delta_message.tool_calls[0].id is not None
+            ):
+                state.history_tool_call_cnt += 1
+
+        # === Pass-through: 无活跃阶段时，直接输出为 content ===
+        if (
+            delta_message is None
+            and not self._in_reasoning_phase(state)
+            and not self._in_tool_call_phase(state)
+        ):
+            delta_message = DeltaMessage(content=delta_text)
+
+        # 更新累积状态（对齐 vLLM：使用 current_text/current_token_ids，
+        # 因为边界处理后 delta_text/delta_token_ids 可能已被修改）
+        state.previous_text = current_text
+        state.previous_token_ids = current_token_ids
+        return delta_message
+
+    def _extract_tool_calls_streaming(
+        self,
+        previous_text: str,
+        current_text: str,
+        delta_text: str,
+        previous_token_ids: list,
+        current_token_ids: list,
+        delta_token_ids: list,
+        request: ChatCompletionRequest,
+        tool_call_idx: int = 0,
+        tool_call_id_type: str = "random",
+        function_name_returned: bool = False,
+    ) -> tuple:
+        """调用底层 tool parser 的流式提取方法。
+
+        对齐 vLLM DelegatingParser._extract_tool_calls_streaming() 接口。
+        """
+        if self._tool_parser is None:
+            return None, function_name_returned
+
+        # 使用 tool parser 的 extract_tool_calls_streaming 方法
+        if hasattr(self._tool_parser, 'extract_tool_calls_streaming'):
+            try:
+                result = self._tool_parser.extract_tool_calls_streaming(
+                    previous_text=previous_text,
+                    current_text=current_text,
+                    delta_text=delta_text,
+                    previous_token_ids=previous_token_ids,
+                    current_token_ids=current_token_ids,
+                    delta_token_ids=delta_token_ids,
+                    request=request,
+                    tool_call_idx=tool_call_idx,
+                    tool_call_id_type=tool_call_id_type,
+                    function_name_returned=function_name_returned,
+                )
+                return result, function_name_returned
+            except Exception:
+                _logger = logging.getLogger(__name__)
+                _logger.debug("tool parser streaming failed, falling back", exc_info=True)
+                return None, function_name_returned
+
+        return None, function_name_returned
 
     def __enter__(self):
         """进入上下文管理器，自动重置流式状态"""
