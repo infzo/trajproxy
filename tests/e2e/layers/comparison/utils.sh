@@ -14,13 +14,13 @@ COMPARE_PY="${_LAYER_DIR}/compare.py"
 # 检查 vLLM 服务是否可用
 check_vllm_health() {
     log_info "检查 vLLM 服务健康状态 (${VLLM_URL})..."
-    local health_result
-    health_result=$(curl -s --noproxy '*' --max-time 5 "${VLLM_URL}/health" 2>&1)
-    if echo "$health_result" | grep -q "ok"; then
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" --noproxy '*' --max-time 5 "${VLLM_URL}/health" 2>&1)
+    if [ "$http_code" = "200" ]; then
         log_success "vLLM 服务可用"
         return 0
     else
-        log_error "vLLM 服务不可用: ${health_result}"
+        log_error "vLLM 服务不可用 (HTTP ${http_code})"
         return 1
     fi
 }
@@ -28,13 +28,13 @@ check_vllm_health() {
 # 检查 trajproxy 服务是否可用
 check_proxy_health() {
     log_info "检查 trajproxy 服务健康状态 (${PROXY_URL})..."
-    local health_result
-    health_result=$(curl -s --noproxy '*' --max-time 5 "${PROXY_URL}/health" 2>&1)
-    if echo "$health_result" | grep -q "ok"; then
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" --noproxy '*' --max-time 5 "${PROXY_URL}/health" 2>&1)
+    if [ "$http_code" = "200" ]; then
         log_success "trajproxy 服务可用"
         return 0
     else
-        log_error "trajproxy 服务不可用: ${health_result}"
+        log_error "trajproxy 服务不可用 (HTTP ${http_code})"
         return 1
     fi
 }
@@ -87,7 +87,7 @@ register_model() {
     local register_result=$(json_get "$REGISTER_BODY" "status")
     assert_eq "success" "$register_result" "注册模型应返回 success"
 
-    sleep 3
+    sleep 1
 }
 
 # 删除模型

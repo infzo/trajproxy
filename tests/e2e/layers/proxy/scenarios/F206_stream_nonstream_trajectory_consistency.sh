@@ -61,7 +61,7 @@ assert_http_status "200" "$REGISTER_STATUS" "HTTP 状态码应为 200"
 REGISTER_RESULT=$(json_get "$REGISTER_BODY" "status")
 assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 
-sleep 3
+sleep 1
 
 echo ""
 

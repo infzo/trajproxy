@@ -35,7 +35,7 @@ log_info "分区 ${MONTH_TARGET} 包含 ${PARTITION_COUNT} 条记录"
 ARCHIVE_OUTPUT=$(run_archive_once 1 2>&1)
 log_info "归档输出:"
 echo "$ARCHIVE_OUTPUT" | tail -3
-sleep 2
+sleep 0.5
 
 # 获取 archive_location
 ARCHIVE_LOCATION=$(get_archive_location "${TEST_SESSION}")

@@ -26,7 +26,7 @@ start_mock() {
     if [ -n "$occupying_pid" ]; then
         log_warning "端口 $MOCK_PORT 被残留进程 (PID: $occupying_pid) 占用，正在清理..."
         kill -9 $occupying_pid 2>/dev/null
-        sleep 1
+        sleep 0.3
     fi
 
     python3 "${MOCK_INFER_SERVER}" "$MOCK_PORT" &
@@ -42,14 +42,14 @@ start_mock() {
             return 1
         fi
 
-        health_result=$(curl -s --noproxy '*' --max-time 3 "${MOCK_URL}/mock/health" 2>&1)
+        health_result=$(curl -s --noproxy '*' --max-time 2 "${MOCK_URL}/mock/health" 2>&1)
         # 只检查响应内容是否包含 "ok"，不依赖 curl 退出码
         # （某些环境下 curl 可能返回数据但退出码非零）
         if echo "$health_result" | grep -q "ok"; then
             log_success "Mock服务已启动 (PID: ${MOCK_PID}, Port: ${MOCK_PORT})"
             return 0
         fi
-        sleep 1
+        sleep 0.2
     done
 
     # 超时时输出诊断信息

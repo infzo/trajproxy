@@ -42,7 +42,7 @@ echo "$ARCHIVE_OUTPUT" | tail -5
 # 步骤 4: 验证分区数据被删除
 log_step "步骤 4: 验证数据已 DELETE"
 
-sleep 1
+sleep 0.3
 
 REMAINING=$(get_partition_record_count "request_details_active_${MONTH_LAST}")
 assert_eq "0" "$REMAINING" "分区记录数应为 0（已全部 DELETE）"

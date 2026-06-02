@@ -71,7 +71,7 @@ assert_eq "$REASONING_TEST_REASONING_PARSER" "$REGISTER_REASONING_PARSER" "reaso
 # 验证 token_in_token_out 配置
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
 assert_eq "true" "$REGISTER_TITO" "token_in_token_out 应为 true"
-sleep 3
+sleep 1
 
 echo ""
 

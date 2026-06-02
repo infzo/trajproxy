@@ -105,6 +105,8 @@ services:
       - PYTHONUNBUFFERED=1
       - LOG_LEVEL=DEBUG
       - LOG_DIR=/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy

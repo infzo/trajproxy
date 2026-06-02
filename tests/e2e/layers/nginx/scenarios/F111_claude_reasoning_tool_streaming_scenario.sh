@@ -80,7 +80,7 @@ assert_eq "$CLAUDE_COMBO_STREAM_TEST_TOOL_PARSER" "$REGISTER_TOOL_PARSER" "tool_
 # 验证 token_in_token_out 配置
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
 assert_eq "true" "$REGISTER_TITO" "token_in_token_out 应为 true"
-sleep 3
+sleep 1
 
 echo ""
 
@@ -165,9 +165,13 @@ else
 fi
 
 # 验证流式响应中 reasoning 字段（Reasoning 流式场景关键字段）
-# Claude流式响应中，reasoning 可能通过 content_block_delta 中的 reasoning 字段返回
+# Claude流式响应中，reasoning 通过 content_block_delta 的 thinking_delta 字段返回
+# OpenAI格式流式响应中，reasoning 通过 delta 的 reasoning_content / reasoning 字段返回
 REASONING_DETECTED=false
-if echo "$STREAM_RESPONSE" | grep -q '"reasoning_content"'; then
+if echo "$STREAM_RESPONSE" | grep -q '"thinking_delta"'; then
+    log_success "流式响应中检测到 thinking 推理内容（Claude格式）"
+    REASONING_DETECTED=true
+elif echo "$STREAM_RESPONSE" | grep -q '"reasoning_content"'; then
     log_success "流式响应中检测到 reasoning_content 解析"
     REASONING_DETECTED=true
 elif echo "$STREAM_RESPONSE" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*"'; then

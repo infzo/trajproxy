@@ -61,7 +61,7 @@ assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
 assert_eq "true" "$REGISTER_TITO" "token_in_token_out 应为 true"
 
-sleep 2  # 等待模型注册生效
+sleep 0.5  # 等待模型注册生效
 
 echo ""
 

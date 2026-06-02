@@ -80,7 +80,7 @@ assert_eq "$CLAUDE_COMBO_TEST_TOOL_PARSER" "$REGISTER_TOOL_PARSER" "tool_parser 
 # 验证 token_in_token_out 配置
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
 assert_eq "true" "$REGISTER_TITO" "token_in_token_out 应为 true"
-sleep 3
+sleep 1
 
 echo ""
 

@@ -106,7 +106,7 @@ log_separator
 assert_http_status "200" "$DIRECT_REG_STATUS" "DirectPipeline 注册应返回 200"
 assert_eq "success" "$(json_get "$DIRECT_REG_BODY" "status")" "注册模型应返回 success"
 
-sleep 2
+sleep 0.5
 
 echo ""
 
@@ -315,7 +315,7 @@ fi
 
 assert_eq "success" "$(json_get "$TITO_REG_BODY" "status")" "注册TITO模型应返回 success"
 
-sleep 3
+sleep 1
 
 echo ""
 

@@ -55,7 +55,7 @@ done
 
 echo ""
 assert_eq "$MODEL_COUNT" "$REGISTER_OK" "所有 ${MODEL_COUNT} 个模型注册均应成功"
-sleep 1
+sleep 0.3
 echo ""
 
 # ========================================

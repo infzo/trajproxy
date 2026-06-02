@@ -33,7 +33,7 @@ echo "$ARCHIVE_OUTPUT" | tail -5
 # 步骤 3: 验证数据未被删除
 log_step "步骤 3: 验证活跃 run 未被归档"
 
-sleep 1
+sleep 0.3
 
 AFTER=$(get_partition_record_count "request_details_active_${MONTH_CURRENT}")
 assert_eq "${BEFORE}" "${AFTER}" "活跃 run 的数据未被 DELETE"

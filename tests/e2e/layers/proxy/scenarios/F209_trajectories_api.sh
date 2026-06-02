@@ -63,7 +63,7 @@ assert_http_status "200" "$REGISTER_STATUS" "HTTP 状态码应为 200"
 REGISTER_RESULT=$(json_get "$REGISTER_BODY" "status")
 assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 
-sleep 1
+sleep 0.3
 
 echo ""
 
@@ -86,7 +86,7 @@ CHAT_RESPONSE_1=$(curl -s -w "\n%{http_code}" -X POST "${TRAJ_API_BASE_URL}/s/${
 
 CHAT_STATUS_1=$(echo "$CHAT_RESPONSE_1" | sed -n '$p')
 assert_http_status "200" "$CHAT_STATUS_1" "Session 1 推理请求应返回 200"
-sleep 1
+sleep 0.3
 
 # Session 2
 echo ">>> Session 2: ${TRAJ_API_SESSION_ID_2}"
@@ -101,7 +101,7 @@ CHAT_RESPONSE_2=$(curl -s -w "\n%{http_code}" -X POST "${TRAJ_API_BASE_URL}/s/${
 
 CHAT_STATUS_2=$(echo "$CHAT_RESPONSE_2" | sed -n '$p')
 assert_http_status "200" "$CHAT_STATUS_2" "Session 2 推理请求应返回 200"
-sleep 1
+sleep 0.3
 
 # Session 3
 echo ">>> Session 3: ${TRAJ_API_SESSION_ID_3}"
@@ -116,7 +116,7 @@ CHAT_RESPONSE_3=$(curl -s -w "\n%{http_code}" -X POST "${TRAJ_API_BASE_URL}/s/${
 
 CHAT_STATUS_3=$(echo "$CHAT_RESPONSE_3" | sed -n '$p')
 assert_http_status "200" "$CHAT_STATUS_3" "Session 3 推理请求应返回 200"
-sleep 1
+sleep 0.3
 
 log_separator
 echo ""

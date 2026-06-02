@@ -51,7 +51,7 @@ assert_eq "success" "$REGISTER_A_RESULT" "注册模型 A 应返回 success"
 REGISTER_A_RUN_ID=$(json_get "$REGISTER_A_BODY" "run_id")
 assert_eq "DEFAULT" "$REGISTER_A_RUN_ID" "run_id 应为 DEFAULT"
 
-sleep 1
+sleep 0.3
 
 echo ""
 
@@ -94,7 +94,7 @@ assert_eq "success" "$REGISTER_B_RESULT" "注册模型 B 应返回 success"
 REGISTER_B_RUN_ID=$(json_get "$REGISTER_B_BODY" "run_id")
 assert_eq "$TEST_MODEL_B_RUN_ID" "$REGISTER_B_RUN_ID" "run_id 应为 ${TEST_MODEL_B_RUN_ID}"
 
-sleep 1
+sleep 0.3
 
 echo ""
 

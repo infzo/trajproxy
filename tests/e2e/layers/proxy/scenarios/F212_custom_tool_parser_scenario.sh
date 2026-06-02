@@ -24,6 +24,7 @@ TOOL_TEST_RUN_ID="run-${SCENARIO_ID}"
 TOOL_TEST_SESSION_ID="session-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 TOOL_TEST_TOKENIZER_PATH="${DEFAULT_TOKENIZER_PATH}"
 TOOL_TEST_TOOL_PARSER="test_tool_parser"  # 使用自定义 parser
+TOOL_TEST_MAX_TOKENS="${E2E_MAX_TOKENS:-2048}"
 
 # 步骤 1: 注册模型（带自定义 tool_parser）
 # 注意：tool_parser 只在 token_in_token_out=true 模式下生效
@@ -76,7 +77,7 @@ assert_eq "$TOOL_TEST_TOOL_PARSER" "$REGISTER_TOOL_PARSER" "tool_parser 应为 $
 # 验证 token_in_token_out 配置
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
 assert_eq "true" "$REGISTER_TITO" "token_in_token_out 应为 true"
-sleep 3
+sleep 1
 
 echo ""
 
@@ -109,7 +110,8 @@ log_curl_cmd "curl -s -w '\n%{http_code}' \\
                 }
             }
         ],
-        \"stream\": false
+        \"stream\": false,
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
     }'"
 log_separator
 
@@ -138,7 +140,8 @@ CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TOOL_TEST_BASE_URL}/s/${T
                 }
             }
         ],
-        \"stream\": false
+        \"stream\": false,
+        \"max_tokens\": ${TOOL_TEST_MAX_TOKENS}
     }")
 
 CHAT_BODY=$(echo "$CHAT_RESPONSE" | sed '$d')

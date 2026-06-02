@@ -58,7 +58,7 @@ log_separator
 
 assert_http_status "200" "$REGISTER_STATUS" "注册模型应返回 200"
 assert_eq "success" "$(json_get "$REGISTER_BODY" "status")" "注册模型应返回 success"
-sleep 1
+sleep 0.3
 echo ""
 
 # ============================================================
@@ -78,7 +78,7 @@ CHAT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_R
 
 CHAT_STATUS=$(echo "$CHAT_RESPONSE" | sed -n '$p')
 assert_http_status "200" "$CHAT_STATUS" "推理请求应返回 200"
-sleep 1
+sleep 0.3
 echo ""
 
 # ============================================================

@@ -63,7 +63,7 @@ assert_eq "$TOKEN_TEST_RUN_ID" "$REGISTER_RUN_ID" "run_id 应为 ${TOKEN_TEST_RU
 # 验证 token_in_token_out 配置
 REGISTER_TITO=$(json_get_bool "$REGISTER_BODY" "token_in_token_out")
 assert_eq "true" "$REGISTER_TITO" "token_in_token_out 应为 true"
-sleep 1
+sleep 0.3
 
 echo ""
 

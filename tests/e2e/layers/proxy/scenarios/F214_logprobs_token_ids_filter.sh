@@ -236,7 +236,7 @@ assert_http_status "200" "$REGISTER_STATUS" "HTTP 状态码应为 200"
 REGISTER_RESULT=$(json_get "$REGISTER_BODY" "status")
 assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 
-sleep 2
+sleep 0.5
 
 echo ""
 
@@ -278,7 +278,7 @@ TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 2b: 等待轨迹存储，验证轨迹中包含 logprobs 和 token_ids（证明强制覆盖生效）
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids（间接证明强制覆盖生效）..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_NO_PARAM}")
 
@@ -343,7 +343,7 @@ TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 3b: 验证轨迹存储（覆盖 true → 1，仍能获取 logprobs）
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids（覆盖 logprobs=true → 1 仍生效）..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_LOGP_TRUE}")
 
@@ -408,7 +408,7 @@ TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 4b: 验证轨迹存储（覆盖 5 → 1）
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids（覆盖 logprobs=5 → 1 仍生效）..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_LOGP_5}")
 
@@ -473,7 +473,7 @@ TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 5b: 验证轨迹存储
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_TOKS}")
 
@@ -539,7 +539,7 @@ TESTS_TOTAL=$((TESTS_TOTAL + 1))
 [ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 6b: 验证轨迹存储
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_NS_BOTH}")
 
@@ -604,7 +604,7 @@ else
 fi
 
 # 7b: 验证轨迹存储
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids（间接证明流式强制覆盖生效）..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_NO_PARAM}")
 
@@ -670,7 +670,7 @@ else
 fi
 
 # 8b: 验证轨迹存储（覆盖 true → 1）
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_LOGP_TRUE}")
 
@@ -736,7 +736,7 @@ else
 fi
 
 # 9b: 验证轨迹存储（覆盖 5 → 1）
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_LOGP_5}")
 
@@ -802,7 +802,7 @@ else
 fi
 
 # 10b: 验证轨迹存储
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_TOKS}")
 
@@ -869,7 +869,7 @@ else
 fi
 
 # 11b: 验证轨迹存储
-sleep 2
+sleep 0.5
 log_info "验证轨迹存储包含 logprobs 和 token_ids..."
 TRAJ_VERIFY=$(verify_trajectory_logprobs_token_ids "${SESSION_S_BOTH}")
 

@@ -58,7 +58,7 @@ assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 REGISTER_RUN_ID=$(json_get "$REGISTER_BODY" "run_id")
 assert_eq "$CLAUDE_TEST_RUN_ID" "$REGISTER_RUN_ID" "run_id 应为 ${CLAUDE_TEST_RUN_ID}"
 
-sleep 1
+sleep 0.3
 
 echo ""
 

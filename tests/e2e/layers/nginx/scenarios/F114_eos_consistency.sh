@@ -60,7 +60,7 @@ assert_http_status "200" "$REGISTER_STATUS" "注册模型 HTTP 状态码应为 2
 REGISTER_RESULT=$(json_get "$REGISTER_BODY" "status")
 assert_eq "success" "$REGISTER_RESULT" "注册模型应返回 success"
 
-sleep 2
+sleep 0.5
 
 echo ""
 
@@ -367,13 +367,14 @@ else:
         errors.append('第2轮 response_text 不以 <|im_end|> 结尾（re-decode 未生效）')
 
     # 验证 full_conversation_text = prompt + response（正确包含 response_text 作为后缀）
+    # 验证 full_conversation_text = prompt + response（正确包含 response_text 作为后缀）
     if r2_resp_text and r2_text:
         if len(r2_text) <= len(r2_resp_text):
             errors.append(f'第2轮 full_conversation_text 长度({len(r2_text)})应 > response_text({len(r2_resp_text)})')
         elif not r2_text.endswith(r2_resp_text):
             errors.append('第2轮 full_conversation_text 应以 response_text 结尾')
 
-# 验证第2轮 cache_hit_tokens（TITO 模式下 <think> 块可能导致缓存未命中，不强制要求 > 0）
+	# 验证第2轮 cache_hit_tokens（TITO 模板修复后前缀匹配应正常工作）
 r2_cache = r2.get('cache_hit_tokens', -1)
 
 if errors:

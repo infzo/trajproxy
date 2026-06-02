@@ -50,7 +50,7 @@ for run_id in "${MODEL_RUN_IDS[@]}"; do
     log_success "模型 ${MODEL_NAME} (run_id: ${run_id}) 注册成功（仅存储配置）"
 done
 
-sleep 1
+sleep 0.3
 echo ""
 
 # 步骤 2: 首轮请求 — 逐个触发懒加载
