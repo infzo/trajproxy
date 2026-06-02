@@ -116,11 +116,11 @@ class TokenPipeline(BasePipeline):
             context = await self._decode_response(context)
             context.decode_duration_ms = (time.perf_counter() - t0) * 1000
 
+            # 更新统计信息（必须在 _build_response 之前，因为 builder 需要 usage 信息）
+            self._update_stats(context)
+
             # 阶段 5: 构建响应
             context = self._build_response(context)
-
-            # 更新统计信息
-            self._update_stats(context)
 
             self._update_timing(context)
 

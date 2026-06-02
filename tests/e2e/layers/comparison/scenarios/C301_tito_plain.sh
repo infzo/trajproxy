@@ -20,7 +20,7 @@ TEST_SESSION_PATH="s/${TEST_RUN_ID}/${TEST_SESSION_ID}"
 # 步骤 1: 注册模型（TITO 模式）
 # ========================================
 log_step "步骤 1: 注册模型（TITO 模式, token_in_token_out: true）"
-register_model "$TEST_RUN_ID" "$COMPARISON_MODEL_NAME" "true"
+register_model "$TEST_RUN_ID" "$COMPARISON_MODEL_NAME" "true" "" "${COMPARISON_REASONING_PARSER}"
 
 echo ""
 
