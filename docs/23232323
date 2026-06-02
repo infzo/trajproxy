@@ -1,0 +1,169 @@
+verl_conf:
+  extras:
+    enable_stepwise_advantage: true  # step or token
+    delta: 2  # 清理 x 个版本前的旧权重
+    update_weights_interval: 1  # 权重更新间隔
+    validate_num_samples: 2 # 5 # 验证数据采样fg
+    init_num_group_batches: 1 # 从DataLoader首次加载数据批次数量 TODO: 与train_server.py中DEFAULT_BATCH_SIZE参数功能一致，需要清理其中一个
+    max_queue_size: 256
+    weight_save_dir: ${hydra:runtime.cwd}/weights_1/
+    consumed_train_samples: 0 # 已处理的样本数量 断点续传？
+    data_loader:
+      train_data_path: /models/x00805158/data/sandbox_data_convert_v3_qwen35_0515/rl
+      split: 100,0,0
+      seq_length: 8192
+      train_iters: ${verl_conf.total_train_steps}
+      global_batch_size: ${verl_conf.data.train_batch_size}
+      num_workers: 1
+      seed: 0
+      dataset_additional_keys: ['labels']
+      no_shuffle: false
+      test_data_path:
+      is_pairwise_dataset: false
+  total_train_steps: 200
+  data:
+    gen_batch_size: 1 # Number of samples generated, currently only support 1, 当前应该不生效
+    return_raw_chat: True
+    train_batch_size: 4
+  actor_rollout_ref:
+    model:
+      path: /models/x00805158/models/Qwen3.5-27B
+      use_remove_padding: False
+      enable_gradient_checkpointing: True
+      enable_activation_offload: False
+    hybrid_engine: False
+    rollout:
+      n: ${verl_conf.rollout.n}
+      name: vllm
+      mode: async
+      log_prob_micro_batch_size_per_gpu: 1
+      calculate_log_probs: True
+      log_prob_use_dynamic_bsz: False
+      log_prob_micro_batch_size: 1
+      # log_prob_micro_batch_size_per_gpu: 1
+      tensor_model_parallel_size: 4
+      gpu_memory_utilization: 0.1
+      free_cache_engine: true
+    actor:
+      ppo_micro_batch_size_per_gpu: 1
+      ppo_mini_batch_size: 1
+      strategy: megatron
+      use_dynamic_bsz: False
+      use_torch_compile: False
+      use_kl_loss: False
+      kl_loss_coef: 0.01
+      kl_loss_type: low_var_kl
+      entropy_coeff: 0
+      megatron:
+        _target_: verl.workers.config.McoreEngineConfig
+        vanilla_mbridge: False
+        use_mbridge: True
+        use_remove_padding: False
+        override_transformer_config:
+          recompute_granularity: full
+          recompute_method: uniform
+          recompute_num_layers: 1
+          overlap_param_gather: true
+          overlap_grad_reduce: true
+          apply_rope_fusion: False
+          moe_router_load_balancing_type: "none"
+          moe_permute_fusion: False
+          moe_grouped_gemm: False
+          gradient_accumulation_fusion: False
+          use_flash_attn: True
+          attention_mask_type: causal
+          calculate_per_token_loss: False
+          reset_position_ids: False
+          reset_attention_mask: False
+          context_parallel_algo: kvallgather_cp_algo
+          num_layers_in_first_pipeline_stage: null  # 5
+          num_layers_in_last_pipeline_stage: null   # 1
+          use_fused_moe_token_permute_and_unpermute: False
+          moe_aux_loss_coeff: 0.01
+          moe_z_loss_coeff: 0.001
+        pipeline_model_parallel_size: 2
+        tensor_model_parallel_size: 2
+        context_parallel_size: 8
+        expert_model_parallel_size: 1
+        expert_tensor_parallel_size: 1
+        sequence_parallel: true
+        use_distributed_optimizer: true
+        dtype: bfloat16
+        router_replay:
+          _target_: verl.workers.config.EngineRouterReplayConfig
+          mode: disabled
+          record_file: null
+          replay_file: null
+        param_offload: True
+        optimizer_offload: True
+        grad_offload: True
+      optim:
+        # optimizer: adam
+        total_training_steps: ${verl_conf.total_train_steps}
+        weight_decay: 0.01
+        lr_warmup_steps: 10
+        lr_decay_steps: ${verl_conf.total_train_steps}
+        override_optimizer_config:
+          optimizer_offload_fraction: 1
+          overlap_cpu_optimizer_d2h_h2d: True
+          use_precision_aware_optimizer: True
+          optimizer_cpu_offload: True
+      checkpoint:
+        _target_: verl.trainer.config.CheckpointConfig
+        save_contents: [ 'model' ]
+        load_contents: [ 'model' ]
+    ref:
+      # log_prob_micro_batch_size: 4
+      log_prob_micro_batch_size_per_gpu: 1
+      log_prob_use_dynamic_bsz: False
+      megatron:
+        pipeline_model_parallel_size: ${verl_conf.actor_rollout_ref.actor.megatron.pipeline_model_parallel_size}
+        tensor_model_parallel_size: ${verl_conf.actor_rollout_ref.actor.megatron.tensor_model_parallel_size}
+        context_parallel_size: ${verl_conf.actor_rollout_ref.actor.megatron.context_parallel_size}
+        expert_model_parallel_size: ${verl_conf.actor_rollout_ref.actor.megatron.expert_model_parallel_size}
+        expert_tensor_parallel_size: ${verl_conf.actor_rollout_ref.actor.megatron.expert_tensor_parallel_size}
+        sequence_parallel: ${verl_conf.actor_rollout_ref.actor.megatron.sequence_parallel}
+        use_distributed_optimizer: ${verl_conf.actor_rollout_ref.actor.megatron.use_distributed_optimizer}
+        override_transformer_config:
+          recompute_granularity: full
+          recompute_method: uniform
+          recompute_num_layers: ${verl_conf.actor_rollout_ref.actor.megatron.override_transformer_config.recompute_num_layers}
+          apply_rope_fusion: ${verl_conf.actor_rollout_ref.actor.megatron.override_transformer_config.apply_rope_fusion}
+          moe_router_load_balancing_type: "none"
+          moe_permute_fusion: ${verl_conf.actor_rollout_ref.actor.megatron.override_transformer_config.moe_permute_fusion}
+          moe_grouped_gemm: ${verl_conf.actor_rollout_ref.actor.megatron.override_transformer_config.moe_grouped_gemm}
+          gradient_accumulation_fusion: False
+          use_flash_attn: True
+          attention_mask_type: causal
+          calculate_per_token_loss: False
+          reset_position_ids: False
+          reset_attention_mask: False
+          context_parallel_algo: kvallgather_cp_algo
+          num_layers_in_first_pipeline_stage: ${verl_conf.actor_rollout_ref.actor.megatron.override_transformer_config.num_layers_in_first_pipeline_stage}
+          num_layers_in_last_pipeline_stage: ${verl_conf.actor_rollout_ref.actor.megatron.override_transformer_config.num_layers_in_last_pipeline_stage}
+          use_fused_moe_token_permute_and_unpermute: ${verl_conf.actor_rollout_ref.actor.megatron.override_transformer_config.use_fused_moe_token_permute_and_unpermute}
+          moe_aux_loss_coeff: 0.01
+          moe_z_loss_coeff: 0.001
+  critic:
+    strategy: megatron
+  trainer:
+    device: npu
+    nnodes: 4
+    n_gpus_per_node: 8
+    rollout_data_dir: ${hydra:runtime.cwd}/outputs/rollout_data_dir/
+    default_local_dir: ${hydra:runtime.cwd}/weights_1/rollout_data_dir/ # ckpt
+    logger: ['console','tensorboard']
+    save_freq: 200
+  rollout:
+    n: 4
+    nnodes: ${verl_conf.trainer.nnodes}
+    n_gpus_per_node: ${verl_conf.trainer.n_gpus_per_node}
+    total_rollout_steps: ${verl_conf.total_train_steps}
+    test_freq: 100
+  async_training:
+    use_rollout_log_probs: False
+    staleness_threshold: 0
+    trigger_parameter_sync_step: 1 # 多久 iter 同步一次权重
+    partial_rollout: False
+  algorithm:
+    adv_estimator: grpo
