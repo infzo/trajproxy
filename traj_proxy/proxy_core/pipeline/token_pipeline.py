@@ -552,6 +552,13 @@ class TokenPipeline(BasePipeline):
                 if delta_msg:
                     content_delta = delta_msg.content
                     reasoning_delta = delta_msg.reasoning
+                    # 防御性修复: 在 reasoning 阶段内，如果 parser 返回了 content
+                    # 但未返回 reasoning（通常因为 previous_token_ids 未追踪到
+                    # <think> token），将 content 修正为 reasoning。
+                    # 这确保即使状态追踪有遗漏，推理文本也不会泄漏到 content 字段。
+                    if not reasoning_delta and content_delta:
+                        reasoning_delta = content_delta
+                        content_delta = None
 
                 # 检查推理是否在此 delta 中结束
                 if self.parser.is_reasoning_end_streaming(current_token_ids, delta_token_ids):
