@@ -262,49 +262,89 @@ assert_http_status "200" "$TRAJ_STATUS" "查询轨迹 HTTP 状态码应为 200"
 TRAJ_COUNT=$(json_get_number "$TRAJ_BODY" "count")
 assert_eq "3" "$TRAJ_COUNT" "轨迹记录数应为 3"
 
-# 使用 python3 提取每条记录的 cache_hit_tokens（按 start_time DESC 排序）
-# records[0] = 第3轮（最新），records[1] = 第2轮，records[2] = 第1轮（最早）
+# 使用 python3 提取每条记录的 cache_hit_tokens 和 token 数组长度
+# records 按 start_time 升序排列（最早的在前）
 CACHE_INFO=$(echo "$TRAJ_BODY" | python3 -c "
 import sys, json
 data = json.loads(sys.stdin.read())
 records = data.get('records', [])
 if len(records) >= 3:
-    # 按 start_time 升序重新排列（最早的在前）
     sorted_records = sorted(records, key=lambda r: r.get('start_time', ''))
-    r1 = sorted_records[0]  # 第1轮（最早）
-    r2 = sorted_records[1]  # 第2轮
-    r3 = sorted_records[2]  # 第3轮（最新）
-    print(f\"{r1.get('cache_hit_tokens', -1)} {r2.get('cache_hit_tokens', -1)} {r3.get('cache_hit_tokens', -1)}\")
+    r1 = sorted_records[0]
+    r2 = sorted_records[1]
+    r3 = sorted_records[2]
+
+    # cache_hit_tokens
+    r1_cache = r1.get('cache_hit_tokens', -1)
+    r2_cache = r2.get('cache_hit_tokens', -1)
+    r3_cache = r3.get('cache_hit_tokens', -1)
+
+    # token 数组长度
+    r1_tl = len(r1.get('token_ids') or [])
+    r1_rl = len(r1.get('response_ids') or [])
+    r1_fl = len(r1.get('full_conversation_token_ids') or [])
+
+    r2_tl = len(r2.get('token_ids') or [])
+    r2_rl = len(r2.get('response_ids') or [])
+    r2_fl = len(r2.get('full_conversation_token_ids') or [])
+
+    r3_tl = len(r3.get('token_ids') or [])
+    r3_rl = len(r3.get('response_ids') or [])
+    r3_fl = len(r3.get('full_conversation_token_ids') or [])
+
+    print(f'{r1_cache} {r2_cache} {r3_cache} '
+          f'{r1_tl} {r1_rl} {r1_fl} '
+          f'{r2_tl} {r2_rl} {r2_fl} '
+          f'{r3_tl} {r3_rl} {r3_fl}')
 else:
-    print('-1 -1 -1')
+    print('-1 -1 -1 0 0 0 0 0 0 0 0 0')
 " 2>/dev/null)
 
 ROUND1_CACHE=$(echo "$CACHE_INFO" | awk '{print $1}')
 ROUND2_CACHE=$(echo "$CACHE_INFO" | awk '{print $2}')
 ROUND3_CACHE=$(echo "$CACHE_INFO" | awk '{print $3}')
+R1_TL=$(echo "$CACHE_INFO" | awk '{print $4}')
+R1_RL=$(echo "$CACHE_INFO" | awk '{print $5}')
+R1_FL=$(echo "$CACHE_INFO" | awk '{print $6}')
+R2_TL=$(echo "$CACHE_INFO" | awk '{print $7}')
+R2_RL=$(echo "$CACHE_INFO" | awk '{print $8}')
+R2_FL=$(echo "$CACHE_INFO" | awk '{print $9}')
+R3_TL=$(echo "$CACHE_INFO" | awk '{print $10}')
+R3_RL=$(echo "$CACHE_INFO" | awk '{print $11}')
+R3_FL=$(echo "$CACHE_INFO" | awk '{print $12}')
 
 log_info "第1轮 cache_hit_tokens: ${ROUND1_CACHE}"
 log_info "第2轮 cache_hit_tokens: ${ROUND2_CACHE}"
 log_info "第3轮 cache_hit_tokens: ${ROUND3_CACHE}"
 
-# 验证第1轮：cache_hit_tokens == 0（无历史对话）
+# ===== 校验 1: cache_hit_tokens == 前一轮 full_conversation_token_ids 长度 =====
+log_info "--- 校验 1: cache_hit_tokens == 前一轮 full_conversation_token_ids 长度 ---"
+
+# 第1轮：cache_hit_tokens == 0（无历史对话）
 assert_eq "0" "$ROUND1_CACHE" "第1轮 cache_hit_tokens 应为 0（无历史）"
 
-# 验证第2轮：cache_hit_tokens > 0（复用第1轮）
-if [ "$ROUND2_CACHE" -gt 0 ] 2>/dev/null; then
-    log_success "第2轮 cache_hit_tokens=${ROUND2_CACHE} > 0，已复用第1轮缓存"
-else
-    log_error "第2轮 cache_hit_tokens 应 > 0（复用第1轮），实际为: ${ROUND2_CACHE}"
-    TEST_FAILED=1
-fi
+# 第2轮：cache_hit_tokens == len(第1轮 full_conversation_token_ids)
+assert_eq "$R1_FL" "$ROUND2_CACHE" \
+    "第2轮 cache_hit_tokens(${ROUND2_CACHE}) == 第1轮 full_conversation_token_ids 长度(${R1_FL})"
 
-# 验证第3轮：cache_hit_tokens > 第2轮的 cache_hit_tokens（复用第2轮，对话更长）
-if [ "$ROUND3_CACHE" -gt "$ROUND2_CACHE" ] 2>/dev/null; then
-    log_success "第3轮 cache_hit_tokens=${ROUND3_CACHE} > 第2轮 ${ROUND2_CACHE}，已复用第2轮缓存"
-else
-    log_error "第3轮 cache_hit_tokens 应 > 第2轮 ${ROUND2_CACHE}（复用第2轮），实际为: ${ROUND3_CACHE}"
-    TEST_FAILED=1
-fi
+# 第3轮：cache_hit_tokens == len(第2轮 full_conversation_token_ids)
+assert_eq "$R2_FL" "$ROUND3_CACHE" \
+    "第3轮 cache_hit_tokens(${ROUND3_CACHE}) == 第2轮 full_conversation_token_ids 长度(${R2_FL})"
+
+# ===== 校验 2: full_conversation_token_ids 长度 == token_ids + response_ids 长度 =====
+log_info "--- 校验 2: len(full_conversation_token_ids) == len(token_ids) + len(response_ids) ---"
+
+R1_SUM=$((R1_TL + R1_RL))
+assert_eq "$R1_SUM" "$R1_FL" \
+    "第1轮 len(token_ids)(${R1_TL}) + len(response_ids)(${R1_RL}) == len(full_conv)(${R1_FL})"
+
+R2_SUM=$((R2_TL + R2_RL))
+assert_eq "$R2_SUM" "$R2_FL" \
+    "第2轮 len(token_ids)(${R2_TL}) + len(response_ids)(${R2_RL}) == len(full_conv)(${R2_FL})"
+
+R3_SUM=$((R3_TL + R3_RL))
+assert_eq "$R3_SUM" "$R3_FL" \
+    "第3轮 len(token_ids)(${R3_TL}) + len(response_ids)(${R3_RL}) == len(full_conv)(${R3_FL})"
 
 echo ""
 
