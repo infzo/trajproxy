@@ -4,6 +4,85 @@
 
 ---
 
+## [0.3.0] - 2026-06-02
+
+**类型**: 重构 + Bug 修复 + 功能增强
+
+### 重构
+- **流式解析三阶段状态机**: 引入 `StreamState` 数据类和 `Parser.parse_delta()` 方法，统一流式解析为 reasoning→tool_call→content 三阶段状态机，对齐 vLLM 原生解析流程。状态管理从 `TokenPipeline` 移至 `Parser.parse_delta()`，职责更清晰
+- **Hermes 工具解析器重写**: 移除脆弱的 `partial_json_parser` 依赖，状态跟踪改为基于完整 `current_text` 的重新解析。多工具调用的增量变更使用基于差异的逻辑，比旧增量 JSON 解析更可靠。`_extract_tool_calls_streaming` 严格对齐 vLLM 接口（`_build_request` 转换 + 参数透传）
+- **Docker 网络隔离重构**: compose 网络重命名为 `traj-proxy-compose-network`，archiver 测试 compose 采用双网络设计（内部 `traj-proxy-archiver-network` + 外部 `traj-proxy-compose-network`），隔离 MinIO 和数据库流量
+- **E2E 测试参数化重构**: 模型名、tokenizer 路径、parser 配置统一通过环境变量控制（`DEFAULT_MODEL_NAME`、`DEFAULT_TOKENIZER_PATH`、`DEFAULT_TOOL_PARSER`、`DEFAULT_REASONING_PARSER`），测试场景不再硬编码 Qwen 特定配置
+- **E2E 测试改用自然语言 Prompt**: 所有测试场景的 prompt 从强制格式注入（如 `toral<function=...>`）改为自然语言描述，使测试更贴近真实使用场景
+- **test(e2e): Comparison 对比层**: 新增第 4 层对比测试（C300-C304），发送相同请求到 vLLM（参考实现）和 trajproxy，递归对比响应字段。覆盖 direct/TITO × plain/tool/reasoning/reasoning+tool 5 种组合，支持非流式和流式两种模式
+- **文档目录重构**: 按 design（Why）/api（What）/guide（How）/tools 四象限重组织，新增 `quickstart.md` 和 `consistency-report.md`，清理过时经验文档
+- **build_image.sh 通用化**: 支持 `--type compose|allinone` 参数，单一脚本构建两种镜像，移除重复代码
+
+### 新增功能
+- **DeepSeekR1ReasoningParser**: 新增基于 `<think>`/`</think>` 标记的推理解析器，兼容 DeepSeek R1 和 Qwen3 系列。对齐 parser 配置（`deepseek_r1`）
+- **TestToolParser**: 新增 `qwen3_coder` XML 格式工具解析器（`<function=name>...</function>`），支持非流式提取和增量流式 diff
+- **流式 `prompt_token_ids` 支持**: 流式模式支持 vLLM `prompt_token_ids` 顶级字段扩展
+- **流式 raw_response 后端元数据**: DirectPipeline 流式模式使用后端真实元数据（`id`、`model`、`created`、`system_fingerprint`）替代合成值
+- **前缀缓存诊断增强**: 缓存未命中时输出详细诊断日志，包含候选匹配度和 EOS/think-token 模式检测
+- **`/dev/shm` 空间检查**: 容器启动时检查共享内存是否 ≥1.7GB，不足时警告 Ray 性能降级风险并提示 `--shm-size=2g`
+- **Docker 启动前自动清理**: `start_docker_compose.sh` 新增 stale network 和运行中容器清理，确保干净部署
+- **LiteLLM Prisma 基线迁移标记**: 全新数据库自动标记 baseline migration，修复 LiteLLM 启动失败问题（P3005）
+- **E2E 测试加速**: 新增 `CacheInferServer` 缓存推理响应，相同 prompt 命中缓存跳过推理（E2E 耗时大幅降低）。测试场景 sleep 系统性缩减（3s→1s, 2s→0.5s, 1s→0.3s）
+
+### Bug 修复
+- **Jinja2 `tojson` 过滤器对齐**: 用 `sort_keys=False` 的 lambda 替换 Jinja2 默认 `tojson` 过滤器，对齐 transformers 库的行为。修复多轮对话模板渲染不一致导致的前缀缓存失效（此为缓存一致性根因）
+- **流式推理阶段 content 泄露**: reasoning 阶段强制拦截 `content` 字段输出（防御性修复 × 2），防止推理未完成时内容泄露到客户端
+- **`stream_finished` 缩进错误**: `if context.stream_finished: break` 移到 `if chunk:` 块外，修复 parser 过滤掉最后 delta 时流永不终止的 bug
+- **TITO 流式推理 `previous_token_ids` 未更新**: `chunk` 被 parser 跳过时 `previous_token_ids` 保持更新，修复后续推理解析错误
+- **空白内容规范化为 None**: 空/空白 content 统一规范化为 `None`（`content: null`），与 vLLM 行为一致，避免下游客户端解析异常
+- **F108 streaming reasoning+tool 场景 tool_calls 缺失**: 提升 `max_tokens` 至 2048 并支持 `E2E_MAX_TOKENS` 环境变量控制，修复 token 不足导致工具调用被截断
+- **Claude reasoning 验证修复**: 修复 `thinking_delta` 和 `reasoning_content` 双格式检测，修复 Qwen3 缓存一致性断言
+- **`stream_builder._build_chunk`**: 增量 reasoning 追加时确保不追加多余的 "\\n"
+- **`DirectPipeline` logprobs 增量追加**: logprobs 的 `content` 列表改为增量 `extend` 而非替换，修复每次新 chunk 到达时之前 logprobs 被丢弃的 bug
+- **TITO 模式参数丢失**: 修复 `max_tokens`/`temperature` 参数在 TITO 模式下未透传的问题
+- **Comparison 层修复**: 健康检查稳定性、session 路由适配、stdout 日志污染修复、C301 TITO 模式 3 个问题修复、C302 补全 `reasoning_parser` 参数、流式 delta 字段全局完整性校验
+- **E2E 测试修复**: 修复 7 个失败用例，删除不可靠的 A104 定时轮询测试，F214 改用真实 vLLM 推理验证
+- **容器日志噪音修复**: allinone 启动时多个日志噪音问题修复（`PYTHONWARNINGS` 抑制 psycopg_pool RuntimeWarning 和 pydantic UserWarning）
+- **Supervisor archiver 集成**: 新增 `[program:traj_archiver]`，所有 Supervisor 进程组增加 `PYTHONWARNINGS` 环境变量控制
+
+### 测试
+- **F115**: 新增多轮 Reasoning+Tool 非流式测试（3 轮，含精确前缀缓存校验：`cache_hit_tokens == len(full_conversation_token_ids)`），修复 eval 注入风险改用 `printf -v`
+- **F116**: 新增多轮 Reasoning+Tool 流式测试（3 轮，流式 SSE chunk 重建 + 精确缓存校验）
+- **F106**: 前缀缓存校验从粗粒度 `cache_hit_tokens > 0` 升级为精确验证 `cache_hit_tokens` 和 `token_ids` 数组长度等价性
+- **F214**: 从 mock 改为真实 vLLM 推理验证 logprobs/token_ids 强制覆盖 + 返回剥离（非流式 7 步 + 流式 5 步），覆盖不传/传 true/传数值/组合参数等场景
+- **F113**: 从 3 轮简化为 2 轮，集成 reasoning 检测逻辑
+- **C300-C304**: 新增 comparison 对比层 5 个测试场景（direct/TITO × plain/tool/reasoning/reasoning+tool）
+- **F202-F205, F212-F213**: 适配参数化配置，改用自然语言 prompt
+- **F216/F218**: LRU 缓存命中/淘汰测试适配单一模型名 + 多 `run_id` 模式
+- **F107-F111**: 适配 parser 参数化配置和 Claude 格式回退验证
+
+### 配置更新
+- `proxy_workers.max_concurrent_requests`: 256 → 4096（适配高并发场景）
+- Docker compose: `traj_proxy` 新增 `host.docker.internal:host-gateway` extra_hosts，`depends_on db` 从 `service_started` 升级为 `service_healthy`
+- All-in-One 新增 `dockers/allinone/configs/archiver.yaml`（独立归档配置）
+- 新增 `E2E_SAMPLING_PARAMS` 环境变量控制测试确定性采样
+
+### 影响范围
+- `traj_proxy/proxy_core/parsers/parser_manager.py` - 三阶段状态机
+- `traj_proxy/proxy_core/parsers/vllm_compat/tool_parsers/hermes_tool_parser.py` - 解析器重写
+- `traj_proxy/proxy_core/parsers/vllm_compat/reasoning_parsers/deepseek_r1_reasoning_parser.py` - 新增
+- `custom_parsers/tool_parsers/test_tool_parser.py` - 新增 XML 格式解析器
+- `traj_proxy/proxy_core/pipeline/token_pipeline.py` - 状态机适配 + Bug 修复
+- `traj_proxy/proxy_core/pipeline/direct_pipeline.py` - 后端元数据 + logprobs 增量追加
+- `traj_proxy/proxy_core/converters/message_converter.py` - Jinja2 tojson 对齐
+- `traj_proxy/proxy_core/converters/token_converter.py` - skip_special_tokens 调整
+- `traj_proxy/proxy_core/builders/openai_builder.py` - 内容规范化为 None
+- `traj_proxy/proxy_core/cache/prefix_cache.py` - 诊断日志增强
+- `traj_proxy/proxy_core/infer_client.py` - 参数映射优先级
+- `dockers/compose/` - 网络隔离重构
+- `dockers/allinone/` - archiver 集成 + /dev/shm 检查
+- `scripts/` - 启动脚本增强
+- `docs/` - 文档目录重构
+- `tests/e2e/` - 参数化重构 + 新测试场景 + comparison 对比层
+- `configs/config.yaml` - 并发上限调整
+
+---
+
 ## [0.2.5] - 2026-05-28
 
 **类型**: 功能增强
