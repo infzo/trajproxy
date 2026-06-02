@@ -232,9 +232,9 @@ class TokenPipeline(BasePipeline):
                     previous_text = context.stream_buffer_text
                     previous_token_ids = context.stream_buffer_ids.copy()
 
-                        # 如果是最后一个 chunk，结束流
-                        if context.stream_finished:
-                            break
+                    # 如果是最后一个 chunk，结束流
+                    if context.stream_finished:
+                        break
 
             # 记录推理总耗时（从开始推理到流结束）
             context.inference_duration_ms = (time.perf_counter() - infer_start_time) * 1000
