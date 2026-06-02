@@ -334,26 +334,23 @@ class Parser:
         if self._tool_parser is None:
             return None, function_name_returned
 
+        # 转换 request 为 ChatCompletionRequest（tool parser 需要）
+        req = self._build_request(request)
+
         # 使用 tool parser 的 extract_tool_calls_streaming 方法
         if hasattr(self._tool_parser, 'extract_tool_calls_streaming'):
-            try:
-                result = self._tool_parser.extract_tool_calls_streaming(
-                    previous_text=previous_text,
-                    current_text=current_text,
-                    delta_text=delta_text,
-                    previous_token_ids=previous_token_ids,
-                    current_token_ids=current_token_ids,
-                    delta_token_ids=delta_token_ids,
-                    request=request,
-                    tool_call_idx=tool_call_idx,
-                    tool_call_id_type=tool_call_id_type,
-                    function_name_returned=function_name_returned,
-                )
-                return result, function_name_returned
-            except Exception:
-                _logger = logging.getLogger(__name__)
-                _logger.debug("tool parser streaming failed, falling back", exc_info=True)
-                return None, function_name_returned
+            return self._tool_parser.extract_tool_calls_streaming(
+                previous_text=previous_text,
+                current_text=current_text,
+                delta_text=delta_text,
+                previous_token_ids=previous_token_ids,
+                current_token_ids=current_token_ids,
+                delta_token_ids=delta_token_ids,
+                request=req,
+                tool_call_idx=tool_call_idx,
+                tool_call_id_type=tool_call_id_type,
+                function_name_returned=function_name_returned,
+            ), function_name_returned
 
         return None, function_name_returned
 
