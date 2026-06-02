@@ -359,6 +359,13 @@ class TokenPipeline(BasePipeline):
 
         # 3. full_conversation 自然一致（text 和 token_ids 都含 EOS）
         context.full_conversation_text = context.prompt_text + context.response_text
+        # 依据 Qwen3 chat template 的 last_query_index 机制：
+        # 当前轮模型输出含 <think>...</think>，但下一轮作为历史 assistant
+        # 消息时模板会剥离 think 块。为保持前缀缓存一致性，
+        # 存储时移除 <think>...</think> 使格式与下一轮模板渲染结果对齐。
+        context.full_conversation_text = self._strip_think_for_caching(
+            context.full_conversation_text
+        )
         if context.token_ids and context.response_ids:
             context.full_conversation_token_ids = context.token_ids + context.response_ids
         else:
@@ -370,6 +377,20 @@ class TokenPipeline(BasePipeline):
         )
 
         return context
+
+    @staticmethod
+    def _strip_think_for_caching(text: str) -> str:
+        """依据 Qwen3 chat template 的 last_query_index 机制剥离 think 块。
+
+        vLLM 使用 tokenizer.apply_chat_template 生成 prompt，
+        Qwen3 模板中仅最后一个 assistant 响应包装 <think>，
+        历史 assistant 消息不包装。但模型原始输出始终含 <think>。
+        为保持 full_conversation_text 与下一轮模板渲染的 prompt_text
+        格式一致，存储前需移除 <think>...</think> 块。
+        """
+        import re
+        # 移除 prompt 和 response 中所有 <think>...</think> 块及其后续空行
+        return re.sub(r'<think>.*?</think>\n*', '', text, flags=re.DOTALL)
 
     def _update_stats(self, context: ProcessContext):
         """更新统计信息"""

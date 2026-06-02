@@ -194,7 +194,8 @@ if msg.get('tool_calls'):
     msg_dict['tool_calls'] = msg['tool_calls']
 if reasoning:
     msg_dict['reasoning_content'] = reasoning
-if content:
+# 仅当 content 有实际文本时才设置，纯空白字符会导致多轮 prompt_text 不一致
+if content and content.strip():
     msg_dict['content'] = content
 print(json.dumps(msg_dict))
 " 2>/dev/null)

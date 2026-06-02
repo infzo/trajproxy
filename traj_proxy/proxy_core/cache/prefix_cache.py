@@ -58,6 +58,8 @@ class PrefixMatchCache(BaseCacheStrategy):
 
         # 如果没有 session_id 或 request_repository，直接编码
         if not context.session_id or not self.request_repository:
+            logger.debug(f"[Cache] SKIP: session_id={context.session_id}, "
+                         f"repo={self.request_repository is not None}")
             token_ids = tokenizer.encode(text, add_special_tokens=False)
             context.uncached_token_ids = token_ids
             return token_ids
@@ -66,6 +68,9 @@ class PrefixMatchCache(BaseCacheStrategy):
         t_db_start = time.perf_counter()
         history = await self.request_repository.get_prefix_candidates(context.session_id)
         context.cache_db_query_ms = (time.perf_counter() - t_db_start) * 1000
+
+        logger.debug(f"[Cache] session={context.session_id}, history_count={len(history)}, "
+                     f"prompt_len={len(text)}")
 
         # 找到最长前缀匹配（匹配完整对话文本）
         t_match_start = time.perf_counter()
@@ -81,6 +86,9 @@ class PrefixMatchCache(BaseCacheStrategy):
             context.cache_hit_tokens = len(cached_tokens) if cached_tokens else 0
             context.cached_token_ids = cached_tokens or []
 
+            logger.debug(f"[Cache] HIT: cached_len={len(cached_text)}, "
+                         f"cached_tokens={context.cache_hit_tokens}")
+
             # 未匹配的文本
             uncached_text = text[len(cached_text):]
             context.uncached_text = uncached_text
@@ -94,7 +102,23 @@ class PrefixMatchCache(BaseCacheStrategy):
                 context.uncached_token_ids = []
                 return cached_tokens or []
         else:
-            # 没有匹配，直接编码
+            # 没有匹配：记录诊断信息
+            if history:
+                for i, h in enumerate(history[:3]):
+                    ct = h.get("full_conversation_text", "")
+                    # 计算公共前缀长度
+                    prefix_len = 0
+                    for a, b in zip(text, ct):
+                        if a != b:
+                            break
+                        prefix_len += 1
+                    logger.debug(f"[Cache] MISS candidate[{i}]: cached_len={len(ct)}, "
+                                 f"common_prefix={prefix_len}, "
+                                 f"cached_end={ct[-60:]!r}, "
+                                 f"text_at_diff={text[prefix_len:prefix_len+60]!r}")
+            else:
+                logger.debug(f"[Cache] MISS: no history for session={context.session_id}")
+
             token_ids = tokenizer.encode(text, add_special_tokens=False)
             context.uncached_token_ids = token_ids
             return token_ids

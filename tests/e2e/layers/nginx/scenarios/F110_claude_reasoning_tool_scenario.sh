@@ -157,19 +157,27 @@ assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
 assert_contains "$CHAT_BODY" "id" "响应应包含 id 字段"
 assert_contains "$CHAT_BODY" "content" "响应应包含 content 字段"
 
-# 验证 reasoning 字段非空（Reasoning 场景关键字段）
+# 验证 thinking 内容块非空（Claude API 格式中 reasoning 位于 content[].thinking 块）
 REASONING_DETECTED=false
-if echo "$CHAT_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*null'; then
-    log_error "reasoning 字段为 null，组合场景应有推理内容"
-    TEST_FAILED=1
-elif echo "$CHAT_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*""'; then
-    log_error "reasoning 字段为空字符串，组合场景应有推理内容"
-    TEST_FAILED=1
-elif echo "$CHAT_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*"'; then
-    log_success "reasoning 字段非空，检测到推理内容"
+REASONING_CHECK=$(echo "$CHAT_BODY" | python3 -c "
+import sys, json
+try:
+    data = json.loads(sys.stdin.read())
+    content = data.get('content', [])
+    if isinstance(content, list):
+        for block in content:
+            if block.get('type') == 'thinking' and block.get('thinking', '').strip():
+                print('PASS:' + block['thinking'][:80])
+                sys.exit(0)
+    print('FAIL')
+except Exception as e:
+    print('FAIL:' + str(e))
+" 2>/dev/null)
+if echo "$REASONING_CHECK" | grep -q '^PASS:'; then
+    log_success "thinking 内容块非空，检测到推理内容: $(echo "$REASONING_CHECK" | sed 's/^PASS://')..."
     REASONING_DETECTED=true
 else
-    log_error "响应中无 reasoning 字段，组合场景应有推理内容"
+    log_error "响应中无 type=thinking 内容块或 thinking 字段为空，组合场景应有推理内容 (detail: ${REASONING_CHECK})"
     TEST_FAILED=1
 fi
 
