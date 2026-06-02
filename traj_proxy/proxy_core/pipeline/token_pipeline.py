@@ -451,6 +451,11 @@ class TokenPipeline(BasePipeline):
 
         # 使用解析结果覆盖原始内容
         effective_content = parsed_content
+        # 防御性防护：reasoning 阶段内禁止发射 content
+        # 即使 state machine 出现任何遗漏（如 previous_token_ids 未同步），
+        # 只要 reasoning 尚未结束，content 就不允许输出。
+        if not context.reasoning_ended and effective_content:
+            effective_content = None
         effective_tool_calls = parsed_tool_calls or tool_calls_delta
 
         # 累积 logprobs（每个 chunk 的 choice 中可能携带，需合并数组）
