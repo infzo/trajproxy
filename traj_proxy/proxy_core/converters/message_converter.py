@@ -66,6 +66,14 @@ class MessageConverter(BaseConverter):
             raise FileNotFoundError(f"TITO 模板文件不存在: {path}")
 
         env = Environment(loader=FileSystemLoader(template_path.parent))
+        # 替换 tojson filter，与 transformers 库行为一致（sort_keys=False）
+        # transformers 在 _cached_compile_jinja_template 中重写了 tojson，
+        # 使用 sort_keys=False 保持 dict key 原始顺序。
+        # Jinja2 默认 tojson 会按字母排序 dict keys，导致 prompt 文本与 vLLM 不一致，
+        # 进而产生不同的 token 计数和模型输出。
+        env.filters["tojson"] = lambda x, ensure_ascii=False, indent=None, separators=None, sort_keys=False: json.dumps(
+            x, ensure_ascii=ensure_ascii, indent=indent, separators=separators, sort_keys=sort_keys
+        )
         return env.get_template(template_path.name)
 
     async def convert(
