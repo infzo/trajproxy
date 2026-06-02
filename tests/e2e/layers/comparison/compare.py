@@ -171,9 +171,9 @@ def compare_nonstream(vllm_data: dict, proxy_data: dict, label: str) -> tuple:
     proxy_choices = proxy_data.get("choices", [])
 
     if len(vllm_choices) != len(proxy_choices):
-        errors.append(f"choices 镗度不一致 (vllm={len(vllm_choices)}, proxy={len(proxy_choices)})")
+        errors.append(f"choices 长度不一致 (vllm={len(vllm_choices)}, proxy={len(proxy_choices)})")
     else:
-        infos.append(f"  choices 镗度一致 ({len(vllm_choices)})")
+        infos.append(f"  choices 长度一致 ({len(vllm_choices)})")
 
         for i, (v_ch, p_ch) in enumerate(zip(vllm_choices, proxy_choices)):
             ch_path = f"choices[{i}]"
@@ -405,7 +405,7 @@ def compare_stream(vllm_chunks: list, proxy_chunks: list, label: str) -> tuple:
         p_choices = p_ch.get("choices", [])
 
         if len(v_choices) != len(p_choices):
-            errors.append(f"{ch_path}.choices 镗度不一致 (vllm={len(v_choices)}, proxy={len(p_choices)})")
+            errors.append(f"{ch_path}.choices 长度不一致 (vllm={len(v_choices)}, proxy={len(p_choices)})")
             continue
 
         for j, (vc, pc) in enumerate(zip(v_choices, p_choices)):
@@ -414,23 +414,38 @@ def compare_stream(vllm_chunks: list, proxy_chunks: list, label: str) -> tuple:
             # index
             compare_recursive(vc.get("index"), pc.get("index"), f"{c_path}.index", errors, infos, skip_fields=STREAM_SKIP_FIELDS)
 
-            # delta 字段集合（只检查字段名是否一致，跳过动态字段）
-            v_delta_keys = set(vc.get("delta", {}).keys()) - STREAM_SKIP_FIELDS
-            p_delta_keys = set(pc.get("delta", {}).keys()) - STREAM_SKIP_FIELDS
-
-            v_missing = v_delta_keys - p_delta_keys
-            p_extra = p_delta_keys - v_delta_keys
-
-            if v_missing:
-                errors.append(f"{c_path}.delta: proxy 缺失字段 {sorted(v_missing)}")
-            if p_extra:
-                infos.append(f"  {c_path}.delta: proxy 有额外字段 {sorted(p_extra)}")
-
-            # finish_reason
+            # delta 字段通过下方全局完整性检查验证（不按索引逐 chunk 对比）
             v_fr = vc.get("finish_reason")
             p_fr = pc.get("finish_reason")
             if v_fr is not None and p_fr is not None:
                 compare_recursive(v_fr, p_fr, f"{c_path}.finish_reason", errors, infos, skip_fields=STREAM_SKIP_FIELDS)
+
+    # delta 字段全局完整性检查
+    # 跨所有 chunk 收集字段名集合，验证 proxy 响应中包含了 vLLM 的所有 delta 字段
+    # 不按索引逐 chunk 对比，因为 proxy 添加的额外请求参数（logprobs/token_ids）
+    # 会导致上游 vLLM 产生不同的 chunk 边界，chunk 计数和排列可能不同
+    infos.append(f"  delta 字段全局完整性检查...")
+    v_all_delta_keys = set()
+    p_all_delta_keys = set()
+    for chunk in vllm_chunks:
+        for choice in chunk.get("choices", []):
+            v_all_delta_keys |= set(choice.get("delta", {}).keys())
+    for chunk in proxy_chunks:
+        for choice in chunk.get("choices", []):
+            p_all_delta_keys |= set(choice.get("delta", {}).keys())
+
+    v_all_delta_keys -= STREAM_SKIP_FIELDS
+    p_all_delta_keys -= STREAM_SKIP_FIELDS
+
+    delta_missing = v_all_delta_keys - p_all_delta_keys
+    delta_extra = p_all_delta_keys - v_all_delta_keys
+
+    if delta_missing:
+        errors.append(f"delta 全局字段缺失: proxy 缺失 vllm 中出现的字段 {sorted(delta_missing)}")
+    if delta_extra:
+        infos.append(f"  delta 全局字段额外: proxy 有 vllm 中未出现的字段 {sorted(delta_extra)}")
+    if not delta_missing and not delta_extra:
+        infos.append(f"  delta 全局字段一致 ({sorted(v_all_delta_keys)})")
 
     # 最后一个 chunk 的 usage 对比
     v_last = vllm_chunks[-1]
