@@ -220,12 +220,17 @@ class TokenPipeline(BasePipeline):
                             context.ttft_ms = (time.perf_counter() - infer_start_time) * 1000
                             first_chunk_received = True
 
-                        # 更新状态
-                        previous_text = context.stream_buffer_text
-                        previous_token_ids = context.stream_buffer_ids.copy()
-
                         context.stream_chunk_count += 1
                         yield chunk
+
+                    # 更新追踪状态（必须放在 if chunk: 外面！）
+                    # 即使 chunk 被跳过（_process_stream_chunk 返回 None），
+                    # stream_buffer_ids/text 已被 decode_streaming 更新。
+                    # previous_token_ids 必须同步更新，否则后续 chunk 的
+                    # extract_reasoning_streaming 看不到 <think> token，
+                    # 导致推理内容被错误地当作 content 输出。
+                    previous_text = context.stream_buffer_text
+                    previous_token_ids = context.stream_buffer_ids.copy()
 
                         # 如果是最后一个 chunk，结束流
                         if context.stream_finished:
