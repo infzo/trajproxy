@@ -33,10 +33,21 @@ logger = init_logger(__name__)
 
 
 class TestToolParser(ToolParser):
-    tool_call_start_token: str = "<tool_call>"
-    tool_call_end_token: str = "</tool_call>"
+    """测试用自定义 Tool Parser，基于 qwen3_coder 格式。
+
+    解析格式:
+        <function=func_name>
+        <parameter=param_name>value</parameter>
+        </function>
+    """
+    tool_call_start_token: str = "<function="
+    tool_call_end_token: str = "</function>"
     tool_call_regex = re.compile(
-        r"<tool_call>(.*?)</tool_call>|<tool_call>(.*)", re.DOTALL
+        r"<function=(.*?)</function>|<function=(.*)$", re.DOTALL
+    )
+    tool_call_parameter_regex = re.compile(
+        r"<parameter=(.*?)(?:</parameter>|(?=<parameter=)|(?=</function>)|$)",
+        re.DOTALL,
     )
     scratch_pad_regex = re.compile(r"<scratch_pad>(.*?)</scratch_pad>", re.DOTALL)
 
@@ -72,52 +83,71 @@ class TestToolParser(ToolParser):
         model_output: str,
         request: ChatCompletionRequest,
     ) -> ExtractedToolCallInformation:
-        # sanity check; avoid unnecessary processing
+        """从模型输出中提取工具调用（qwen3_coder <function=name> 格式）
+
+        解析格式:
+            <function=func_name>
+            <parameter=param_name>value</parameter>
+            </function>
+        """
+        # 快速检查
         if self.tool_call_start_token not in model_output:
             return ExtractedToolCallInformation(
                 tools_called=False, tool_calls=[], content=model_output
             )
 
-        else:
-            try:
-                # there are two possible captures - between tags, or between a
-                # tag and end-of-string so the result of
-                # findall is an array of tuples where one is a function call and
-                # the other is None
-                function_call_tuples = self.tool_call_regex.findall(model_output)
+        try:
+            # 匹配所有 <function=name>...</function> 块
+            function_call_tuples = self.tool_call_regex.findall(model_output)
+            raw_function_calls = [
+                match[0] if match[0] else match[1]
+                for match in function_call_tuples
+            ]
 
-                # load the JSON, and then use it to build the Function and
-                # Tool Call
-                raw_function_calls = [
-                    json.loads(match[0] if match[0] else match[1])
-                    for match in function_call_tuples
-                ]
-                tool_calls = [
-                    ToolCall(
-                        type="function",
-                        function=FunctionCall(
-                            name=function_call["name"],
-                            # function call args are JSON but as a string
-                            arguments=json.dumps(
-                                function_call["arguments"], ensure_ascii=False
-                            ),
-                        ),
-                    )
-                    for function_call in raw_function_calls
-                ]
-
-                content = model_output[: model_output.find(self.tool_call_start_token)]
-                return ExtractedToolCallInformation(
-                    tools_called=True,
-                    tool_calls=tool_calls,
-                    content=content if content else None,
-                )
-
-            except Exception:
-                logger.exception("Error in extracting tool call from response.")
+            if not raw_function_calls:
                 return ExtractedToolCallInformation(
                     tools_called=False, tool_calls=[], content=model_output
                 )
+
+            tool_calls: list[ToolCall] = []
+            for func_str in raw_function_calls:
+                # 解析: <function=get_weather>
+                #        <parameter=location>Beijing</parameter>
+                #        </function>
+                end_idx = func_str.index(">")
+                func_name = func_str[:end_idx]
+                params_str = func_str[end_idx + 1:]
+
+                param_dict = {}
+                for param_match in self.tool_call_parameter_regex.findall(params_str):
+                    p_idx = param_match.index(">")
+                    p_name = param_match[:p_idx]
+                    p_value = param_match[p_idx + 1:].strip()
+                    param_dict[p_name] = p_value
+
+                tool_calls.append(ToolCall(
+                    type="function",
+                    function=FunctionCall(
+                        name=func_name,
+                        arguments=json.dumps(param_dict, ensure_ascii=False),
+                    ),
+                ))
+
+            # content 为第一个 <function= 之前的部分
+            content_end = model_output.find(self.tool_call_start_token)
+            content = model_output[:content_end] if content_end > 0 else None
+
+            return ExtractedToolCallInformation(
+                tools_called=True,
+                tool_calls=tool_calls,
+                content=content if content else None,
+            )
+
+        except Exception:
+            logger.exception("Error in extracting tool call from response.")
+            return ExtractedToolCallInformation(
+                tools_called=False, tool_calls=[], content=model_output
+            )
 
     def _extract_content(self, current_text: str) -> str | None:
         """Return unsent non-tool-call text, or None.
