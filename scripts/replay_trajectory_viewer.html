@@ -2171,13 +2171,13 @@ function renderDAG(graph) {
         const markerId = 'arrow-' + color.replace('#', '');
         const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
         marker.setAttribute('id', markerId);
-        marker.setAttribute('markerWidth', '10');
-        marker.setAttribute('markerHeight', '7');
-        marker.setAttribute('refX', '9');
-        marker.setAttribute('refY', '3.5');
+        marker.setAttribute('markerWidth', '6');
+        marker.setAttribute('markerHeight', '4');
+        marker.setAttribute('refX', '5');
+        marker.setAttribute('refY', '2');
         marker.setAttribute('orient', 'auto');
         const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-        polygon.setAttribute('points', '0 0, 10 3.5, 0 7');
+        polygon.setAttribute('points', '0 0, 6 2, 0 4');
         polygon.setAttribute('fill', color);
         marker.appendChild(polygon);
         defs.appendChild(marker);
