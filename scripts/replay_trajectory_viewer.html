@@ -721,7 +721,7 @@
         padding: 40px;
     }
 
-    .dag-svg {
+.dag-svg {
         position: absolute;
         inset: 0;
         width: 100%;
@@ -2194,7 +2194,7 @@ function renderDAG(graph) {
     layout.positions.forEach((pos, idx) => {
         const node = graph.nodes[idx];
         const x = pos.level * (nodeWidth + horizontalGap) + 40;
-        const y = pos.offset * (nodeHeight + verticalGap) + 40;
+        const y = pos.row * (nodeHeight + verticalGap) + 40;
 
         const configColor = CONFIG_COLORS[node.configGroup] || CONFIG_COLORS[0];
 
@@ -2297,19 +2297,19 @@ function renderDAG(graph) {
 
     // 更新容器大小
     const maxX = Math.max(...layout.positions.map(p => p.level)) * (nodeWidth + horizontalGap) + 200;
-    const maxY = Math.max(...layout.positions.map(p => p.offset)) * (nodeHeight + verticalGap) + 150;
+    const maxY = Math.max(...layout.positions.map(p => p.row)) * (nodeHeight + verticalGap) + 150;
     container.style.width = `${Math.max(maxX, 400)}px`;
     container.style.height = `${Math.max(maxY, 300)}px`;
 }
 
 /**
- * 计算布局位置
- * 返回: { positions: [{ level, offset }] }
+ * 计算布局位置（树形布局：子节点优先与父同行，多子节点分行，总行数=叶子数）
+ * 返回: { positions: [{ level, row }] }
  */
 function computeLayout(graph) {
-    const positions = graph.nodes.map(() => ({ level: 0, offset: 0 }));
+    const positions = graph.nodes.map(() => ({ level: 0, row: -1 }));
 
-    // BFS 分配层级
+    // BFS 分配层级（横向位置）
     const visited = new Set();
     const queue = [...graph.roots];
 
@@ -2329,21 +2329,55 @@ function computeLayout(graph) {
         });
     }
 
-    // 按层级分组，计算每层内的偏移
-    const levels = {};
+    // 递归分配行号（纵向位置）：树形布局
+    // 单子节点与父同行，多子节点各占一行
+    let nextRow = 0;
+
+    for (const rootIdx of graph.roots) {
+        nextRow = assignSubtreeRow(rootIdx, nextRow, graph, positions);
+    }
+
+    // 处理无法从根到达的节点（安全兜底）
     graph.nodes.forEach((node, idx) => {
-        const level = positions[idx].level;
-        if (!levels[level]) levels[level] = [];
-        levels[level].push(idx);
+        if (positions[idx].row === -1) {
+            positions[idx].row = nextRow++;
+        }
     });
 
-    Object.values(levels).forEach((nodesInLevel, levelIdx) => {
-        nodesInLevel.forEach((idx, offset) => {
-            positions[idx].offset = offset;
-        });
-    });
+    return { positions, totalRows: nextRow };
+}
 
-    return { positions };
+/**
+ * 递归分配子树的行号
+ * - 叶子节点占一行
+ * - 单子节点：父与子同行（链式紧凑）
+ * - 多子节点：每个子树独立占连续行，父在首行
+ * 返回: 下一个可用行号
+ */
+function assignSubtreeRow(nodeIdx, startRow, graph, positions) {
+    const node = graph.nodes[nodeIdx];
+    const children = node.children;
+
+    if (children.length === 0) {
+        // 叶子节点：占一行
+        positions[nodeIdx].row = startRow;
+        return startRow + 1;
+    }
+
+    if (children.length === 1) {
+        // 单子节点：父与子同行（紧凑链式布局）
+        const endRow = assignSubtreeRow(children[0], startRow, graph, positions);
+        positions[nodeIdx].row = startRow;
+        return endRow;
+    }
+
+    // 多子节点：每个子树占连续行段，父节点在首行
+    let currentRow = startRow;
+    for (const childIdx of children) {
+        currentRow = assignSubtreeRow(childIdx, currentRow, graph, positions);
+    }
+    positions[nodeIdx].row = startRow;
+    return currentRow;
 }
 
 /**
