@@ -1007,6 +1007,35 @@
     .diff-char-add { background: rgba(16, 185, 129, 0.4); border-radius: 2px; text-decoration: none; }
     .diff-char-remove { background: rgba(239, 68, 68, 0.4); border-radius: 2px; text-decoration: none; }
 
+    /* ==================== Download Progress ==================== */
+    .download-progress {
+        font-size: 12px;
+        color: var(--text-muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .download-progress-bar {
+        width: 120px;
+        height: 6px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+    .download-progress-fill {
+        height: 100%;
+        background: var(--primary);
+        transition: width 0.3s ease;
+        width: 0%;
+    }
+    .download-progress.done .download-progress-fill {
+        background: var(--success);
+    }
+    .download-progress.error .download-progress-fill {
+        background: var(--danger);
+    }
+
 </style>
 </head>
 <body>
@@ -1033,6 +1062,8 @@
             <button class="btn-primary" id="btnFetch" onclick="fetchSessions()">
                 <span>&#128269;</span> 查询
             </button>
+            <button class="btn-secondary" id="btnDownload" onclick="downloadAllSessions()" title="下载所有 Session 为 JSON 文件" style="display:none">下载</button>
+            <span class="download-progress" id="downloadProgress" style="display:none"></span>
             <button class="btn-secondary" onclick="clearAll()">重置</button>
         </div>
     </div>
@@ -1512,6 +1543,8 @@ async function fetchSessions() {
 
         window._sessions = sessions;
         document.getElementById('sessionSearch').value = ''; // 清空搜索框
+        document.getElementById('btnDownload').style.display = '';
+        document.getElementById('downloadProgress').style.display = 'none';
         showToast(`加载成功: ${sessions.length} 个 Sessions`, 'success');
     } catch (e) {
         listEl.innerHTML = `<div style="padding:20px;color:var(--danger);text-align:center">请求失败: ${escapeHtml(e.message)}</div>`;
@@ -1934,6 +1967,8 @@ function clearAll() {
     document.getElementById('recordList').innerHTML = '<div class="empty-state"><div class="empty-icon">&#128200;</div><div class="empty-text">在左侧选择 Session 查看轨迹详情</div></div>';
     document.getElementById('sessionCount').style.display = 'none';
     document.getElementById('recordNav').style.display = 'none';
+    document.getElementById('btnDownload').style.display = 'none';
+    document.getElementById('downloadProgress').style.display = 'none';
     closeTrajectory();
     window._sessions = [];
     currentRecords = [];
@@ -1941,6 +1976,120 @@ function clearAll() {
     stringStore.clear();
     stringStoreId = 0;
     showToast('已重置', 'info');
+}
+
+// ==================== Download All Sessions ====================
+
+/**
+ * 下载所有 Session 为 JSON 文件
+ * 使用 File System Access API 选择本地文件夹
+ * 按 run_id 创建文件夹，逐 session 保存
+ */
+async function downloadAllSessions() {
+    const runId = document.getElementById('runId').value.trim();
+    if (!runId) {
+        showToast('请先选择 Run ID 并查询', 'error');
+        return;
+    }
+
+    const sessions = window._sessions;
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+        showToast('没有可下载的 Session', 'error');
+        return;
+    }
+
+    // 检查浏览器是否支持 File System Access API
+    if (!('showDirectoryPicker' in window)) {
+        showToast('当前浏览器不支持文件夹选择功能，请使用 Chrome / Edge', 'error');
+        return;
+    }
+
+    // 1. 让用户选择本地文件夹
+    let rootHandle;
+    try {
+        rootHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            showToast('已取消选择文件夹', 'info');
+        } else {
+            showToast('选择文件夹失败: ' + e.message, 'error');
+        }
+        return;
+    }
+
+    // 2. 创建以 run_id 命名的子文件夹（若已存在则复用）
+    let runDirHandle;
+    const safeFolderName = sanitizeFileName(runId);
+    try {
+        runDirHandle = await rootHandle.getDirectoryHandle(safeFolderName, { create: true });
+    } catch (e) {
+        showToast('创建文件夹失败: ' + e.message, 'error');
+        return;
+    }
+
+    // 3. 显示进度 UI
+    const progressEl = document.getElementById('downloadProgress');
+    const btnDownload = document.getElementById('btnDownload');
+    btnDownload.disabled = true;
+    progressEl.style.display = 'inline-flex';
+    progressEl.className = 'download-progress';
+    progressEl.innerHTML = `
+        <span class="download-progress-bar"><span class="download-progress-fill" id="downloadFill"></span></span>
+        <span id="downloadText">准备中...</span>
+    `;
+    const fillEl = document.getElementById('downloadFill');
+    const textEl = document.getElementById('downloadText');
+
+    // 4. 逐 session 下载
+    const total = sessions.length;
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < total; i++) {
+        const session = sessions[i];
+        const sid = session.session_id || `unknown_${i}`;
+        const safeName = sanitizeFileName(sid);
+        const fileName = safeName + '.json';
+
+        // 更新进度
+        const percent = Math.round(((i) / total) * 100);
+        fillEl.style.width = percent + '%';
+        textEl.textContent = `${i + 1} / ${total}`;
+
+        try {
+            const data = await apiGet(`/trajectories/${encodeURIComponent(sid)}`);
+            const jsonStr = JSON.stringify(data, null, 2);
+            const fileHandle = await runDirHandle.getFileHandle(fileName, { create: true });
+            const writable = await fileHandle.createWritable();
+            await writable.write(jsonStr);
+            await writable.close();
+            successCount++;
+        } catch (e) {
+            console.error('下载 session 失败:', sid, e);
+            failCount++;
+        }
+    }
+
+    // 5. 最终进度
+    fillEl.style.width = '100%';
+    textEl.textContent = `完成: ${successCount}/${total}`;
+
+    if (failCount === 0) {
+        progressEl.classList.add('done');
+        showToast(`下载完成: ${successCount} 个 Session 已保存到 ${safeFolderName}/`, 'success');
+    } else {
+        progressEl.classList.add('error');
+        showToast(`下载完成: 成功 ${successCount}, 失败 ${failCount}`, 'error');
+    }
+
+    btnDownload.disabled = false;
+}
+
+/**
+ * 将文本转为安全的文件名（移除非法字符）
+ */
+function sanitizeFileName(name) {
+    return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').substring(0, 200);
 }
 
 // ==================== Trajectory View (轨迹视图) ====================
