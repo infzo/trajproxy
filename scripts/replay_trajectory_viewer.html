@@ -727,6 +727,7 @@
         width: 100%;
         height: 100%;
         pointer-events: none;
+        z-index: 2;
     }
 
     .dag-node {
@@ -2218,27 +2219,31 @@ function renderDAG(graph) {
         nodeEl.id = `dag-node-${idx}`;
         container.appendChild(nodeEl);
 
-        // 存储位置信息用于绘制连线
-        node._x = x + nodeWidth / 2;
-        node._y = y + nodeHeight;       // 底部（出边起点）
-        node._topY = y;                  // 顶部（入边终点）
+        // 存储位置信息用于绘制连线（右→左水平连接，从根本上杜绝穿越节点）
+        node._rightX = x + nodeWidth;           // 右侧（出边起点）
+        node._leftX = x;                        // 左侧（入边终点）
+        node._centerY = y + nodeHeight / 2;     // 垂直中心
     });
 
-    // 渲染连线（前后轮对话关系）
+    // 渲染连线（前后轮对话关系，右→左水平连接）
+    // 连线从父节点右侧到子节点左侧，仅经过层间间隙（无节点的空白区域），根本杜绝穿越
     graph.edges.forEach(edge => {
         const fromNode = graph.nodes[edge.from];
         const toNode = graph.nodes[edge.to];
 
-        if (fromNode._x === undefined) return;
+        if (fromNode._rightX === undefined) return;
 
-        const fromX = fromNode._x;
-        const fromY = fromNode._y;
-        const toX = toNode._x;
-        const toY = toNode._topY;
+        const fromX = fromNode._rightX;     // 父节点右侧
+        const fromY = fromNode._centerY;    // 父节点垂直中心
+        const toX = toNode._leftX;          // 子节点左侧
+        const toY = toNode._centerY;        // 子节点垂直中心
+
+        // 水平 S 曲线：控制在层间间隙中过渡，不会穿过任何节点
+        const midX = (fromX + toX) / 2;
+        const pathData = `M${fromX},${fromY} C${midX},${fromY} ${midX},${toY} ${toX},${toY}`;
 
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const midY = (fromY + toY) / 2;
-        path.setAttribute('d', `M${fromX},${fromY} C${fromX},${midY} ${toX},${midY} ${toX},${toY}`);
+        path.setAttribute('d', pathData);
 
         if (edge.configChanged) {
             // 配置变更连线：橙色虚线（醒目提示 system 或 tools 参数不一致）
