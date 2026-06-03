@@ -727,6 +727,7 @@
         width: 100%;
         height: 100%;
         pointer-events: none;
+        z-index: 2;
     }
 
     .dag-node {
@@ -2138,6 +2139,76 @@ function messagesEqual(a, b) {
 }
 
 /**
+ * 计算连线的 SVG 路径（无冲突用贝塞尔，有冲突用正交折线绕障）
+ * 检测连线区域是否穿过无关节点，有冲突时走"通道"绕行
+ */
+function computeEdgePath(fromNode, toNode, allNodes, nodeWidth, nodeHeight) {
+    const fromX = fromNode._x;
+    const fromY = fromNode._y;      // 底部中心（出边起点）
+    const toX = toNode._x;
+    const toY = toNode._topY;       // 顶部中心（入边终点）
+
+    // 检测路径区域是否穿过其他节点（用矩形近似贝塞尔曲线凸包）
+    const margin = 10;
+    const pathBB = {
+        minX: Math.min(fromX, toX) - margin,
+        maxX: Math.max(fromX, toX) + margin,
+        minY: Math.min(fromY, toY) - margin,
+        maxY: Math.max(fromY, toY) + margin
+    };
+
+    const hasConflict = allNodes.some(node => {
+        if (node.idx === fromNode.idx || node.idx === toNode.idx || node._x === undefined) return false;
+
+        const nLeft = node._x - nodeWidth / 2;
+        const nRight = node._x + nodeWidth / 2;
+        const nTop = node._topY;
+        const nBottom = node._y;
+
+        return nRight > pathBB.minX && nLeft < pathBB.maxX &&
+               nBottom > pathBB.minY && nTop < pathBB.maxY;
+    });
+
+    if (!hasConflict) {
+        // 无冲突：贝塞尔曲线直连
+        const midY = (fromY + toY) / 2;
+        return `M${fromX},${fromY} C${fromX},${midY} ${toX},${midY} ${toX},${toY}`;
+    }
+
+    // 有冲突：正交折线绕障（3段路径 + 圆角转弯）
+    const padding = 18;
+    const r = 10; // 圆角半径
+
+    // 计算避障路由 Y（在所有节点之上或之下选择总路径更短者）
+    const nodeTops = allNodes.filter(n => n._x !== undefined).map(n => n._topY);
+    const nodeBottoms = allNodes.filter(n => n._x !== undefined).map(n => n._y);
+    const aboveY = Math.min(...nodeTops) - padding;
+    const belowY = Math.max(...nodeBottoms) + padding;
+
+    const distAbove = Math.abs(fromY - aboveY) + Math.abs(toY - aboveY);
+    const distBelow = Math.abs(fromY - belowY) + Math.abs(toY - belowY);
+    const routingY = distAbove <= distBelow ? aboveY : belowY;
+
+    const dir = toX >= fromX ? 1 : -1;
+
+    if (routingY < Math.min(fromY, toY)) {
+        // 路由在上方：先向上绕行，再水平，再向下到达目标
+        return `M${fromX},${fromY} L${fromX},${routingY + r} ` +
+               `Q${fromX},${routingY} ${fromX + dir * r},${routingY} ` +
+               `L${toX - dir * r},${routingY} ` +
+               `Q${toX},${routingY} ${toX},${routingY + r} ` +
+               `L${toX},${toY}`;
+    } else {
+        // 路由在下方：先向下绕行，再水平，再向上到达目标
+        return `M${fromX},${fromY} L${fromX},${routingY - r} ` +
+               `Q${fromX},${routingY} ${fromX + dir * r},${routingY} ` +
+               `L${toX - dir * r},${routingY} ` +
+               `Q${toX},${routingY} ${toX},${routingY - r} ` +
+               `L${toX},${toY}`;
+    }
+}
+
+/**
  * 渲染 DAG 图（配置组颜色区分 + 前后轮连线）
  */
 function renderDAG(graph) {
@@ -2224,21 +2295,17 @@ function renderDAG(graph) {
         node._topY = y;                  // 顶部（入边终点）
     });
 
-    // 渲染连线（前后轮对话关系）
+    // 渲染连线（前后轮对话关系，冲突时正交绕障）
     graph.edges.forEach(edge => {
         const fromNode = graph.nodes[edge.from];
         const toNode = graph.nodes[edge.to];
 
         if (fromNode._x === undefined) return;
 
-        const fromX = fromNode._x;
-        const fromY = fromNode._y;
-        const toX = toNode._x;
-        const toY = toNode._topY;
+        const pathData = computeEdgePath(fromNode, toNode, graph.nodes, nodeWidth, nodeHeight);
 
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const midY = (fromY + toY) / 2;
-        path.setAttribute('d', `M${fromX},${fromY} C${fromX},${midY} ${toX},${midY} ${toX},${toY}`);
+        path.setAttribute('d', pathData);
 
         if (edge.configChanged) {
             // 配置变更连线：橙色虚线（醒目提示 system 或 tools 参数不一致）
@@ -2298,7 +2365,7 @@ function renderDAG(graph) {
 }
 
 /**
- * 计算布局位置
+ * 计算布局位置（Barycenter 启发法优化层内排序，减少连线交叉）
  * 返回: { positions: [{ level, offset }] }
  */
 function computeLayout(graph) {
@@ -2324,7 +2391,7 @@ function computeLayout(graph) {
         });
     }
 
-    // 按层级分组，计算每层内的偏移
+    // 按层级分组
     const levels = {};
     graph.nodes.forEach((node, idx) => {
         const level = positions[idx].level;
@@ -2332,11 +2399,72 @@ function computeLayout(graph) {
         levels[level].push(idx);
     });
 
-    Object.values(levels).forEach((nodesInLevel, levelIdx) => {
+    // 初始排序：按原始索引
+    Object.values(levels).forEach(nodesInLevel => {
+        nodesInLevel.sort((a, b) => a - b);
         nodesInLevel.forEach((idx, offset) => {
             positions[idx].offset = offset;
         });
     });
+
+    // Barycenter 启发法：迭代优化层内排序以减少连线交叉
+    const maxIterations = 5;
+    const levelKeys = Object.keys(levels).map(Number).sort((a, b) => a - b);
+
+    for (let iter = 0; iter < maxIterations; iter++) {
+        let changed = false;
+
+        // 前向传播（左→右）：根据父节点平均位置排序子节点层
+        for (let li = 1; li < levelKeys.length; li++) {
+            const level = levelKeys[li];
+            const nodesInLevel = levels[level];
+
+            nodesInLevel.forEach(idx => {
+                const parents = graph.nodes[idx].parents;
+                if (parents.length > 0) {
+                    positions[idx].barycenter = parents.reduce((sum, pIdx) => sum + positions[pIdx].offset, 0) / parents.length;
+                } else {
+                    positions[idx].barycenter = positions[idx].offset;
+                }
+            });
+
+            const sorted = [...nodesInLevel].sort((a, b) => positions[a].barycenter - positions[b].barycenter);
+            if (sorted.some((idx, i) => idx !== nodesInLevel[i])) {
+                levels[level] = sorted;
+                sorted.forEach((idx, offset) => {
+                    positions[idx].offset = offset;
+                });
+                changed = true;
+            }
+        }
+
+        // 后向传播（右→左）：根据子节点平均位置排序父节点层
+        for (let li = levelKeys.length - 2; li >= 0; li--) {
+            const level = levelKeys[li];
+            const nodesInLevel = levels[level];
+
+            nodesInLevel.forEach(idx => {
+                const children = graph.nodes[idx].children;
+                if (children.length > 0) {
+                    positions[idx].barycenter = children.reduce((sum, cIdx) => sum + positions[cIdx].offset, 0) / children.length;
+                } else {
+                    positions[idx].barycenter = positions[idx].offset;
+                }
+            });
+
+            const sorted = [...nodesInLevel].sort((a, b) => positions[a].barycenter - positions[b].barycenter);
+            if (sorted.some((idx, i) => idx !== nodesInLevel[i])) {
+                levels[level] = sorted;
+                sorted.forEach((idx, offset) => {
+                    positions[idx].offset = offset;
+                });
+                changed = true;
+            }
+        }
+
+        // 收敛检测：排序无变化则提前退出
+        if (!changed) break;
+    }
 
     return { positions };
 }
