@@ -1,0 +1,29 @@
+er pid=1037) 2026-06-03 08:48:15 | INFO | processor | - | [92-11-c465584d-8c2f-4ee4-a04d-3a49adcf61a0-13855-0,f95dab07-8e1e-41eb-92b7-f3d449ed3a7b] 开始处理请求: model=Qwen3-32B, messages_count=28, token_mode=True [repeated 5x across cluster]
+(RemoteWorker pid=1037) 2026-06-03 08:48:15 | INFO | token_pipeline | - | [92-11-c465584d-8c2f-4ee4-a04d-3a49adcf61a0-13855-0,f95dab07-8e1e-41eb-92b7-f3d449ed3a7b] 开始处理请求（Token 模式）: model=Qwen3-32B, messages_count=28 [repeated 5x across cluster]
+(RemoteWorker pid=1037) 2026-06-03 08:48:15 | DEBUG | token_pipeline | - | [92-11-c465584d-8c2f-4ee4-a04d-3a49adcf61a0-13855-0,f95dab07-8e1e-41eb-92b7-f3d449ed3a7b] PromptText 转换完成: prompt_length=51022 [repeated 5x across cluster]
+(RemoteWorker pid=1037) 2026-06-03 08:48:15 | DEBUG | prefix_cache | - | [Cache] session=92-11-c465584d-8c2f-4ee4-a04d-3a49adcf61a0-13855-0, history_count=13, prompt_len=51022 [repeated 5x across cluster]
+(RemoteWorker pid=1037) 2026-06-03 08:48:15 | DEBUG | prefix_cache | - | [Cache] HIT: cached_len=50401, cached_tokens=14131 [repeated 5x across cluster]
+(RemoteWorker pid=1037) 2026-06-03 08:48:15 | INFO | token_pipeline | - | [92-11-c465584d-8c2f-4ee4-a04d-3a49adcf61a0-13855-0,f95dab07-8e1e-41eb-92b7-f3d449ed3a7b] TokenIds 转换完成: prompt_tokens=14307 [repeated 5x across cluster]
+(RemoteWorker pid=1037) 2026-06-03 08:48:15 | INFO | token_pipeline | - | [92-11-c465584d-8c2f-4ee4-a04d-3a49adcf61a0-13855-0,f95dab07-8e1e-41eb-92b7-f3d449ed3a7b] 发送 Infer 请求（Token 模式） [repeated 5x across cluster]
+(RemoteWorker pid=1037) 2026-06-03 08:48:15 | WARNING | infer_client | - | [92-11-c465584d-8c2f-4ee4-a04d-3a49adcf61a0-13855-0,f95dab07-8e1e-41eb-92b7-f3d449ed3a7b] Chat->Completion 参数不兼容，已丢弃: ['tools'] [repeated 5x across cluster]
+(RemoteWorker pid=1037) 2026-06-03 08:48:15 | DEBUG | infer_client | - | Infer 请求: http://7.242.104.203:8293/v1/completions [repeated 5x across cluster]
+(RemoteWorker pid=1254) Error in extracting tool call from response.
+(RemoteWorker pid=1254) Traceback (most recent call last):
+(RemoteWorker pid=1254)   File "/tmp/ray/session_2026-06-03_08-30-30_207996_1/runtime_resources/working_dir_files/_ray_pkg_1c7270adea99060b/traj_proxy/proxy_core/parsers/vllm_compat/tool_parsers/hermes_tool_parser.py", line 91, in extract_tool_calls
+(RemoteWorker pid=1254)     raw_function_calls = [
+(RemoteWorker pid=1254)                          ^
+(RemoteWorker pid=1254)   File "/tmp/ray/session_2026-06-03_08-30-30_207996_1/runtime_resources/working_dir_files/_ray_pkg_1c7270adea99060b/traj_proxy/proxy_core/parsers/vllm_compat/tool_parsers/hermes_tool_parser.py", line 92, in <listcomp>
+(RemoteWorker pid=1254)     json.loads(match[0] if match[0] else match[1])
+(RemoteWorker pid=1254)   File "/usr/local/lib/python3.11/json/__init__.py", line 346, in loads
+(RemoteWorker pid=1254)     return _default_decoder.decode(s)
+(RemoteWorker pid=1254)            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(RemoteWorker pid=1254)   File "/usr/local/lib/python3.11/json/decoder.py", line 337, in decode
+(RemoteWorker pid=1254)     obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+(RemoteWorker pid=1254)                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(RemoteWorker pid=1254)   File "/usr/local/lib/python3.11/json/decoder.py", line 353, in raw_decode
+(RemoteWorker pid=1254)     obj, end = self.scan_once(s, idx)
+(RemoteWorker pid=1254)                ^^^^^^^^^^^^^^^^^^^^^^
+(RemoteWorker pid=1254) json.decoder.JSONDecodeError: Invalid control character at: line 2 column 124 (char 124)
+(RemoteWorker pid=1517) 2026-06-03 08:48:20 | INFO | base | - | [105-13-0f0b0fef-1710-4a20-9951-84ed3d622a96-1490-0,f771893a-3752-4a84-b1de-4ab023b16aca] 轨迹存储成功 [repeated 7x across cluster]
+(RemoteWorker pid=1517) 2026-06-03 08:48:20 | INFO | worker | - | Response: POST http://traj-proxy:12308/v1/chat/completions | request_id=0d1e7c9d | status=200 | elapsed=67551ms [repeated 7x across cluster]
+(RemoteWorker pid=1326) 2026-06-03 08:48:21 | INFO | token_pipeline | - | [53-6-5477fccc-a26b-41e9-9b65-d4d2de06922c-13855-0,74c165cd-609d-47f7-be0d-d46b2b22ac67] Infer 请求完成 [repeated 8x across cluster]
