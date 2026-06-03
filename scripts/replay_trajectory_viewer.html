@@ -783,6 +783,230 @@
     }
     .analysis-empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.4; }
 
+    /* ==================== Modal Tabs ==================== */
+    .modal-tabs {
+        display: flex;
+        gap: 0;
+        padding: 0 20px;
+        background: rgba(0,0,0,0.15);
+        border-bottom: 1px solid var(--border-color);
+        flex-shrink: 0;
+    }
+    .modal-tab {
+        padding: 10px 20px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-muted);
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .modal-tab:hover {
+        color: var(--text-main);
+        background: rgba(255,255,255,0.03);
+    }
+    .modal-tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+    }
+    .tab-panel {
+        display: none;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden;
+    }
+    .tab-panel.active {
+        display: flex;
+    }
+
+    /* ==================== Diff Comparison ==================== */
+    .diff-selector {
+        padding: 12px 20px;
+        background: rgba(0,0,0,0.2);
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+    }
+    .diff-selector label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+    }
+    .diff-selector select {
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        color: var(--text-main);
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        min-width: 120px;
+        max-width: 260px;
+    }
+    .diff-result {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 20px;
+    }
+    .diff-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 200px;
+        color: var(--text-dim);
+        font-size: 14px;
+    }
+    .diff-empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+
+    .diff-header-row {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 12px;
+        padding: 10px 16px;
+        background: rgba(0,0,0,0.15);
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .diff-header-left, .diff-header-right { flex: 1; }
+    .diff-header-stats { text-align: center; min-width: 140px; }
+
+    .diff-msg-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        margin-bottom: 8px;
+        overflow: hidden;
+        transition: all 0.2s;
+    }
+    .diff-msg-card.has-diff {
+        border-color: var(--warning);
+        border-left: 3px solid var(--warning);
+    }
+    .diff-msg-card.no-diff {
+        opacity: 0.7;
+    }
+    .diff-msg-card.added {
+        border-left: 3px solid var(--success);
+        background: rgba(16, 185, 129, 0.03);
+    }
+    .diff-msg-card.removed {
+        border-left: 3px solid var(--danger);
+        background: rgba(239, 68, 68, 0.03);
+    }
+
+    .diff-msg-header {
+        padding: 10px 14px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        user-select: none;
+    }
+    .diff-msg-header:hover {
+        background: rgba(255,255,255,0.03);
+    }
+
+    .diff-msg-role-icon { font-size: 16px; flex-shrink: 0; }
+    .diff-msg-role-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        min-width: 80px;
+    }
+    .diff-msg-role-system { color: #94a3b8; }
+    .diff-msg-role-user { color: #60a5fa; }
+    .diff-msg-role-assistant { color: #34d399; }
+    .diff-msg-role-tool { color: #fbbf24; }
+
+    .diff-msg-status {
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        flex-shrink: 0;
+    }
+    .diff-msg-status.status-same { background: rgba(99,102,241,0.15); color: #818cf8; }
+    .diff-msg-status.status-diff { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .diff-msg-status.status-added { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+    .diff-msg-status.status-removed { background: rgba(239,68,68,0.15); color: #fca5a5; }
+
+    .diff-msg-summary {
+        flex: 1;
+        font-size: 12px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .diff-msg-toggle {
+        font-size: 11px;
+        color: var(--text-dim);
+        transition: transform 0.2s;
+        flex-shrink: 0;
+    }
+    .diff-msg-card.expanded .diff-msg-toggle {
+        transform: rotate(90deg);
+    }
+
+    .diff-msg-body {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+    }
+    .diff-msg-card.expanded .diff-msg-body {
+        max-height: none;
+    }
+
+    .diff-msg-body-inner {
+        padding: 0 14px 14px;
+        display: flex;
+        gap: 8px;
+    }
+
+    .diff-col {
+        flex: 1;
+        min-width: 0;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 500px;
+        overflow-y: auto;
+        font-family: var(--font-mono);
+    }
+    .diff-col-header {
+        font-size: 10px;
+        font-weight: 600;
+        padding: 4px 8px;
+        border-radius: 3px;
+        margin-bottom: 6px;
+        display: inline-block;
+    }
+    .diff-col-label-a { background: rgba(239,68,68,0.15); color: #fca5a5; }
+    .diff-col-label-b { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+    .diff-col-label-same { background: rgba(99,102,241,0.15); color: #818cf8; }
+
+    .diff-col-a { background: rgba(239, 68, 68, 0.04); border: 1px solid rgba(239, 68, 68, 0.12); }
+    .diff-col-b { background: rgba(16, 185, 129, 0.04); border: 1px solid rgba(16, 185, 129, 0.12); }
+    .diff-col-same { background: rgba(99, 102, 241, 0.03); border: 1px solid rgba(99, 102, 241, 0.08); }
+    .diff-col-empty { background: transparent; border: 1px dashed var(--border-color); color: var(--text-dim); font-style: italic; }
+
+    .diff-line-add { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; }
+    .diff-line-remove { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+    .diff-char-add { background: rgba(16, 185, 129, 0.4); border-radius: 2px; text-decoration: none; }
+    .diff-char-remove { background: rgba(239, 68, 68, 0.4); border-radius: 2px; text-decoration: none; }
+
 </style>
 </head>
 <body>
@@ -890,13 +1114,38 @@
             <div class="modal-title">&#128202; 轨迹分析</div>
             <button class="modal-close" onclick="closeAnalysisModal()">&times;</button>
         </div>
+        <div class="modal-tabs">
+            <button class="modal-tab active" onclick="switchModalTab('analysis')">轨迹图</button>
+            <button class="modal-tab" onclick="switchModalTab('diff')">差异对比</button>
+        </div>
         <div class="modal-body">
-            <div class="analysis-stats" id="analysisStats"></div>
-            <div class="dag-scroll-container">
-                <div class="dag-container" id="dagContainer">
-                    <svg class="dag-svg" id="dagSvg">
-                        <defs></defs>
-                    </svg>
+            <!-- 轨迹图面板 -->
+            <div class="tab-panel active" id="analysisTabPanel">
+                <div class="analysis-stats" id="analysisStats"></div>
+                <div class="dag-scroll-container">
+                    <div class="dag-container" id="dagContainer">
+                        <svg class="dag-svg" id="dagSvg">
+                            <defs></defs>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+            <!-- 差异对比面板 -->
+            <div class="tab-panel" id="diffTabPanel">
+                <div class="diff-selector">
+                    <label>轨迹A:</label>
+                    <select id="diffSelectA"></select>
+                    <label>轨迹B:</label>
+                    <select id="diffSelectB"></select>
+                    <button class="btn-primary" onclick="runDiffComparison()">对比</button>
+                    <button class="btn-secondary" onclick="expandAllDiffs()" title="展开所有">全部展开</button>
+                    <button class="btn-secondary" onclick="collapseAllDiffs()" title="折叠一切">全部折叠</button>
+                </div>
+                <div class="diff-result" id="diffResult">
+                    <div class="diff-empty">
+                        <div class="diff-empty-icon">&#128270;</div>
+                        选择两条轨迹进行对比
+                    </div>
                 </div>
             </div>
         </div>
@@ -2010,6 +2259,491 @@ function analyzeTrajectory() {
 function closeAnalysisModal(event) {
     if (event && event.target !== event.currentTarget) return;
     document.getElementById('analysisModal').classList.remove('show');
+}
+
+// ==================== Modal Tabs & Diff Comparison ====================
+
+/**
+ * 切换模态弹窗内的标签页
+ */
+function switchModalTab(tabName) {
+    // 切换标签按钮激活状态
+    document.querySelectorAll('.modal-tab').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
+
+    // 切换内容面板
+    const analysisPanel = document.getElementById('analysisTabPanel');
+    const diffPanel = document.getElementById('diffTabPanel');
+
+    analysisPanel.classList.remove('active');
+    diffPanel.classList.remove('active');
+
+    if (tabName === 'analysis') {
+        analysisPanel.classList.add('active');
+    } else if (tabName === 'diff') {
+        diffPanel.classList.add('active');
+        // 切换到差异对比标签时初始化选择器
+        initDiffSelector();
+    }
+}
+
+/**
+ * 初始化差异对比选择器（在打开模态弹窗或切换到 diff 标签时调用）
+ */
+function initDiffSelector() {
+    const selA = document.getElementById('diffSelectA');
+    const selB = document.getElementById('diffSelectB');
+
+    selA.innerHTML = '';
+    selB.innerHTML = '';
+
+    currentRecords.forEach((rec, i) => {
+        const optA = document.createElement('option');
+        optA.value = i;
+        optA.textContent = `#${i + 1} ${rec.model || 'Unknown'}`;
+        selA.appendChild(optA);
+
+        const optB = document.createElement('option');
+        optB.value = i;
+        optB.textContent = `#${i + 1} ${rec.model || 'Unknown'}`;
+        selB.appendChild(optB);
+    });
+
+    // 默认选最后两条（或相同）
+    selA.value = currentRecords.length > 1 ? currentRecords.length - 2 : 0;
+    selB.value = currentRecords.length - 1;
+}
+
+/**
+ * 执行差异对比
+ */
+function runDiffComparison() {
+    const idxA = parseInt(document.getElementById('diffSelectA').value);
+    const idxB = parseInt(document.getElementById('diffSelectB').value);
+
+    if (isNaN(idxA) || isNaN(idxB)) {
+        showToast('请选择两条轨迹进行对比', 'error');
+        return;
+    }
+
+    const recA = currentRecords[idxA];
+    const recB = currentRecords[idxB];
+    const msgsA = extractConversation(recA);
+    const msgsB = extractConversation(recB);
+
+    renderDiffView(msgsA, msgsB, recA, recB, idxA, idxB);
+}
+
+/**
+ * 分层渲染差异对比视图
+ * 默认折叠：仅高亮存在差异的消息卡片
+ * 点击展开：显示详细内容并内联高亮差异
+ */
+function renderDiffView(msgsA, msgsB, recA, recB, idxA, idxB) {
+    const container = document.getElementById('diffResult');
+    let html = '';
+
+    // 头部信息
+    html += '<div class="diff-header-row">';
+    html += `<div class="diff-header-left"><strong style="color:#f87171">A: #${idxA + 1}</strong> ${escapeHtml(recA.model || '?')} | ${recA.prompt_tokens ?? '?'}P/${recA.completion_tokens ?? '?'}C</div>`;
+    html += '<div class="diff-header-stats">';
+    const diffCount = countDiffMessages(msgsA, msgsB);
+    html += `<span style="color:var(--warning);font-weight:600">${diffCount.diffCount}</span>/${Math.max(msgsA.length, msgsB.length)} 条消息存在差异`;
+    html += '</div>';
+    html += `<div class="diff-header-right"><strong style="color:#6ee7b7">B: #${idxB + 1}</strong> ${escapeHtml(recB.model || '?')} | ${recB.prompt_tokens ?? '?'}P/${recB.completion_tokens ?? '?'}C</div>`;
+    html += '</div>';
+
+    // 逐条消息对比
+    const maxLen = Math.max(msgsA.length, msgsB.length);
+    const roleIcons = { system: '&#9881;', user: '&#128100;', assistant: '&#129302;', tool: '&#128295;', thinking: '&#128173;' };
+    const roleNames = { system: 'System', user: 'User', assistant: 'Assistant', tool: 'Tool', thinking: 'Thinking' };
+
+    for (let i = 0; i < maxLen; i++) {
+        const mA = msgsA[i];
+        const mB = msgsB[i];
+        const diffResult = compareMessages(mA, mB);
+
+        // 确定卡片类型
+        let cardClass = 'diff-msg-card';
+        let statusClass = '';
+        let statusText = '';
+        if (diffResult.type === 'added') {
+            cardClass += ' added';
+            statusClass = 'status-added';
+            statusText = '&#43; 新增';
+        } else if (diffResult.type === 'removed') {
+            cardClass += ' removed';
+            statusClass = 'status-removed';
+            statusText = '&#8722; 缺失';
+        } else if (diffResult.type === 'same') {
+            cardClass += ' no-diff';
+            statusClass = 'status-same';
+            statusText = '&#10004; 相同';
+        } else {
+            cardClass += ' has-diff';
+            statusClass = 'status-diff';
+            statusText = '&#9888; 差异';
+        }
+
+        const displayMsg = mA || mB;
+        const role = displayMsg ? (displayMsg.role || 'unknown') : '';
+        const roleIcon = roleIcons[role] || '&#9679;';
+        const roleName = roleNames[role] || role;
+        const summary = diffResult.preview;
+
+        html += `<div class="${cardClass}" data-msg-idx="${i}">`;
+        html += `<div class="diff-msg-header" onclick="toggleDiffMessage(this)">`;
+        html += `<span class="diff-msg-role-icon">${roleIcon}</span>`;
+        html += `<span class="diff-msg-role-label diff-msg-role-${role}">${escapeHtml(roleName)}</span>`;
+        html += `<span class="diff-msg-status ${statusClass}">${statusText}</span>`;
+        html += `<span class="diff-msg-summary">${escapeHtml(summary)}</span>`;
+        html += '<span class="diff-msg-toggle">&#9654;</span>';
+        html += '</div>';
+
+        html += '<div class="diff-msg-body">';
+        html += '<div class="diff-msg-body-inner">';
+
+        if (diffResult.type === 'same') {
+            // 内容相同，单列显示
+            const content = formatMessageContent(mA.content);
+            html += `<div class="diff-col diff-col-same">`;
+            html += '<div class="diff-col-header diff-col-label-same">\u5185\u5bb9\u76f8\u540c</div>';
+            html += content ? escapeHtml(content.substring(0, 2000)) : '<em>（空）</em>';
+            html += '</div>';
+        } else if (diffResult.type === 'added') {
+            // 仅 B 有
+            html += '<div class="diff-col diff-col-empty">\u6d88\u606f A \u4e0d\u5b58\u5728</div>';
+            html += `<div class="diff-col diff-col-b">`;
+            html += '<div class="diff-col-header diff-col-label-b">\u6d88\u606f B \u65b0\u589e\u5185\u5bb9</div>';
+            const content = formatMessageContent(mB.content);
+            html += content ? escapeHtml(content.substring(0, 3000)) : '<em>（空）</em>';
+            html += '</div>';
+        } else if (diffResult.type === 'removed') {
+            // 仅 A 有
+            html += `<div class="diff-col diff-col-a">`;
+            html += '<div class="diff-col-header diff-col-label-a">\u6d88\u606f A \u5185\u5bb9</div>';
+            const content = formatMessageContent(mA.content);
+            html += content ? escapeHtml(content.substring(0, 3000)) : '<em>（空）</em>';
+            html += '</div>';
+            html += '<div class="diff-col diff-col-empty">\u6d88\u606f B \u4e0d\u5b58\u5728</div>';
+        } else {
+            // 内容不同，双列显示并内联高亮差异
+            const contentA = formatMessageContent(mA.content) || '';
+            const contentB = formatMessageContent(mB.content) || '';
+            const lineDiff = computeLineDiff(contentA, contentB);
+
+            html += `<div class="diff-col diff-col-a">`;
+            html += '<div class="diff-col-header diff-col-label-a">A: \u539f\u59cb\u5185\u5bb9</div>';
+            html += renderDiffLines(lineDiff, 'left');
+            html += '</div>';
+
+            html += `<div class="diff-col diff-col-b">`;
+            html += '<div class="diff-col-header diff-col-label-b">B: \u5bf9\u6bd4\u5185\u5bb9</div>';
+            html += renderDiffLines(lineDiff, 'right');
+            html += '</div>';
+        }
+
+        html += '</div>'; // diff-msg-body-inner
+        html += '</div>'; // diff-msg-body
+        html += '</div>'; // diff-msg-card
+    }
+
+    container.innerHTML = html;
+}
+
+/**
+ * 统计差异消息数量
+ */
+function countDiffMessages(msgsA, msgsB) {
+    const maxLen = Math.max(msgsA.length, msgsB.length);
+    let diffCount = 0;
+    for (let i = 0; i < maxLen; i++) {
+        const result = compareMessages(msgsA[i], msgsB[i]);
+        if (result.type !== 'same') {
+            diffCount++;
+        }
+    }
+    return { diffCount, total: maxLen };
+}
+
+/**
+ * 比较两条消息
+ * 返回 { type: 'same'|'modified'|'added'|'removed', preview: string }
+ */
+function compareMessages(mA, mB) {
+    if (!mA && !mB) {
+        return { type: 'same', preview: '' };
+    }
+    if (!mA) {
+        const preview = formatMessageContent(mB.content) || '[\u5de5\u5177\u8c03\u7528]';
+        return { type: 'added', preview: preview.substring(0, 80) };
+    }
+    if (!mB) {
+        const preview = formatMessageContent(mA.content) || '[\u5de5\u5177\u8c03\u7528]';
+        return { type: 'removed', preview: preview.substring(0, 80) };
+    }
+
+    const contentA = formatMessageContent(mA.content) || '';
+    const contentB = formatMessageContent(mB.content) || '';
+
+    if (contentA === contentB) {
+        return { type: 'same', preview: contentA.substring(0, 80) || '[\u5de5\u5177\u8c03\u7528]' };
+    } else {
+        return { type: 'modified', preview: contentA.substring(0, 60) + '...' || '[\u5de5\u5177\u8c03\u7528]' };
+    }
+}
+
+/**
+ * 展开/折叠单条消息
+ */
+function toggleDiffMessage(header) {
+    const card = header.parentElement;
+    card.classList.toggle('expanded');
+}
+
+/**
+ * 展开所有差异消息
+ */
+function expandAllDiffs() {
+    document.querySelectorAll('.diff-msg-card').forEach(card => {
+        card.classList.add('expanded');
+    });
+}
+
+/**
+ * 折叠所有差异消息
+ */
+function collapseAllDiffs() {
+    document.querySelectorAll('.diff-msg-card').forEach(card => {
+        card.classList.remove('expanded');
+    });
+}
+
+/**
+ * 计算行级 diff
+ * 返回数组: [{ type: 'same'|'add'|'remove'|'modify', lineA?: string, lineB?: string }]
+ */
+function computeLineDiff(textA, textB) {
+    const linesA = textA.split('\n');
+    const linesB = textB.split('\n');
+
+    const lcs = computeLCS(linesA, linesB);
+    const result = [];
+
+    let iA = 0, iB = 0, iL = 0;
+
+    while (iA < linesA.length || iB < linesB.length) {
+        const lcsLine = iL < lcs.length ? lcs[iL] : null;
+
+        if (lcsLine !== null && iA < linesA.length && linesA[iA] === lcsLine && iB < linesB.length && linesB[iB] === lcsLine) {
+            result.push({ type: 'same', lineA: linesA[iA], lineB: linesB[iB] });
+            iA++; iB++; iL++;
+        } else {
+            const removeBlock = [];
+            while (iA < linesA.length && (lcsLine === null || linesA[iA] !== lcsLine)) {
+                removeBlock.push(linesA[iA]);
+                iA++;
+            }
+            const addBlock = [];
+            while (iB < linesB.length && (lcsLine === null || linesB[iB] !== lcsLine)) {
+                addBlock.push(linesB[iB]);
+                iB++;
+            }
+
+            const pairs = Math.min(removeBlock.length, addBlock.length);
+            for (let p = 0; p < pairs; p++) {
+                result.push({ type: 'modify', lineA: removeBlock[p], lineB: addBlock[p] });
+            }
+            for (let p = pairs; p < removeBlock.length; p++) {
+                result.push({ type: 'remove', lineA: removeBlock[p] });
+            }
+            for (let p = pairs; p < addBlock.length; p++) {
+                result.push({ type: 'add', lineB: addBlock[p] });
+            }
+        }
+    }
+
+    return result;
+}
+
+/**
+ * 计算 LCS（最长公共子序列）
+ */
+function computeLCS(a, b) {
+    const m = a.length, n = b.length;
+    if (m * n > 500000) {
+        return computeLCSSparse(a, b);
+    }
+
+    const dp = [];
+    for (let i = 0; i <= m; i++) {
+        dp[i] = new Uint16Array(n + 1);
+    }
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            dp[i][j] = a[i - 1] === b[j - 1]
+                ? dp[i - 1][j - 1] + 1
+                : Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+    }
+
+    const lcs = [];
+    let i = m, j = n;
+    while (i > 0 && j > 0) {
+        if (a[i - 1] === b[j - 1]) {
+            lcs.unshift(a[i - 1]);
+            i--; j--;
+        } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+            i--;
+        } else {
+            j--;
+        }
+    }
+    return lcs;
+}
+
+/**
+ * 稀疏 LCS（大数组优化）
+ */
+function computeLCSSparse(a, b) {
+    const indexMap = new Map();
+    b.forEach((line, j) => {
+        if (!indexMap.has(line)) indexMap.set(line, []);
+        indexMap.get(line).push(j);
+    });
+
+    const matches = [];
+    a.forEach((line, i) => {
+        const indices = indexMap.get(line);
+        if (indices) {
+            for (let k = indices.length - 1; k >= 0; k--) {
+                matches.push([i, indices[k]]);
+            }
+        }
+    });
+
+    const stacks = [];
+    const stackTops = [];
+    const prevLinks = [];
+
+    for (const [iA, iB] of matches) {
+        let pos = stackTops.findIndex(v => v >= iB);
+        if (pos === -1) pos = stackTops.length;
+
+        if (pos > 0) prevLinks.push([iA, iB, stacks[pos - 1].length - 1]);
+        else prevLinks.push([iA, iB, -1]);
+
+        if (pos === stacks.length) {
+            stacks.push([]);
+            stackTops.push(iB);
+        }
+        stacks[pos].push([iA, iB]);
+        stackTops[pos] = iB;
+    }
+
+    const result = [];
+    if (stacks.length === 0) return result;
+
+    let stackIdx = stacks.length - 1;
+    let linkIdx = stacks[stackIdx].length - 1;
+
+    while (stackIdx >= 0 && linkIdx >= 0) {
+        const [iA] = stacks[stackIdx][linkIdx];
+        result.unshift(a[iA]);
+
+        if (stackIdx > 0) {
+            for (let p = prevLinks.length - 1; p >= 0; p--) {
+                if (prevLinks[p][0] === stacks[stackIdx][linkIdx][0] && prevLinks[p][2] >= 0) {
+                    stackIdx--;
+                    linkIdx = prevLinks[p][2];
+                    break;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    return result;
+}
+
+/**
+ * 渲染行级 diff 到 HTML
+ */
+function renderDiffLines(diffLines, side) {
+    let html = '';
+    diffLines.forEach(d => {
+        switch (d.type) {
+            case 'same':
+                html += escapeHtml(side === 'left' ? d.lineA : d.lineB) + '\n';
+                break;
+            case 'add':
+                if (side === 'right') {
+                    html += `<span class="diff-line-add">${escapeHtml(d.lineB)}</span>\n`;
+                }
+                break;
+            case 'remove':
+                if (side === 'left') {
+                    html += `<span class="diff-line-remove">${escapeHtml(d.lineA)}</span>\n`;
+                }
+                break;
+            case 'modify':
+                if (side === 'left') {
+                    html += renderInlineCharDiff(d.lineA, d.lineB, 'remove') + '\n';
+                } else {
+                    html += renderInlineCharDiff(d.lineB, d.lineA, 'add') + '\n';
+                }
+                break;
+        }
+    });
+    return html;
+}
+
+/**
+ * 字符级内联 diff
+ */
+function renderInlineCharDiff(current, other, type) {
+    const cssClass = type === 'add' ? 'diff-char-add' : 'diff-char-remove';
+
+    let prefixLen = 0;
+    while (prefixLen < current.length && prefixLen < other.length && current[prefixLen] === other[prefixLen]) {
+        prefixLen++;
+    }
+    let suffixLen = 0;
+    while (suffixLen < current.length - prefixLen && suffixLen < other.length - prefixLen &&
+           current[current.length - 1 - suffixLen] === other[other.length - 1 - suffixLen]) {
+        suffixLen++;
+    }
+
+    const prefix = current.substring(0, prefixLen);
+    const suffix = current.substring(current.length - suffixLen);
+    const midCurrent = current.substring(prefixLen, current.length - suffixLen);
+    const midOther = other.substring(prefixLen, other.length - suffixLen);
+
+    const charLCS = computeLCS(midCurrent.split(''), midOther.split(''));
+    const lcsSet = new Set();
+    let lcsIdx = 0;
+    for (let ci = 0; ci < midCurrent.length && lcsIdx < charLCS.length; ci++) {
+        if (midCurrent[ci] === charLCS[lcsIdx]) {
+            lcsSet.add(ci);
+            lcsIdx++;
+        }
+    }
+
+    let midHtml = '';
+    for (let ci = 0; ci < midCurrent.length; ci++) {
+        const ch = escapeHtml(midCurrent[ci]);
+        if (lcsSet.has(ci)) {
+            midHtml += ch;
+        } else {
+            midHtml += `<span class="${cssClass}">${ch}</span>`;
+        }
+    }
+
+    return escapeHtml(prefix) + midHtml + escapeHtml(suffix);
 }
 
 /**
