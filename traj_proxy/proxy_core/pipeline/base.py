@@ -124,6 +124,7 @@ class BasePipeline(ABC):
         context.raw_request = {
             "model": self.model,
             "messages": messages,
+            "stream": is_stream,
             **request_params
         }
 
