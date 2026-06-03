@@ -894,11 +894,7 @@
             <div class="dag-scroll-container">
                 <div class="dag-container" id="dagContainer">
                     <svg class="dag-svg" id="dagSvg">
-                        <defs>
-                            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                                <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
-                            </marker>
-                        </defs>
+                        <defs></defs>
                     </svg>
                 </div>
             </div>
@@ -918,6 +914,20 @@ let renderedBodySet = new Set(); // 已渲染 body 的 record 索引集合
 const MAX_STRING_LEN = 200;
 const MAX_ARRAY_RENDER = 200; // 大数组最多渲染条目数
 const CHAT_COLLAPSE_LEN = 800; // 聊天消息超过此长度折叠
+
+// 配置组颜色方案：system/tools 参数不同的请求用不同颜色区分
+const CONFIG_COLORS = [
+    '#6366f1', // 靛蓝 - 默认组
+    '#f59e0b', // 琥珀
+    '#10b981', // 翡翠
+    '#8b5cf6', // 紫罗兰
+    '#06b6d4', // 青色
+    '#f97316', // 橙色
+    '#ec4899', // 粉色
+    '#14b8a6', // 蓝绿
+];
+const EDGE_SAME_CONFIG_COLOR = '#475569';  // 同配置连线颜色 (Slate 600)
+const EDGE_DIFF_CONFIG_COLOR = '#f97316';  // 不同配置连线颜色 (橙色警告)
 
 const stringStore = new Map(); // 存储 long string / array 引用，避免 DOM 属性膨胀
 let stringStoreId = 0;
@@ -2002,84 +2012,120 @@ function closeAnalysisModal(event) {
 }
 
 /**
- * 构建记录关系图
- * 返回: { nodes: [], edges: [], roots: [] }
+ * 获取 record 的请求消息列表（兼容多种数据格式）
+ */
+function getRecordMessages(record) {
+    return record.messages || (record.raw_request && record.raw_request.messages) || [];
+}
+
+/**
+ * 计算请求配置指纹（system 消息 + tools 参数）
+ * 用于区分不同配置的推理请求
+ */
+function computeConfigFingerprint(record) {
+    const msgs = getRecordMessages(record);
+    // 提取 system 消息内容
+    const systemMsg = msgs.find(m => m.role === 'system');
+    const systemContent = systemMsg
+        ? (typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content))
+        : '';
+
+    // 提取 tools 参数（取工具名称列表排序后拼接）
+    const tools = record.tools
+        || (record.raw_request && record.raw_request.tools)
+        || [];
+    const toolsNames = Array.isArray(tools)
+        ? tools.map(t => t.function && t.function.name ? t.function.name : (t.name || '')).sort().join(',')
+        : '';
+
+    return `sys:${systemContent}|tools:${toolsNames}`;
+}
+
+/**
+ * 构建记录关系图（仅连前后轮对话，配置组颜色区分）
+ * 返回: { nodes: [], edges: [], roots: [], configGroupCount, configFingerprints }
  */
 function buildRelationGraph(records) {
     const nodes = records.map((r, i) => ({
         idx: i,
         hasError: !!r.error,
         children: [],
-        parents: []
+        parents: [],
+        configGroup: -1 // 待分配
     }));
 
     const edges = [];
 
-    // 计算每个 record 的 messages 指纹（请求部分）
-    const fingerprints = records.map(r => computeMessagesFingerprint(r.messages || []));
+    // 计算每个 record 的配置指纹并分配配置组（相同指纹 = 同一组）
+    const configFingerprints = records.map(r => computeConfigFingerprint(r));
+    const configGroupMap = new Map();
+    let groupIndex = 0;
+    configFingerprints.forEach((fp, i) => {
+        if (!configGroupMap.has(fp)) {
+            configGroupMap.set(fp, groupIndex++);
+        }
+        nodes[i].configGroup = configGroupMap.get(fp);
+    });
 
-    // 检测继承关系：record[j] 继承自 record[i]
-    for (let i = 0; i < records.length; i++) {
-        for (let j = 0; j < records.length; j++) {
+    // 仅限前后轮对话连线：每个 record 只连接其直接前驱
+    // 直接前驱 = 消息前缀最长且完全匹配的 record（排除跨轮连线）
+    for (let j = 0; j < records.length; j++) {
+        let bestParent = -1;
+        let bestParentLen = 0;
+
+        const childMsgs = getRecordMessages(records[j]);
+        if (childMsgs.length === 0) continue;
+
+        for (let i = 0; i < records.length; i++) {
             if (i === j) continue;
 
-            // 检测 j 是否继承自 i
-            if (isChildOf(records[j], records[i], fingerprints[i], fingerprints[j])) {
-                nodes[i].children.push(j);
-                nodes[j].parents.push(i);
-                edges.push({ from: i, to: j });
+            const parentMsgs = getRecordMessages(records[i]);
+            if (parentMsgs.length === 0) continue;
+            if (childMsgs.length <= parentMsgs.length) continue;
+
+            // 检查前 parentMsgs.length 条消息是否一致
+            let match = true;
+            for (let k = 0; k < parentMsgs.length; k++) {
+                if (!messagesEqual(childMsgs[k], parentMsgs[k])) {
+                    match = false;
+                    break;
+                }
             }
+
+            // 只取最长匹配前缀作为直接前驱（保证只有前后轮连线，无跨轮连线）
+            if (match && parentMsgs.length > bestParentLen) {
+                bestParent = i;
+                bestParentLen = parentMsgs.length;
+            }
+        }
+
+        if (bestParent >= 0) {
+            nodes[bestParent].children.push(j);
+            nodes[j].parents.push(bestParent);
+            edges.push({
+                from: bestParent,
+                to: j,
+                configChanged: nodes[bestParent].configGroup !== nodes[j].configGroup,
+                fromGroup: nodes[bestParent].configGroup,
+                toGroup: nodes[j].configGroup
+            });
         }
     }
 
     // 找出根节点（没有父节点的节点）
     const roots = nodes.filter(n => n.parents.length === 0).map(n => n.idx);
 
-    return { nodes, edges, roots };
+    return { nodes, edges, roots, configGroupCount: groupIndex, configFingerprints };
 }
 
 /**
- * 计算 messages 的指纹（请求部分）
- */
-function computeMessagesFingerprint(messages) {
-    if (!Array.isArray(messages) || messages.length === 0) return '';
-    // 对每条消息取 role + content 前50字符
-    return messages.map(m => {
-        const content = typeof m.content === 'string' ? m.content : '';
-        const truncated = content.length > 50 ? content.substring(0, 50) : content;
-        return `${m.role}:${truncated}`;
-    }).join('|');
-}
-
-/**
- * 判断 child 是否继承自 parent
- * 继承条件：child.messages 的前 N 条与 parent.messages 一致
- */
-function isChildOf(child, parent, parentFingerprint, childFingerprint) {
-    const parentMsgs = parent.messages || [];
-    const childMsgs = child.messages || [];
-
-    if (parentMsgs.length === 0 || childMsgs.length === 0) return false;
-    if (childMsgs.length <= parentMsgs.length) return false;
-
-    // 检查前 parentMsgs.length 条消息是否一致
-    for (let i = 0; i < parentMsgs.length; i++) {
-        if (!messagesEqual(childMsgs[i], parentMsgs[i])) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-/**
- * 比较两条消息是否相等
+ * 比较两条消息是否相等（用于前后轮对话检测）
  */
 function messagesEqual(a, b) {
     if (a.role !== b.role) return false;
 
-    const contentA = typeof a.content === 'string' ? a.content : '';
-    const contentB = typeof b.content === 'string' ? b.content : '';
+    const contentA = typeof a.content === 'string' ? a.content : JSON.stringify(a.content || '');
+    const contentB = typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '');
 
     if (contentA !== contentB) return false;
 
@@ -2092,7 +2138,7 @@ function messagesEqual(a, b) {
 }
 
 /**
- * 渲染 DAG 图
+ * 渲染 DAG 图（配置组颜色区分 + 前后轮连线）
  */
 function renderDAG(graph) {
     const container = document.getElementById('dagContainer');
@@ -2100,7 +2146,11 @@ function renderDAG(graph) {
 
     // 清空现有内容
     container.querySelectorAll('.dag-node').forEach(el => el.remove());
+    container.querySelectorAll('.dag-legend').forEach(el => el.remove());
     svg.querySelectorAll('path').forEach(el => el.remove());
+    // 清空旧 marker，准备动态创建
+    const defs = svg.querySelector('defs');
+    defs.innerHTML = '';
 
     if (graph.nodes.length === 0) {
         container.innerHTML = `<div class="analysis-empty">
@@ -2110,10 +2160,31 @@ function renderDAG(graph) {
         return;
     }
 
+    // 为每种连线颜色动态创建箭头 marker
+    const markerColors = [EDGE_SAME_CONFIG_COLOR, EDGE_DIFF_CONFIG_COLOR];
+    // 不同配置组间连线也用各组的颜色 marker（用于节点边框高亮）
+    for (let g = 0; g < graph.configGroupCount; g++) {
+        markerColors.push(CONFIG_COLORS[g] || CONFIG_COLORS[0]);
+    }
+    markerColors.forEach(color => {
+        const markerId = 'arrow-' + color.replace('#', '');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', markerId);
+        marker.setAttribute('markerWidth', '10');
+        marker.setAttribute('markerHeight', '7');
+        marker.setAttribute('refX', '9');
+        marker.setAttribute('refY', '3.5');
+        marker.setAttribute('orient', 'auto');
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        polygon.setAttribute('points', '0 0, 10 3.5, 0 7');
+        polygon.setAttribute('fill', color);
+        marker.appendChild(polygon);
+        defs.appendChild(marker);
+    });
+
     // 计算布局：使用简单的层级布局
     const layout = computeLayout(graph);
 
-    // 渲染节点
     const nodeWidth = 70;
     const nodeHeight = 44;
     const horizontalGap = 30;
@@ -2124,13 +2195,24 @@ function renderDAG(graph) {
         const x = pos.level * (nodeWidth + horizontalGap) + 40;
         const y = pos.offset * (nodeHeight + verticalGap) + 40;
 
+        const configColor = CONFIG_COLORS[node.configGroup] || CONFIG_COLORS[0];
+
+        // 构建节点 tooltip：配置组信息
+        const fp = graph.configFingerprints[idx];
+        const sysPart = (fp.split('|')[0] || '').replace('sys:', '');
+        const toolsPart = (fp.split('|')[1] || '').replace('tools:', '');
+        const tooltip = `配置组 ${node.configGroup + 1}\nSystem: ${truncate(sysPart, 80) || '(无)'}\nTools: ${toolsPart || '(无)'}`;
+
         const nodeEl = document.createElement('div');
         nodeEl.className = `dag-node ${node.hasError ? 'error' : 'normal'}`;
         nodeEl.style.left = `${x}px`;
         nodeEl.style.top = `${y}px`;
+        nodeEl.style.borderColor = configColor;
+        nodeEl.style.color = configColor;
+        nodeEl.title = tooltip;
         nodeEl.innerHTML = `<div class="dag-node-label">
             <span class="dag-node-idx">#${idx + 1}</span>
-            <span class="dag-node-status">${node.hasError ? 'Error' : 'OK'}</span>
+            <span class="dag-node-status" style="color:${configColor}">${node.hasError ? 'Error' : 'OK'}</span>
         </div>`;
         nodeEl.onclick = () => jumpToRecord(idx);
         nodeEl.id = `dag-node-${idx}`;
@@ -2138,35 +2220,78 @@ function renderDAG(graph) {
 
         // 存储位置信息用于绘制连线
         node._x = x + nodeWidth / 2;
-        node._y = y + nodeHeight;
+        node._y = y + nodeHeight;       // 底部（出边起点）
+        node._topY = y;                  // 顶部（入边终点）
     });
 
-    // 渲染连线
+    // 渲染连线（前后轮对话关系）
     graph.edges.forEach(edge => {
         const fromNode = graph.nodes[edge.from];
         const toNode = graph.nodes[edge.to];
 
         if (fromNode._x === undefined) return;
 
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         const fromX = fromNode._x;
         const fromY = fromNode._y;
         const toX = toNode._x;
-        const toY = toNode._y - nodeHeight;  // 连接到节点顶部
+        const toY = toNode._topY;
 
-        // 使用贝塞尔曲线
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         const midY = (fromY + toY) / 2;
         path.setAttribute('d', `M${fromX},${fromY} C${fromX},${midY} ${toX},${midY} ${toX},${toY}`);
-        path.setAttribute('stroke', '#64748b');
-        path.setAttribute('stroke-width', '2');
-        path.setAttribute('fill', 'none');
-        path.setAttribute('marker-end', 'url(#arrowhead)');
+
+        if (edge.configChanged) {
+            // 配置变更连线：橙色虚线（醒目提示 system 或 tools 参数不一致）
+            path.setAttribute('stroke', EDGE_DIFF_CONFIG_COLOR);
+            path.setAttribute('stroke-width', '2.5');
+            path.setAttribute('stroke-dasharray', '6,3');
+            path.setAttribute('fill', 'none');
+            path.setAttribute('marker-end', `url(#arrow-${EDGE_DIFF_CONFIG_COLOR.replace('#', '')})`);
+        } else {
+            // 同配置连线：实线（前后轮对话配置一致）
+            path.setAttribute('stroke', EDGE_SAME_CONFIG_COLOR);
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('fill', 'none');
+            path.setAttribute('marker-end', `url(#arrow-${EDGE_SAME_CONFIG_COLOR.replace('#', '')})`);
+        }
 
         svg.appendChild(path);
     });
 
+    // 渲染颜色图例（右上角）
+    const legendEl = document.createElement('div');
+    legendEl.className = 'dag-legend';
+    legendEl.style.cssText = 'position:absolute;bottom:10px;right:10px;background:rgba(30,41,59,0.92);border:1px solid var(--border-color);border-radius:8px;padding:12px 16px;font-size:11px;z-index:5;max-width:220px;';
+
+    let legendHtml = '<div style="font-weight:700;color:var(--text-muted);margin-bottom:8px;letter-spacing:0.5px;">配置组颜色</div>';
+
+    // 配置组颜色说明
+    for (let g = 0; g < graph.configGroupCount; g++) {
+        const color = CONFIG_COLORS[g] || CONFIG_COLORS[0];
+        const count = graph.nodes.filter(n => n.configGroup === g).length;
+        legendHtml += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="width:12px;height:12px;border-radius:3px;background:${color};display:inline-block;"></span>
+            <span style="color:var(--text-main);">配置组 ${g + 1} (${count} 条)</span>
+        </div>`;
+    }
+
+    // 连线类型说明
+    legendHtml += '<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border-color);">';
+    legendHtml += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+        <span style="width:24px;height:2px;background:${EDGE_SAME_CONFIG_COLOR};display:inline-block;"></span>
+        <span style="color:var(--text-main);">同配置前后轮</span>
+    </div>`;
+    legendHtml += `<div style="display:flex;align-items:center;gap:6px;">
+        <span style="width:24px;height:0;border-top:2.5px dashed ${EDGE_DIFF_CONFIG_COLOR};display:inline-block;"></span>
+        <span style="color:var(--text-main);">配置变更(Sys/Tools)</span>
+    </div>`;
+    legendHtml += '</div>';
+
+    legendEl.innerHTML = legendHtml;
+    container.appendChild(legendEl);
+
     // 更新容器大小
-    const maxX = Math.max(...layout.positions.map(p => p.level)) * (nodeWidth + horizontalGap) + 150;
+    const maxX = Math.max(...layout.positions.map(p => p.level)) * (nodeWidth + horizontalGap) + 200;
     const maxY = Math.max(...layout.positions.map(p => p.offset)) * (nodeHeight + verticalGap) + 150;
     container.style.width = `${Math.max(maxX, 400)}px`;
     container.style.height = `${Math.max(maxY, 300)}px`;
@@ -2217,18 +2342,21 @@ function computeLayout(graph) {
 }
 
 /**
- * 更新统计信息
+ * 更新统计信息（含配置组与配置变更统计）
  */
 function updateAnalysisStats(graph) {
     const statsEl = document.getElementById('analysisStats');
     const errorCount = graph.nodes.filter(n => n.hasError).length;
     const rootCount = graph.roots.length;
     const edgeCount = graph.edges.length;
+    const configChangedEdges = graph.edges.filter(e => e.configChanged).length;
 
     statsEl.innerHTML = `
         <div class="stat-item"><span>总记录:</span><span class="stat-value">${graph.nodes.length}</span></div>
         <div class="stat-item"><span>对话树:</span><span class="stat-value">${rootCount}</span></div>
-        <div class="stat-item"><span>关联数:</span><span class="stat-value">${edgeCount}</span></div>
+        <div class="stat-item"><span>前后轮:</span><span class="stat-value">${edgeCount}</span></div>
+        <div class="stat-item"><span>配置组:</span><span class="stat-value">${graph.configGroupCount}</span></div>
+        <div class="stat-item"><span>配置变更:</span><span class="stat-value" style="color:${configChangedEdges > 0 ? EDGE_DIFF_CONFIG_COLOR : 'var(--success)'}">${configChangedEdges}</span></div>
         <div class="stat-item"><span>异常:</span><span class="stat-value" style="color: ${errorCount > 0 ? '#f87171' : 'var(--success)'}">${errorCount}</span></div>
     `;
 }
