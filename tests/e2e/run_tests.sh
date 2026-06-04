@@ -30,6 +30,9 @@ TOTAL_SCENARIOS=0
 PASSED_SCENARIOS=0
 FAILED_SCENARIOS=0
 
+# 计时日志文件（由 run_tests.sh 创建，传递给 run_layer.sh 使用）
+TIMING_LOG=""
+
 # 默认跳过的场景前缀（P=性能测试, A=归档测试），显式指定场景编号时不过滤
 # 可通过 --all 清除此过滤，或通过 SKIP_PREFIXES 环境变量自定义
 SKIP_PREFIXES="${SKIP_PREFIXES:-P,A}"
@@ -140,6 +143,47 @@ run_scenario_cross_layer() {
     return 0
 }
 
+# 打印计时统计报告：耗时最长的前10个用例 + 全部用例平均耗时
+print_timing_report() {
+    if [ -z "${TIMING_LOG:-}" ] || [ ! -f "$TIMING_LOG" ] || [ ! -s "$TIMING_LOG" ]; then
+        return
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo "耗时统计报告"
+    echo "=========================================="
+
+    local total_cases=0
+    local total_time=0
+
+    while IFS='|' read -r name duration; do
+        total_cases=$((total_cases + 1))
+        total_time=$((total_time + duration))
+    done < "$TIMING_LOG"
+
+    # 前 10 个最慢用例
+    echo -e "${YELLOW}耗时最长的前 10 个用例:${NC}"
+    echo "──────────────────────────────────────────"
+    printf "  %-6s  %-40s  %s\n" "排名" "用例名称" "耗时"
+    echo "──────────────────────────────────────────"
+    sort -t'|' -k2 -rn "$TIMING_LOG" | head -n 10 | {
+        rank=0
+        while IFS='|' read -r name duration; do
+            rank=$((rank + 1))
+            printf "  %-6s  %-40s  %s\n" "#${rank}" "$name" "${duration}s"
+        done
+    }
+    echo "──────────────────────────────────────────"
+
+    # 平均耗时
+    if [ $total_cases -gt 0 ]; then
+        local avg=$((total_time / total_cases))
+        echo -e "全部用例总数: ${total_cases}  |  总耗时: ${total_time}s  |  ${YELLOW}平均耗时: ${avg}s${NC}"
+    fi
+    echo "=========================================="
+}
+
 # 打印最终摘要
 print_final_summary() {
     echo ""
@@ -150,6 +194,9 @@ print_final_summary() {
     echo -e "场景通过: ${GREEN}${PASSED_SCENARIOS}${NC}"
     echo -e "场景失败: ${RED}${FAILED_SCENARIOS}${NC}"
     echo "=========================================="
+
+    # 输出耗时报告
+    print_timing_report
 
     if [ $FAILED_SCENARIOS -eq 0 ]; then
         echo -e "${GREEN}所有测试通过！${NC}"
@@ -167,6 +214,11 @@ main() {
         echo -e "${RED}错误: layers 目录不存在${NC}"
         exit 1
     fi
+
+    # 创建计时日志临时文件，供各 run_layer.sh 写入
+    TIMING_LOG=$(mktemp /tmp/e2e_timing_XXXXXX.log)
+    export TIMING_LOG
+    trap "rm -f '$TIMING_LOG'" EXIT
 
     LAYER=""
     SCENARIO_IDS=()
@@ -242,6 +294,8 @@ main() {
                 exit 1
                 ;;
         esac
+        # 单层层模式也输出耗时报告
+        print_timing_report
     elif [ ${#SCENARIO_IDS[@]} -gt 0 ]; then
         # 未指定层，但有指定场景编号 -> 跨层搜索（显式指定，不过滤）
         for id in "${SCENARIO_IDS[@]}"; do
@@ -282,6 +336,7 @@ main() {
         # 汇总
         echo ""
         echo -e "${GREEN}全部层测试执行完毕${NC}"
+        print_timing_report
     fi
 }
 

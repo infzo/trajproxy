@@ -74,6 +74,7 @@ for idx in $(seq 0 $((MODEL_COUNT - 1))); do
         -d "{
             \"model\": \"${MODEL_NAME}\",
             \"messages\": [{\"role\": \"user\", \"content\": \"Round 1, model idx ${idx}\"}],
+            \"max_tokens\": 10,
             \"stream\": false
         }")
 
@@ -108,6 +109,7 @@ for idx in "${EVICTED_INDICES[@]}"; do
         -d "{
             \"model\": \"${MODEL_NAME}\",
             \"messages\": [{\"role\": \"user\", \"content\": \"Reload evicted model idx ${idx}\"}],
+            \"max_tokens\": 10,
             \"stream\": false
         }")
 
@@ -143,6 +145,7 @@ for idx in "${CACHED_INDICES[@]}"; do
         -d "{
             \"model\": \"${MODEL_NAME}\",
             \"messages\": [{\"role\": \"user\", \"content\": \"Verify cached model idx ${idx}\"}],
+            \"max_tokens\": 10,
             \"stream\": false
         }")
 

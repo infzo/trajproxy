@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+# Adapted from vllm/reasoning/deepseek_r1_reasoning_parser.py
 
 from collections.abc import Sequence
 
@@ -9,11 +10,10 @@ from vllm.reasoning.basic_parsers import BaseThinkingReasoningParser
 
 class DeepSeekR1ReasoningParser(BaseThinkingReasoningParser):
     """
-    Reasoning parser for DeepSeek R1 and compatible models (e.g., Qwen3).
+    Reasoning parser for DeepSeek R1 model.
 
-    Uses <think>...</think> tokens to denote reasoning text within model output.
-    Non-streaming extraction uses base class logic, which correctly handles
-    truncated output (when </think> is missing due to max_tokens limit).
+    The DeepSeek R1 model uses <think>...</think> tokens to denote reasoning
+    text. This parser extracts the reasoning content from the model output.
     """
 
     @property
@@ -35,7 +35,6 @@ class DeepSeekR1ReasoningParser(BaseThinkingReasoningParser):
         current_token_ids: Sequence[int],
         delta_token_ids: Sequence[int],
     ) -> DeltaMessage | None:
-        # Delegate to base class first (same logic as vLLM upstream)
         ret = super().extract_reasoning_streaming(
             previous_text,
             current_text,
@@ -44,9 +43,6 @@ class DeepSeekR1ReasoningParser(BaseThinkingReasoningParser):
             current_token_ids,
             delta_token_ids,
         )
-
-        # Additional handling for cases where base class returns None
-        # (single start/end tokens skipped by base class), matching vLLM upstream
         if (
             ret is not None
             and self.start_token_id not in previous_token_ids
@@ -68,17 +64,5 @@ class DeepSeekR1ReasoningParser(BaseThinkingReasoningParser):
             else:
                 # no end token in previous or delta, reasoning content continues
                 return DeltaMessage(reasoning=delta_text)
-
-        # Strip <think> prefix from reasoning delta when start token was in this delta
-        # (base class returns DeltaMessage(reasoning=delta_text) which includes <think>)
-        if (
-            ret is not None
-            and ret.reasoning
-            and self.start_token_id in delta_token_ids
-        ):
-            clean = ret.reasoning
-            if self.start_token in clean:
-                clean = clean[clean.find(self.start_token) + len(self.start_token) :]
-            ret = DeltaMessage(reasoning=clean, content=ret.content)
 
         return ret

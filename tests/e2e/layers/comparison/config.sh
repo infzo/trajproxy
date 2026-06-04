@@ -1,5 +1,5 @@
 #!/bin/bash
-# Layer 4 配置: 对比测试层（vLLM port 8000 vs trajproxy port 12300）
+# Layer 4 配置: 对比测试层（vLLM port 8080 vs trajproxy port 12300）
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../../config.sh"
@@ -9,7 +9,7 @@ PROXY_URL="${TRAJ_PROXY_URL:-http://127.0.0.1:12300}"
 PROXY_API_MODELS="${PROXY_URL}/models"
 
 # vLLM 原始推理服务地址
-VLLM_URL="${VLLM_URL:-http://127.0.0.1:8000}"
+VLLM_URL="${VLLM_URL:-http://127.0.0.1:8080}"
 VLLM_API_MODELS="${VLLM_URL}/v1/models"
 
 # 对比测试通用配置（引用全局 DEFAULT_* 变量，支持环境变量覆盖）

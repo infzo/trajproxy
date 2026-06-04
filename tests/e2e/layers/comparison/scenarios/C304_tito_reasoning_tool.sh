@@ -1,7 +1,8 @@
 #!/bin/bash
-# 场景 C304: TITO 模式 - Reasoning + Tool 组合 API 一致性验证
-# 测试流程：注册模型(TITO+qwen3+hermes) -> 非流式对比 -> 流式对比 -> 删除模型
+# 场景 C304: TITO 模式 - Reasoning + Tool 组合 API 一致性验证（preserve_thinking=true）
+# 测试流程：注册模型(TITO+qwen3+qwen3_coder) -> 非流式对比 -> 流式对比 -> 删除模型
 # 核心看护: reasoning + tool_calls 组合场景下 trajproxy 与 vLLM 之间全字段一致性
+# 关键参数: preserve_thinking=true, enable_thinking=true, reasoning_parser=qwen3, tool_parser=qwen3_coder
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
@@ -17,9 +18,9 @@ TEST_SESSION_ID="sess-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 TEST_SESSION_PATH="s/${TEST_RUN_ID}/${TEST_SESSION_ID}"
 
 # ========================================
-# 步骤 1: 注册模型（TITO + qwen3 reasoning + hermes tool）
+# 步骤 1: 注册模型（TITO + qwen3 reasoning + qwen3_coder tool）
 # ========================================
-log_step "步骤 1: 注册模型（TITO + qwen3 reasoning + hermes tool）"
+log_step "步骤 1: 注册模型（TITO + qwen3 reasoning + qwen3_coder tool, preserve_thinking=true）"
 register_model "$TEST_RUN_ID" "$COMPARISON_MODEL_NAME" "true" "${COMPARISON_TOOL_PARSER}" "${COMPARISON_REASONING_PARSER}"
 
 echo ""

@@ -67,6 +67,7 @@ for idx in "${!MODEL_RUN_IDS[@]}"; do
         -d "{
             \"model\": \"${MODEL_NAME}\",
             \"messages\": [{\"role\": \"user\", \"content\": \"Round 1 request for ${MODEL_NAME} run_id ${run_id}\"}],
+            \"max_tokens\": 10,
             \"stream\": false
         }")
 
@@ -100,6 +101,7 @@ for idx in "${!MODEL_RUN_IDS[@]}"; do
         -d "{
             \"model\": \"${MODEL_NAME}\",
             \"messages\": [{\"role\": \"user\", \"content\": \"Round 2 request for ${MODEL_NAME} run_id ${run_id}\"}],
+            \"max_tokens\": 10,
             \"stream\": false
         }")
 
@@ -131,6 +133,7 @@ for round in 1 2 3; do
             -d "{
                 \"model\": \"${MODEL_NAME}\",
                 \"messages\": [{\"role\": \"user\", \"content\": \"Alternating round ${round} for ${MODEL_NAME} run_id ${run_id}\"}],
+                \"max_tokens\": 10,
                 \"stream\": false
             }")
 

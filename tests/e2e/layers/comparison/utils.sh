@@ -266,7 +266,8 @@ build_plain_request_body() {
         \"messages\": [{\"role\": \"user\", \"content\": \"What is 2+2? Answer with just the number.\"}],
         \"stream\": false,
         ${COMPARISON_SAMPLING_PARAMS},
-        \"max_tokens\": 64
+        \"max_tokens\": 64,
+        \"chat_template_kwargs\": {\"preserve_thinking\": true, \"enable_thinking\": true}
     }"
 }
 
@@ -278,11 +279,12 @@ build_plain_stream_request_body() {
         \"messages\": [{\"role\": \"user\", \"content\": \"What is 2+2? Answer with just the number.\"}],
         \"stream\": true,
         ${COMPARISON_SAMPLING_PARAMS},
-        \"max_tokens\": 64
+        \"max_tokens\": 64,
+        \"chat_template_kwargs\": {\"preserve_thinking\": true, \"enable_thinking\": true}
     }"
 }
 
-# 构建带 tools 的请求体（hermes 格式）
+# 构建带 tools 的请求体（qwen3_coder 格式）
 # 参数: $1=model_name
 build_tool_request_body() {
     local model="$1"
@@ -310,11 +312,12 @@ build_tool_request_body() {
         ],
         \"stream\": false,
         ${COMPARISON_SAMPLING_PARAMS},
-        \"max_tokens\": 256
+        \"max_tokens\": 256,
+        \"chat_template_kwargs\": {\"preserve_thinking\": true, \"enable_thinking\": true}
     }"
 }
 
-# 构建带 tools 的流式请求体
+# 构建带 tools 的流式请求体（qwen3_coder 格式）
 build_tool_stream_request_body() {
     local model="$1"
     echo "{
@@ -341,7 +344,8 @@ build_tool_stream_request_body() {
         ],
         \"stream\": true,
         ${COMPARISON_SAMPLING_PARAMS},
-        \"max_tokens\": 256
+        \"max_tokens\": 256,
+        \"chat_template_kwargs\": {\"preserve_thinking\": true, \"enable_thinking\": true}
     }"
 }
 
@@ -354,7 +358,8 @@ build_reasoning_request_body() {
         \"messages\": [{\"role\": \"user\", \"content\": \"Solve: if x+3=7, what is x? Think step by step.\"}],
         \"stream\": false,
         ${COMPARISON_SAMPLING_PARAMS},
-        \"max_tokens\": 256
+        \"max_tokens\": 256,
+        \"chat_template_kwargs\": {\"preserve_thinking\": true, \"enable_thinking\": true}
     }"
 }
 
@@ -366,7 +371,8 @@ build_reasoning_stream_request_body() {
         \"messages\": [{\"role\": \"user\", \"content\": \"Solve: if x+3=7, what is x? Think step by step.\"}],
         \"stream\": true,
         ${COMPARISON_SAMPLING_PARAMS},
-        \"max_tokens\": 256
+        \"max_tokens\": 256,
+        \"chat_template_kwargs\": {\"preserve_thinking\": true, \"enable_thinking\": true}
     }"
 }
 
@@ -398,7 +404,8 @@ build_reasoning_tool_request_body() {
         ],
         \"stream\": false,
         ${COMPARISON_SAMPLING_PARAMS},
-        \"max_tokens\": 512
+        \"max_tokens\": 512,
+        \"chat_template_kwargs\": {\"preserve_thinking\": true, \"enable_thinking\": true}
     }"
 }
 
@@ -429,6 +436,7 @@ build_reasoning_tool_stream_request_body() {
         ],
         \"stream\": true,
         ${COMPARISON_SAMPLING_PARAMS},
-        \"max_tokens\": 512
+        \"max_tokens\": 512,
+        \"chat_template_kwargs\": {\"preserve_thinking\": true, \"enable_thinking\": true}
     }"
 }

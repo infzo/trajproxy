@@ -5,12 +5,12 @@
 """
 vLLM ReasoningParser 基类适配器
 
-提供 ReasoningParser 基类和 ReasoningParserManager 注册器。
+对齐 vllm 最新版本接口，保留 proxy 上下文的简化实现。
 """
 import importlib
 import os
 from abc import abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
@@ -19,15 +19,9 @@ from vllm.utils.collection_utils import is_list_of
 from vllm.utils.import_utils import import_from_path
 
 if TYPE_CHECKING:
-    from vllm.entrypoints.openai.chat_completion.protocol import (
-        ChatCompletionRequest,
-    )
-    from vllm.entrypoints.openai.engine.protocol import (
-        DeltaMessage,
-    )
-    from vllm.entrypoints.openai.responses.protocol import (
-        ResponsesRequest,
-    )
+    from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
+    from vllm.entrypoints.openai.engine.protocol import DeltaMessage
+    from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
     from vllm.tokenizers import TokenizerLike
 else:
     ChatCompletionRequest = Any
@@ -40,69 +34,111 @@ logger = init_logger(__name__)
 
 class ReasoningParser:
     """
-    抽象推理解析器基类，不应直接使用。
-    提供的方法应在子类中使用。
+    Abstract reasoning parser class that should not be used directly.
+    Provided methods should be used in derived classes.
 
-    用于从模型输出中提取推理内容。
+    It is used to extract reasoning content from the model output.
     """
 
     def __init__(self, tokenizer: TokenizerLike, *args, **kwargs):
         self.model_tokenizer = tokenizer
+        # Optional vLLM ModelConfig from the server. Use get (not pop) so composite
+        # parsers can forward **kwargs to nested parsers.
+        # NOTE: In proxy context, model_config is always None.
+        self._model_config: Any | None = kwargs.get("model_config")
 
     @cached_property
     def vocab(self) -> dict[str, int]:
-        # 注意：只有 PreTrainedTokenizerFast 保证有 .vocab
-        # 但所有 tokenizer 都有 .get_vocab()
+        # NOTE: Only PreTrainedTokenizerFast is guaranteed to have .vocab
+        # whereas all tokenizers have .get_vocab()
         return self.model_tokenizer.get_vocab()
+
+    @property
+    def reasoning_start_str(self) -> str | None:
+        """Set `reasoning_start_str` to the strings that delimit
+        the reasoning block (e.g. `"<seed:think>"` and `"索索"`).
+        """
+        return None
+
+    @property
+    def reasoning_end_str(self) -> str | None:
+        """Set `reasoning_end_str` to the strings that delimit
+        the reasoning block (e.g. `"</seed:think>"` and `"最终答案"`).
+        """
+        return None
 
     @abstractmethod
     def is_reasoning_end(self, input_ids: Sequence[int]) -> bool:
         """
-        检查推理内容是否在 input_ids 中结束。
+        Check if the reasoning content ends in the input_ids.
 
-        用于结构化引擎如 `xgrammar` 来检查推理内容是否在模型输出中结束。
+        It is used in structured engines like `xgrammar` to check if the
+        reasoning content ends in the model output.
 
-        参数：
+        Parameters:
         input_ids: list[int]
-            模型输出的 input_ids。
+            The input_ids of the model output.
 
-        返回：
+        Returns:
         bool
-            如果推理内容在 input_ids 中结束则为 True。
+            True if the reasoning content ends in the input_ids.
         """
 
     def is_reasoning_end_streaming(
-        self, input_ids: Sequence[int], delta_ids: Sequence[int]
+        self, input_ids: Sequence[int], delta_ids: Iterable[int]
     ) -> bool:
         """
-        检查推理内容是否在 decode 步骤的 input_ids 中结束。
+        Check if the reasoning content ends in the input_ids on a
+        decode step.
 
-        用于结构化引擎如 `xgrammar` 来检查推理内容是否在 decode 步骤期间在模型输出中结束。
-        `input_ids` 是整个模型输出，`delta_ids` 是模型输出在当前 decode 步骤的最后几个计算出的 tokens。
+        It is used in structured engines like `xgrammar` to check if the
+        reasoning content ends in the model output during a decode step.
+        `input_ids` the entire model output and `delta_ids` are the last few
+        computed tokens of the model output (like during a decode step).
 
-        参数：
+        Parameters:
         input_ids: list[int]
-            整个模型输出。
+            The entire model output.
         delta_ids: list[int]
-            当前 decode 步骤模型输出的最后几个计算出的 tokens。
+            The last few computed tokens of the model output at the current decode step.
 
-        返回：
+        Returns:
         bool
-            如果推理内容在 decode 步骤的 `delta_ids` 中结束则为 True。
+            True if the reasoning content ends in the `delta_ids` on a
+            decode step.
         """
         return self.is_reasoning_end(input_ids)
 
     @abstractmethod
     def extract_content_ids(self, input_ids: list[int]) -> list[int]:
         """
-        从 input_ids 中提取内容 token ids。
-        参数：
+        Extract content token ids from the input_ids.
+        Parameters:
         input_ids: list[int]
-            模型输出的 input_ids。
-        返回：
+            The input_ids of the model output.
+        Returns:
         list[int]
-            从 input_ids 中提取的内容。
+            The extracted content from the input_ids.
         """
+
+    def count_reasoning_tokens(self, token_ids: Sequence[int]) -> int:
+        """Count the number of reasoning tokens in a sequence.
+
+        Text-based reasoning models typically wrap their chain-of-thought
+        between special start/end tokens (e.g., ``索索 ... 最终答案``).
+        Implementations that support reasoning token counting should override
+        this method. The default implementation returns ``0`` so existing
+        parsers remain unchanged unless they explicitly opt in.
+
+        Args:
+            token_ids: Sequence of generated token ids (excluding prompt).
+
+        Returns:
+            int: Number of tokens that belong to reasoning content.
+        """
+
+        # By default, assume the parser cannot detect reasoning spans.
+        return 0
 
     @abstractmethod
     def extract_reasoning(
@@ -111,20 +147,17 @@ class ReasoningParser:
         request: ChatCompletionRequest | ResponsesRequest,
     ) -> tuple[str | None, str | None]:
         """
-        从完整的模型生成字符串中提取推理内容。
+        Extract reasoning content from a complete model-generated string.
 
-        用于非流式响应，我们在发送给客户端之前有完整的模型响应。
+        Used for non-streaming responses where we have the entire model response
+        available before sending to the client.
 
-        参数：
-        model_output: str
-            要从中提取推理内容的模型生成字符串。
+        Parameters:
+            model_output: The model-generated string to extract reasoning content from.
+            request: The request object that was used to generate the model_output.
 
-        request: ChatCompletionRequest
-            用于生成 model_output 的请求对象。
-
-        返回：
-        tuple[Optional[str], Optional[str]]
-            包含推理内容和内容的元组。
+        Returns:
+            A tuple containing the reasoning content and the content.
         """
 
     @abstractmethod
@@ -138,22 +171,41 @@ class ReasoningParser:
         delta_token_ids: Sequence[int],
     ) -> DeltaMessage | None:
         """
-        实例方法，应该实现从不完整的响应中提取推理；
-        用于处理推理调用和流式输出。
-        必须是实例方法，因为它需要状态 -
-        当前的 tokens/diffs，以及之前解析和提取的信息（见构造函数）
+        Instance method that should be implemented for extracting reasoning
+        from an incomplete response; for use when handling reasoning calls and
+        streaming. Has to be an instance method because  it requires state -
+        the current tokens/diffs, but also the information about what has
+        previously been parsed and extracted (see constructor)
         """
+
+    def adjust_request(
+        self, request: ChatCompletionRequest | ResponsesRequest
+    ) -> ChatCompletionRequest | ResponsesRequest:
+        """Adjust request parameters; override in subclasses as needed."""
+        return request
+
+    def prepare_structured_tag(
+        self,
+        original_tag: str | None,
+        tool_server: Any | None,
+    ) -> str | None:
+        """
+        Instance method that is implemented for preparing the structural tag.
+        Otherwise, None is returned.
+        NOTE: In proxy context, tool_server is always None.
+        """
+        return None
 
 
 class ReasoningParserManager:
     """
-    ReasoningParser 实现的中心注册表。
+    Central registry for ReasoningParser implementations.
 
-    支持两种注册模式：
-      - 通过 `register_module` 立即注册
-      - 通过 `register_lazy_module` 延迟注册
+    Supports two registration modes:
+      - Eager registration via `register_module`
+      - Lazy registration via `register_lazy_module`
 
-    每个 reasoning parser 必须继承自 `ReasoningParser`。
+    Each reasoning parser must inherit from `ReasoningParser`.
     """
 
     reasoning_parsers: dict[str, type[ReasoningParser]] = {}
@@ -162,12 +214,13 @@ class ReasoningParserManager:
     @classmethod
     def get_reasoning_parser(cls, name: str) -> type[ReasoningParser]:
         """
-        获取已注册或延迟注册的 ReasoningParser 类。
+        Retrieve a registered or lazily registered ReasoningParser class.
 
-        如果 parser 是延迟注册的，它将在首次访问时导入并缓存。
+        If the parser is lazily registered, it will be imported and cached
+        on first access.
 
-        抛出：
-            KeyError: 如果在给定名称下未找到 parser。
+        Raises:
+            KeyError: if no parser is found under the given name.
         """
         if name in cls.reasoning_parsers:
             return cls.reasoning_parsers[name]
@@ -182,12 +235,12 @@ class ReasoningParserManager:
 
     @classmethod
     def list_registered(cls) -> list[str]:
-        """返回所有已注册和延迟注册的 reasoning parser 名称"""
+        """Return names of all eagerly and lazily registered reasoning parsers."""
         return sorted(set(cls.reasoning_parsers.keys()) | set(cls.lazy_parsers.keys()))
 
     @classmethod
     def _load_lazy_parser(cls, name: str) -> type[ReasoningParser]:
-        """导入并注册延迟加载的 reasoning parser"""
+        """Import and register a lazily loaded reasoning parser."""
         module_path, class_name = cls.lazy_parsers[name]
         try:
             mod = importlib.import_module(module_path)
@@ -197,7 +250,7 @@ class ReasoningParserManager:
                     f"{class_name} in {module_path} is not a ReasoningParser subclass."
                 )
 
-            cls.reasoning_parsers[name] = parser_cls  # 缓存
+            cls.reasoning_parsers[name] = parser_cls  # cache
             return parser_cls
         except Exception as e:
             logger.exception(
@@ -215,7 +268,7 @@ class ReasoningParserManager:
         module_name: str | list[str] | None = None,
         force: bool = True,
     ) -> None:
-        """立即注册 ReasoningParser 类"""
+        """Register a ReasoningParser class immediately."""
         if not issubclass(module, ReasoningParser):
             raise TypeError(
                 f"module must be subclass of ReasoningParser, but got {type(module)}"
@@ -239,9 +292,9 @@ class ReasoningParserManager:
     @classmethod
     def register_lazy_module(cls, name: str, module_path: str, class_name: str) -> None:
         """
-        注册延迟模块映射以延迟导入。
+        Register a lazy module mapping for delayed import.
 
-        示例：
+        Example:
             ReasoningParserManager.register_lazy_module(
                 name="qwen3",
                 module_path="vllm.reasoning.parsers.qwen3_reasoning_parser",
@@ -260,18 +313,19 @@ class ReasoningParserManager:
         type[ReasoningParser] | Callable[[type[ReasoningParser]], type[ReasoningParser]]
     ):
         """
-        使用给定的名称或名称列表注册模块。
-        可以用作装饰器（module 为 None）或普通函数（module 不为 None）。
+        Register module with the given name or name list. it can be used as a
+        decoder(with module as None) or normal function(with module as not
+        None).
         """
         if not isinstance(force, bool):
             raise TypeError(f"force must be a boolean, but got {type(force)}")
 
-        # 立即注册（显式调用）
+        # Immediate registration (explicit call)
         if module is not None:
             cls._register_module(module=module, module_name=name, force=force)
             return module
 
-        # 装饰器用法
+        # Decorator usage
         def _decorator(obj: type[ReasoningParser]) -> type[ReasoningParser]:
             module_path = obj.__module__
             class_name = obj.__name__
@@ -293,7 +347,8 @@ class ReasoningParserManager:
     @classmethod
     def import_reasoning_parser(cls, plugin_path: str) -> None:
         """
-        通过 reasoning parser 定义文件的路径导入用户定义的 reasoning parser。
+        Import a user-defined reasoning parser by the path
+        of the reasoning parser define file.
         """
         module_name = os.path.splitext(os.path.basename(plugin_path))[0]
 
@@ -306,7 +361,7 @@ class ReasoningParserManager:
             return
 
 
-# 别名，方便使用
+# Convenience aliases
 get_reasoning_parser = ReasoningParserManager.get_reasoning_parser
 register_reasoning_parser = ReasoningParserManager.register_module
 list_reasoning_parsers = ReasoningParserManager.list_registered

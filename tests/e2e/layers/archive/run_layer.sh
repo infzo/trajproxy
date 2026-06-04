@@ -64,11 +64,24 @@ run_scenario() {
 
     TOTAL_SCENARIOS=$((TOTAL_SCENARIOS + 1))
 
-    # 运行测试脚本
+    # 运行测试脚本并记录耗时
+    local start_ts=$(date +%s)
     if bash "$scenario_path"; then
+        local end_ts=$(date +%s)
+        local elapsed=$((end_ts - start_ts))
+        if [ -n "${TIMING_LOG:-}" ]; then
+            echo "${scenario_name}|${elapsed}" >> "$TIMING_LOG"
+        fi
+        echo -e "${GREEN}场景 ${scenario_name} 耗时: ${elapsed}s${NC}"
         PASSED_SCENARIOS=$((PASSED_SCENARIOS + 1))
         return 0
     else
+        local end_ts=$(date +%s)
+        local elapsed=$((end_ts - start_ts))
+        if [ -n "${TIMING_LOG:-}" ]; then
+            echo "${scenario_name}|${elapsed}" >> "$TIMING_LOG"
+        fi
+        echo -e "${RED}场景 ${scenario_name} 耗时: ${elapsed}s (失败)${NC}"
         FAILED_SCENARIOS=$((FAILED_SCENARIOS + 1))
         return 1
     fi

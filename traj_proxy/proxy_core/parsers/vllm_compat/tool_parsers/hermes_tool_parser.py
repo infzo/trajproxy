@@ -198,6 +198,7 @@ class Hermes2ProToolParser(ToolParser):
             return None
         diff = args[len(self.streamed_args_for_tool[index]) :]
         self.streamed_args_for_tool[index] = args
+        self.prev_tool_call_arr[index]["arguments"] = args
         return diff
 
     def extract_tool_calls_streaming(
