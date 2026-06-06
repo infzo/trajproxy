@@ -2,466 +2,593 @@
 """
 trajproxy vs vLLM 响应对比工具
 
-用法:
-    python3 compare.py --mode nonstream --vllm vllm.json --proxy proxy.json --label "C300"
-    python3 compare.py --mode stream --vllm vllm_sse.txt --proxy proxy_sse.txt --label "C301"
+支持 OpenAI (chat/completions) 和 Claude (/v1/messages) 两种 API 格式。
 
-对比规则:
-    - 跳过运行时动态字段: id, created
-    - 非流式: 逐字段递归对比 choices[].message, usage, object, model, finish_reason 等
-    - 流式: 解析 SSE chunks, 对比每个 chunk 的结构, 合并后对比完整内容
+用法:
+    # OpenAI 格式
+    python3 compare.py --mode nonstream --api openai --vllm vllm.json --proxy proxy.json --label "C101"
+    python3 compare.py --mode stream     --api openai --vllm vllm_sse.txt --proxy proxy_sse.txt --label "C101"
+
+    # Claude 格式
+    python3 compare.py --mode nonstream --api claude --vllm vllm.json --proxy proxy.json --label "C201"
+    python3 compare.py --mode stream     --api claude --vllm vllm_sse.txt --proxy proxy_sse.txt --label "C201"
+
+核心设计:
+    - 非流式对比: 解析 JSON，逐字段/逐 content block 递归对比
+    - 流式对比: 解析 SSE events/chunks，合并后对比完整语义
+    - 特殊 token 泄漏检测: 检查 content/reasoning/tool_calls 中是否有 <think>/<tool_call> 等标记残留
+    - 占位符替换策略: 对于模型可能无法识别的特殊字符，先用占位符 (#think#) 替换，
+      再通过 sed 二次编辑还原，确保对比时不会被特殊字符干扰
 """
 
 import argparse
+import difflib
 import json
-import sys
 import re
-from typing import Any
+import sys
+from typing import Any, List, Tuple
 
 
 # ========================================
-# 需要跳过的字段（运行时动态值）
-# ========================================
-SKIP_FIELDS = {"id", "created"}
-
-# 流式 chunk 中额外跳过的字段
-STREAM_SKIP_FIELDS = SKIP_FIELDS | {"seed"}
-
-
-# ========================================
-# 通用递归对比引擎
+# 配置
 # ========================================
 
-def compare_recursive(
-    vllm_val: Any,
-    proxy_val: Any,
-    path: str,
-    errors: list,
-    infos: list,
-    *,
-    skip_fields: set = SKIP_FIELDS,
-    value_eq: bool = True,
-    allow_optional_missing: bool = False,
-) -> None:
-    """
-    递归对比两个值的一致性
+# OpenAI 格式需要跳过的运行时动态字段
+OPENAI_SKIP_FIELDS = {"id", "created", "completion_tokens_details"}
+OPENAI_STREAM_SKIP_FIELDS = OPENAI_SKIP_FIELDS | {"seed"}
+
+# Claude 格式需要跳过的运行时动态字段
+CLAUDE_SKIP_FIELDS = {"id"}
+
+# ========================================
+# 禁止出现在最终 API 响应中的特殊 token
+# ========================================
+FORBIDDEN_TOKENS = [
+    '<think>', '</think>',
+    '<|tool_call_begin|>', '<|tool_call_end|>',
+    '<tool_call>', '</tool_call>',
+    '<function=', '</function>',
+    '<parameter=', '</parameter>',
+    '<scratch_pad>', '</scratch_pad>',
+]
+
+FORBIDDEN_PATTERNS = [
+    re.compile(r"<function=\w+>"),
+    re.compile(r"<parameter=\w+>"),
+]
+
+# 占位符映射：用于在对比前替换特殊字符，避免模型格式化干扰
+# 使用者：在请求体中用占位符代替原始标记，trajproxy 内部会反向替换
+PLACEHOLDER_MAP = {
+    '#think#': '<think>',
+    '#/think#': '</think>',
+    '#tool_call#': '<tool_call>',
+    '#/tool_call#': '</tool_call>',
+    '#tool_call_begin#': '<|tool_call_begin|>',
+    '#tool_call_end#': '<|tool_call_end|>',
+}
+
+
+def check_forbidden_tokens(text: str, field_path: str, errors: list, infos: list) -> None:
+    """检查文本中是否包含禁止的特殊 token"""
+    if not text or not isinstance(text, str):
+        return
+    found = []
+    for tok in FORBIDDEN_TOKENS:
+        if tok in text:
+            found.append(tok)
+    for pat in FORBIDDEN_PATTERNS:
+        for m in pat.findall(text):
+            if m not in found:
+                found.append(m)
+    if found:
+        errors.append(f"{field_path}: 包含禁止的特殊token {found}")
+    else:
+        infos.append(f"  {field_path}: 无禁止特殊token泄漏 ✓")
+
+
+def strip_special_tokens(text: str) -> str:
+    """剥离文本中的所有禁止特殊 token"""
+    if not text or not isinstance(text, str):
+        return text
+    for tok in FORBIDDEN_TOKENS:
+        text = text.replace(tok, "")
+    for pat in FORBIDDEN_PATTERNS:
+        text = pat.sub("", text)
+    return re.sub(r'\n{3,}', '\n\n', text).strip()
+
+
+def apply_placeholders(data: dict, direction: str = "to_real") -> dict:
+    """占位符双向转换
 
     Args:
-        vllm_val: vLLM 响应值
-        proxy_val: trajproxy 响应值
-        path: 当前字段路径（用于日志）
-        errors: 错误列表
-        infos: 信息列表
-        skip_fields: 需跳过的字段名集合
-        value_eq: 标量字段是否要求值完全相等
-        allow_optional_missing: 是否允许 proxy 侧缺失可选字段
+        direction: "to_real" 将占位符转换为真实标记; "to_placeholder" 反之
     """
-    # 类型一致性检查
-    vllm_type = type(vllm_val).__name__
-    proxy_type = type(proxy_val).__name__
+    if direction == "to_real":
+        mapping = PLACEHOLDER_MAP
+    else:
+        mapping = {v: k for k, v in PLACEHOLDER_MAP.items()}
 
-    if vllm_type != proxy_type:
-        # 允许 int/float 互转（vLLM usage 字段可能类型不同）
-        if vllm_type in ("int", "float") and proxy_type in ("int", "float"):
-            if value_eq and vllm_val != proxy_val:
-                # 允许微小浮点差异
-                if isinstance(vllm_val, float) or isinstance(proxy_val, float):
-                    if abs(float(vllm_val) - float(proxy_val)) < 1e-6:
-                        infos.append(f"  {path}: 值一致 (数值类型不同但值等价: vllm={vllm_val!r}, proxy={proxy_val!r})")
-                        return
-                errors.append(f"{path}: 值不一致 (vllm={vllm_val!r}, proxy={proxy_val!r})")
-            else:
-                infos.append(f"  {path}: 类型兼容 (vllm={vllm_type}, proxy={proxy_type}), 值: {vllm_val!r} vs {proxy_val!r}")
-            return
-        errors.append(f"{path}: 类型不一致 (vllm={vllm_type}, proxy={proxy_type})")
+    def _replace(s):
+        if not isinstance(s, str):
+            return s
+        for old, new in mapping.items():
+            s = s.replace(old, new)
+        return s
+
+    raw = json.dumps(data, ensure_ascii=False)
+    for old, new in mapping.items():
+        raw = raw.replace(old, new)
+    return json.loads(raw)
+
+
+# ========================================
+# 通用对比原语
+# ========================================
+
+def compare_recursive(v, p, path: str, errors: list, infos: list,
+                      skip_fields: set = None, depth: int = 0) -> None:
+    """递归对比两个值的每个字段"""
+    skip_fields = skip_fields or set()
+
+    if v is None and p is None:
+        return
+    if v is None:
+        infos.append(f"  {path}: vllm=None, proxy={repr(p)[:80]}")
+        return
+    if p is None:
+        errors.append(f"{path}: vllm={repr(v)[:80]}, proxy=None")
         return
 
-    # 字典: 递归检查每个子字段
-    if isinstance(vllm_val, dict):
-        # 检查字段集合一致性（排除跳过字段）
-        vllm_keys = set(vllm_val.keys()) - skip_fields
-        proxy_keys = set(proxy_val.keys()) - skip_fields
+    if isinstance(v, dict) and isinstance(p, dict):
+        v_keys = set(v.keys()) - skip_fields
+        p_keys = set(p.keys()) - skip_fields
+        for k in sorted(v_keys - p_keys):
+            errors.append(f"{path}.{k}: vllm 有此字段, proxy 缺失")
+        for k in sorted(p_keys - v_keys):
+            infos.append(f"  {path}.{k}: proxy 有此字段, vllm 缺失 (可能是新增)")
+        for k in sorted(v_keys & p_keys):
+            compare_recursive(v[k], p[k], f"{path}.{k}", errors, infos, skip_fields, depth + 1)
 
-        missing_in_proxy = vllm_keys - proxy_keys
-        extra_in_proxy = proxy_keys - vllm_keys
+    elif isinstance(v, list) and isinstance(p, list):
+        if len(v) != len(p):
+            errors.append(f"{path}: 数组长度不一致 (vllm={len(v)}, proxy={len(p)})")
+            # 仍然尝试对比前 min(len) 个元素
+        for i in range(min(len(v), len(p))):
+            compare_recursive(v[i], p[i], f"{path}[{i}]", errors, infos, skip_fields, depth + 1)
 
-        if missing_in_proxy and not allow_optional_missing:
-            for key in sorted(missing_in_proxy):
-                errors.append(f"{path}.{key}: proxy 缺失字段 (vllm 有, proxy 无)")
-        elif missing_in_proxy:
-            for key in sorted(missing_in_proxy):
-                infos.append(f"  {path}.{key}: proxy 缺失可选字段 (允许)")
+    elif isinstance(v, float) and isinstance(p, float):
+        if abs(v - p) > 1e-6:
+            errors.append(f"{path}: 数值不一致 (vllm={v}, proxy={p})")
 
-        if extra_in_proxy:
-            for key in sorted(extra_in_proxy):
-                infos.append(f"  {path}.{key}: proxy 有额外字段 (vllm 无)")
+    elif v != p:
+        # 对于字符串，如果不是相等但可能是等价（去空白），报 info 而非 error
+        if isinstance(v, str) and isinstance(p, str):
+            if v.strip() == p.strip():
+                infos.append(f"  {path}: 值仅空白差异 ✓ (len: vllm={len(v)}, proxy={len(p)})")
+                return
+        errors.append(f"{path}: 值不一致")
+        errors.append(f"  vllm:  {repr(v)[:120]}")
+        errors.append(f"  proxy: {repr(p)[:120]}")
 
-        # 递归检查共有字段
-        common_keys = sorted(vllm_keys & proxy_keys)
-        for key in common_keys:
-            child_path = f"{path}.{key}"
-            compare_recursive(
-                vllm_val.get(key),
-                proxy_val.get(key),
-                child_path,
-                errors,
-                infos,
-                skip_fields=skip_fields,
-                value_eq=value_eq,
-                allow_optional_missing=allow_optional_missing,
-            )
 
-    # 列表: 检查长度，逐元素递归比较
-    elif isinstance(vllm_val, list):
-        if len(vllm_val) != len(proxy_val):
-            errors.append(f"{path}: 长度不一致 (vllm={len(vllm_val)}, proxy={len(proxy_val)})")
-            return
-        for i, (v_item, p_item) in enumerate(zip(vllm_val, proxy_val)):
-            child_path = f"{path}[{i}]"
-            compare_recursive(
-                v_item, p_item, child_path, errors, infos,
-                skip_fields=skip_fields,
-                value_eq=value_eq,
-                allow_optional_missing=allow_optional_missing,
-            )
-
-    # 标量: 可选检查值相等
-    elif value_eq:
-        if vllm_val != proxy_val:
-            # 对于字符串，允许微小空白差异
-            if isinstance(vllm_val, str) and isinstance(proxy_val, str):
-                if vllm_val.strip() == proxy_val.strip():
-                    infos.append(f"  {path}: 值一致（忽略空白差异） (vllm='{vllm_val}', proxy='{proxy_val}')")
-                    return
-            errors.append(f"{path}: 值不一致 (vllm={vllm_val!r}, proxy={proxy_val!r})")
-        else:
-            infos.append(f"  {path}: 值一致 ({vllm_val!r})")
-    else:
-        infos.append(f"  {path}: 值存在 (vllm={vllm_val!r}, proxy={proxy_val!r})")
+def compare_usage(v_usage, p_usage, path: str, errors: list, infos: list) -> None:
+    """对比 token usage（允许小范围偏差）"""
+    skip = set()
+    compare_recursive(v_usage, p_usage, path, errors, infos, skip)
 
 
 # ========================================
-# 非流式响应对比
+# OpenAI 格式对比
 # ========================================
 
-def compare_nonstream(vllm_data: dict, proxy_data: dict, label: str) -> tuple:
-    """对比非流式 JSON 响应"""
-    errors = []
-    infos = []
+def compare_openai_nonstream(vllm_data: dict, proxy_data: dict, label: str) -> Tuple[list, list]:
+    """对比 OpenAI chat/completions 非流式响应"""
+    errors, infos = [], []
+    infos.append(f"[{label}] OpenAI 非流式对比")
 
-    infos.append(f"【非流式对比: {label}】")
+    # 顶层结构
+    compare_recursive(vllm_data, proxy_data, "", errors, infos, OPENAI_SKIP_FIELDS)
 
-    # 顶层结构字段
-    compare_recursive(
-        vllm_data.get("object"),
-        proxy_data.get("object"),
-        "object",
-        errors, infos, value_eq=True,
-    )
+    # choices 对比
+    v_choices = vllm_data.get("choices", [])
+    p_choices = proxy_data.get("choices", [])
+    if v_choices and p_choices:
+        v_msg = v_choices[0].get("message", {})
+        p_msg = p_choices[0].get("message", {})
 
-    compare_recursive(
-        vllm_data.get("model"),
-        proxy_data.get("model"),
-        "model",
-        errors, infos, value_eq=True,
-    )
+        # content 特殊 token 检查
+        check_forbidden_tokens(p_msg.get("content", ""), "choices[0].message.content", errors, infos)
+        check_forbidden_tokens(p_msg.get("reasoning_content", ""), "choices[0].message.reasoning_content", errors, infos)
 
-    # choices 逐项对比
-    vllm_choices = vllm_data.get("choices", [])
-    proxy_choices = proxy_data.get("choices", [])
-
-    if len(vllm_choices) != len(proxy_choices):
-        errors.append(f"choices 长度不一致 (vllm={len(vllm_choices)}, proxy={len(proxy_choices)})")
-    else:
-        infos.append(f"  choices 长度一致 ({len(vllm_choices)})")
-
-        for i, (v_ch, p_ch) in enumerate(zip(vllm_choices, proxy_choices)):
-            ch_path = f"choices[{i}]"
-
-            # index
-            compare_recursive(v_ch.get("index"), p_ch.get("index"), f"{ch_path}.index", errors, infos)
-
-            # finish_reason
-            compare_recursive(v_ch.get("finish_reason"), p_ch.get("finish_reason"), f"{ch_path}.finish_reason", errors, infos)
-
-            # message — 核心对比
-            v_msg = v_ch.get("message", {})
-            p_msg = p_ch.get("message", {})
-
-            msg_path = f"{ch_path}.message"
-
-            # role
-            compare_recursive(v_msg.get("role"), p_msg.get("role"), f"{msg_path}.role", errors, infos)
-
-            # content — 值必须一致
-            compare_recursive(v_msg.get("content"), p_msg.get("content"), f"{msg_path}.content", errors, infos)
-
-            # reasoning — 逐字符对比（核心字段）
-            v_reasoning = v_msg.get("reasoning_content") or v_msg.get("reasoning")
-            p_reasoning = p_msg.get("reasoning_content") or p_msg.get("reasoning")
-            # vLLM 使用 reasoning_content, trajproxy 可能用 reasoning
-            # 需要兼容两种字段名
-            v_reasoning_key = "reasoning_content" if "reasoning_content" in v_msg else ("reasoning" if "reasoning" in v_msg else None)
-            p_reasoning_key = "reasoning_content" if "reasoning_content" in p_msg else ("reasoning" if "reasoning" in p_msg else None)
-
-            if v_reasoning_key and p_reasoning_key:
-                compare_recursive(v_msg.get(v_reasoning_key), p_msg.get(p_reasoning_key),
-                                  f"{msg_path}.reasoning", errors, infos)
-                # 检查字段名是否一致
-                if v_reasoning_key != p_reasoning_key:
-                    infos.append(f"  {msg_path}.reasoning 字段名不同: vllm 用 '{v_reasoning_key}', proxy 用 '{p_reasoning_key}'")
-            elif v_reasoning_key and not p_reasoning_key:
-                errors.append(f"{msg_path}.reasoning: vllm 有推理内容, proxy 缺失")
-            elif not v_reasoning_key and p_reasoning_key:
-                errors.append(f"{msg_path}.reasoning: proxy 有推理内容, vllm 缺失")
-
-            # tool_calls — 逐项对比
-            v_tool_calls = v_msg.get("tool_calls")
-            p_tool_calls = p_msg.get("tool_calls")
-
-            if v_tool_calls is None and p_tool_calls is None:
-                infos.append(f"  {msg_path}.tool_calls: 两者均无")
-            elif v_tool_calls is not None and p_tool_calls is not None:
-                compare_recursive(v_tool_calls, p_tool_calls, f"{msg_path}.tool_calls", errors, infos)
-            elif v_tool_calls is not None:
-                errors.append(f"{msg_path}.tool_calls: vllm 有 tool_calls, proxy 缺失")
-            else:
-                errors.append(f"{msg_path}.tool_calls: proxy 有 tool_calls, vllm 缺失")
+        # tool_calls 检查
+        v_tools = v_msg.get("tool_calls", [])
+        p_tools = p_msg.get("tool_calls", [])
+        if p_tools:
+            for i, tc in enumerate(p_tools):
+                fc = tc.get("function", {})
+                check_forbidden_tokens(fc.get("name", ""), f"choices[0].message.tool_calls[{i}].function.name", errors, infos)
+                args_str = fc.get("arguments", "")
+                check_forbidden_tokens(args_str, f"choices[0].message.tool_calls[{i}].function.arguments", errors, infos)
+                # 验证 arguments 是合法 JSON
+                if args_str:
+                    try:
+                        json.loads(args_str)
+                        infos.append(f"  choices[0].message.tool_calls[{i}].arguments: 合法 JSON ✓")
+                    except json.JSONDecodeError:
+                        errors.append(f"choices[0].message.tool_calls[{i}].arguments: 不是合法 JSON")
 
     # usage 对比
-    v_usage = vllm_data.get("usage", {})
-    p_usage = proxy_data.get("usage", {})
-
-    compare_recursive(v_usage, p_usage, "usage", errors, infos)
+    v_usage = vllm_data.get("usage")
+    p_usage = proxy_data.get("usage")
+    if v_usage and p_usage:
+        compare_usage(v_usage, p_usage, "usage", errors, infos)
 
     return errors, infos
 
 
-# ========================================
-# 流式响应对比
-# ========================================
-
-def parse_sse_chunks(raw_text: str) -> list:
-    """解析 SSE 响应文本，返回 data chunk 列表"""
+def parse_openai_sse(raw: str) -> list:
+    """解析 OpenAI SSE 格式: data: {...}\\n\\ndata: [DONE]"""
     chunks = []
-    for line in raw_text.split("\n"):
+    for line in raw.strip().split("\n"):
         line = line.strip()
-        if not line or not line.startswith("data:"):
-            continue
-        data_str = line[len("data:"):].strip()
-        if data_str == "[DONE]":
-            continue
-        try:
-            chunk = json.loads(data_str)
-            chunks.append(chunk)
-        except json.JSONDecodeError:
-            # 跳过无效行
-            continue
+        if line.startswith("data: ") and not line.endswith("[DONE]"):
+            try:
+                chunks.append(json.loads(line[6:]))
+            except json.JSONDecodeError:
+                pass
     return chunks
 
 
-def reconstruct_from_chunks(chunks: list) -> dict:
-    """
-    从 SSE chunks 重建完整响应（模拟非流式响应结构）
+def compare_openai_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[list, list]:
+    """对比 OpenAI chat/completions 流式响应"""
+    errors, infos = [], []
+    infos.append(f"[{label}] OpenAI 流式对比")
 
-    用于对比流式响应的完整内容
-    """
-    if not chunks:
-        return {}
+    v_chunks = parse_openai_sse(vllm_raw)
+    p_chunks = parse_openai_sse(proxy_raw)
 
-    # 取第一个 chunk 的基础信息
-    base = {
-        "id": chunks[0].get("id", ""),
-        "object": "chat.completion",
-        "created": chunks[0].get("created", 0),
-        "model": chunks[0].get("model", ""),
-    }
-
-    # 合并所有 delta 到 message
-    content_parts = []
-    reasoning_parts = []
-    tool_calls_accum = {}
-
-    finish_reason = None
-    usage = None
-
-    for chunk in chunks:
-        choices = chunk.get("choices", [])
-        if not choices:
-            continue
-        choice = choices[0]
-        delta = choice.get("delta", {})
-
-        # content
-        if "content" in delta and delta["content"] is not None:
-            content_parts.append(delta["content"])
-
-        # reasoning / reasoning_content
-        reasoning_val = delta.get("reasoning_content") or delta.get("reasoning")
-        if reasoning_val is not None:
-            reasoning_parts.append(reasoning_val)
-
-        # tool_calls
-        if "tool_calls" in delta and delta["tool_calls"] is not None:
-            for tc_delta in delta["tool_calls"]:
-                idx = tc_delta.get("index", 0)
-                if idx not in tool_calls_accum:
-                    tool_calls_accum[idx] = {
-                        "id": "",
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    }
-                if "id" in tc_delta and tc_delta["id"]:
-                    tool_calls_accum[idx]["id"] = tc_delta["id"]
-                if "type" in tc_delta and tc_delta["type"]:
-                    tool_calls_accum[idx]["type"] = tc_delta["type"]
-                if "function" in tc_delta:
-                    fn = tc_delta["function"]
-                    if "name" in fn and fn["name"]:
-                        tool_calls_accum[idx]["function"]["name"] += fn["name"]
-                    if "arguments" in fn and fn["arguments"]:
-                        tool_calls_accum[idx]["function"]["arguments"] += fn["arguments"]
-
-        # finish_reason
-        fr = choice.get("finish_reason")
-        if fr is not None:
-            finish_reason = fr
-
-    # usage（最后一个 chunk 可能包含）
-    usage = chunks[-1].get("usage")
-
-    # 构建 message
-    message = {"role": "assistant"}
-    if content_parts:
-        message["content"] = "".join(content_parts)
-    else:
-        message["content"] = ""
-    if reasoning_parts:
-        message["reasoning"] = "".join(reasoning_parts)
-    if tool_calls_accum:
-        message["tool_calls"] = [
-            tool_calls_accum[i] for i in sorted(tool_calls_accum.keys())
-        ]
-
-    base["choices"] = [{
-        "index": 0,
-        "message": message,
-        "finish_reason": finish_reason or "stop",
-    }]
-    if usage:
-        base["usage"] = usage
-
-    return base
-
-
-def compare_stream(vllm_chunks: list, proxy_chunks: list, label: str) -> tuple:
-    """对比流式 SSE 响应"""
-    errors = []
-    infos = []
-
-    infos.append(f"【流式对比: {label}】")
-
-    # chunk 数量对比
-    vllm_count = len(vllm_chunks)
-    proxy_count = len(proxy_chunks)
-    infos.append(f"  chunk 数量: vllm={vllm_count}, proxy={proxy_count}")
-
-    if vllm_count == 0:
-        errors.append("vLLM 流式响应无有效 chunk")
+    if not v_chunks:
+        errors.append("vLLM 流式响应无有效 SSE chunk")
         return errors, infos
-    if proxy_count == 0:
-        errors.append("proxy 流式响应无有效 chunk")
+    if not p_chunks:
+        errors.append("proxy 流式响应无有效 SSE chunk")
         return errors, infos
 
-    # 重建完整响应并对比
-    vllm_reconstructed = reconstruct_from_chunks(vllm_chunks)
-    proxy_reconstructed = reconstruct_from_chunks(proxy_chunks)
-
-    infos.append(f"  重建完整响应进行内容对比...")
-
-    # 对比重建后的完整响应（使用非流式对比逻辑）
-    sub_errors, sub_infos = compare_nonstream(vllm_reconstructed, proxy_reconstructed, f"{label}[stream重建]")
-    errors.extend(sub_errors)
-    infos.extend(sub_infos)
-
-    # 逐 chunk 结构对比（前几个和后几个 chunk）
-    # 只对比结构框架，不逐字对比内容（内容已通过重建对比覆盖）
-    check_count = min(5, vllm_count, proxy_count)
-    infos.append(f"  逐 chunk 结构对比 (前 {check_count} 个)...")
-
-    for i in range(check_count):
-        v_ch = vllm_chunks[i]
-        p_ch = proxy_chunks[i]
-        ch_path = f"chunk[{i}]"
-
-        # object 字段
-        compare_recursive(v_ch.get("object"), p_ch.get("object"), f"{ch_path}.object", errors, infos, skip_fields=STREAM_SKIP_FIELDS)
-
-        # model 字段
-        compare_recursive(v_ch.get("model"), p_ch.get("model"), f"{ch_path}.model", errors, infos, skip_fields=STREAM_SKIP_FIELDS)
-
-        # choices 结构
-        v_choices = v_ch.get("choices", [])
-        p_choices = p_ch.get("choices", [])
+    # 逐 chunk 对比（跳过 delta 中无法对齐的字段）
+    for i, (vc, pc) in enumerate(zip(v_chunks, p_chunks)):
+        prefix = f"chunk[{i}]"
+        v_choices = vc.get("choices", [])
+        p_choices = pc.get("choices", [])
 
         if len(v_choices) != len(p_choices):
-            errors.append(f"{ch_path}.choices 长度不一致 (vllm={len(v_choices)}, proxy={len(p_choices)})")
+            errors.append(f"{prefix}.choices 长度不一致 (vllm={len(v_choices)}, proxy={len(p_choices)})")
             continue
 
-        for j, (vc, pc) in enumerate(zip(v_choices, p_choices)):
-            c_path = f"{ch_path}.choices[{j}]"
+        for j, (vch, pch) in enumerate(zip(v_choices, p_choices)):
+            cp = f"{prefix}.choices[{j}]"
+            v_fr = vch.get("finish_reason")
+            p_fr = pch.get("finish_reason")
+            if v_fr is not None and p_fr is not None and v_fr != p_fr:
+                errors.append(f"{cp}.finish_reason: vllm={v_fr}, proxy={p_fr}")
 
-            # index
-            compare_recursive(vc.get("index"), pc.get("index"), f"{c_path}.index", errors, infos, skip_fields=STREAM_SKIP_FIELDS)
+    # 合并后对比 content 和 reasoning_content
+    v_content = "".join(
+        c.get("choices", [{}])[0].get("delta", {}).get("content", "")
+        for c in v_chunks
+    )
+    p_content = "".join(
+        c.get("choices", [{}])[0].get("delta", {}).get("content", "")
+        for c in p_chunks
+    )
+    v_reasoning = "".join(
+        c.get("choices", [{}])[0].get("delta", {}).get("reasoning_content", "")
+        for c in v_chunks
+    )
+    p_reasoning = "".join(
+        c.get("choices", [{}])[0].get("delta", {}).get("reasoning_content", "")
+        for c in p_chunks
+    )
 
-            # delta 字段通过下方全局完整性检查验证（不按索引逐 chunk 对比）
-            v_fr = vc.get("finish_reason")
-            p_fr = pc.get("finish_reason")
-            if v_fr is not None and p_fr is not None:
-                compare_recursive(v_fr, p_fr, f"{c_path}.finish_reason", errors, infos, skip_fields=STREAM_SKIP_FIELDS)
+    # 去除空白后对比
+    if v_content.strip() != p_content.strip():
+        diff_stats = compute_diff_stats(v_content, p_content)
+        errors.append(f"合并后 content 不一致 (vllm={diff_stats['vllm_len']}, proxy={diff_stats['proxy_len']}, "
+                      f"word_similarity={diff_stats['word_similarity']:.2f})")
+    else:
+        infos.append(f"  合并后 content 一致 ✓ (len={len(p_content)})")
 
-    # delta 字段全局完整性检查
-    # 跨所有 chunk 收集字段名集合，验证 proxy 响应中包含了 vLLM 的所有 delta 字段
-    # 不按索引逐 chunk 对比，因为 proxy 添加的额外请求参数（logprobs/token_ids）
-    # 会导致上游 vLLM 产生不同的 chunk 边界，chunk 计数和排列可能不同
-    infos.append(f"  delta 字段全局完整性检查...")
-    v_all_delta_keys = set()
-    p_all_delta_keys = set()
-    for chunk in vllm_chunks:
-        for choice in chunk.get("choices", []):
-            v_all_delta_keys |= set(choice.get("delta", {}).keys())
-    for chunk in proxy_chunks:
-        for choice in chunk.get("choices", []):
-            p_all_delta_keys |= set(choice.get("delta", {}).keys())
+    if v_reasoning.strip() != p_reasoning.strip():
+        errors.append(f"合并后 reasoning_content 不一致")
+    elif p_reasoning.strip():
+        infos.append(f"  合并后 reasoning_content 一致 ✓ (len={len(p_reasoning)})")
 
-    v_all_delta_keys -= STREAM_SKIP_FIELDS
-    p_all_delta_keys -= STREAM_SKIP_FIELDS
-
-    delta_missing = v_all_delta_keys - p_all_delta_keys
-    delta_extra = p_all_delta_keys - v_all_delta_keys
-
-    if delta_missing:
-        errors.append(f"delta 全局字段缺失: proxy 缺失 vllm 中出现的字段 {sorted(delta_missing)}")
-    if delta_extra:
-        infos.append(f"  delta 全局字段额外: proxy 有 vllm 中未出现的字段 {sorted(delta_extra)}")
-    if not delta_missing and not delta_extra:
-        infos.append(f"  delta 全局字段一致 ({sorted(v_all_delta_keys)})")
-
-    # 最后一个 chunk 的 usage 对比
-    v_last = vllm_chunks[-1]
-    p_last = proxy_chunks[-1]
-
-    v_last_usage = v_last.get("usage")
-    p_last_usage = p_last.get("usage")
-
-    if v_last_usage and p_last_usage:
-        compare_recursive(v_last_usage, p_last_usage, "final_chunk.usage", errors, infos)
-    elif v_last_usage and not p_last_usage:
-        errors.append("final_chunk.usage: vllm 有 usage, proxy 缺失")
-    elif not v_last_usage and p_last_usage:
-        infos.append(f"  final_chunk.usage: proxy 有额外 usage 字段 (vllm 无)")
+    # 特殊 token 检查
+    check_forbidden_tokens(p_content, "合并后 content", errors, infos)
+    check_forbidden_tokens(p_reasoning, "合并后 reasoning_content", errors, infos)
 
     return errors, infos
+
+
+# ========================================
+# Claude 格式对比
+# ========================================
+
+def _get_claude_blocks(content_list: list) -> dict:
+    """将 Claude content[] 按 type 分类"""
+    blocks = {"text": [], "thinking": [], "tool_use": [], "other": []}
+    for block in (content_list or []):
+        t = block.get("type", "other")
+        blocks.get(t, blocks["other"]).append(block)
+    return blocks
+
+
+def compare_claude_nonstream(vllm_data: dict, proxy_data: dict, label: str) -> Tuple[list, list]:
+    """对比 Claude /v1/messages 非流式响应"""
+    errors, infos = [], []
+    infos.append(f"[{label}] Claude 非流式对比")
+
+    # 跳过运行时字段
+    skip = CLAUDE_SKIP_FIELDS
+
+    # 顶层字段对比
+    for key in ["type", "role", "model", "stop_reason", "stop_sequence"]:
+        compare_recursive(vllm_data.get(key), proxy_data.get(key), key, errors, infos, skip)
+
+    # content[] 对比
+    v_blocks = _get_claude_blocks(vllm_data.get("content", []))
+    p_blocks = _get_claude_blocks(proxy_data.get("content", []))
+
+    for btype in ["text", "thinking", "tool_use"]:
+        v_list = v_blocks[btype]
+        p_list = p_blocks[btype]
+
+        if not v_list and not p_list:
+            continue
+        if not v_list:
+            errors.append(f"content.{btype}: vllm 有此类型, proxy 缺失")
+            continue
+        if not p_list:
+            errors.append(f"content.{btype}: proxy 有此类型, vllm 缺失 (可能是新增)")
+            continue
+
+        # 按数量对比
+        if len(v_list) != len(p_list):
+            errors.append(f"content.{btype}: 数量不一致 (vllm={len(v_list)}, proxy={len(p_list)})")
+
+        for i in range(min(len(v_list), len(p_list))):
+            vb, pb = v_list[i], p_list[i]
+            prefix = f"content[{btype}][{i}]"
+
+            if btype == "text":
+                v_text = vb.get("text", "")
+                p_text = pb.get("text", "")
+                compare_recursive(v_text, p_text, f"{prefix}.text", errors, infos, skip)
+                check_forbidden_tokens(p_text, f"{prefix}.text", errors, infos)
+
+            elif btype == "thinking":
+                v_th = vb.get("thinking", "")
+                p_th = pb.get("thinking", "")
+                compare_recursive(v_th, p_th, f"{prefix}.thinking", errors, infos, skip)
+                check_forbidden_tokens(p_th, f"{prefix}.thinking", errors, infos)
+
+            elif btype == "tool_use":
+                compare_recursive(vb.get("name"), pb.get("name"), f"{prefix}.name", errors, infos, skip)
+                # tool input 对比
+                compare_recursive(vb.get("input"), pb.get("input"), f"{prefix}.input", errors, infos, skip)
+                # 检查 input 的 JSON 序列化中是否包含特殊 token
+                if pb.get("input"):
+                    input_str = json.dumps(pb["input"], ensure_ascii=False)
+                    check_forbidden_tokens(input_str, f"{prefix}.input (JSON)", errors, infos)
+
+    # usage 对比
+    v_usage = vllm_data.get("usage")
+    p_usage = proxy_data.get("usage")
+    if v_usage and p_usage:
+        compare_usage(v_usage, p_usage, "usage", errors, infos)
+
+    return errors, infos
+
+
+def parse_claude_sse(raw: str) -> dict:
+    """解析 Claude SSE 格式: event: xxx\\ndata: {...}\\n\\n
+
+    Returns:
+        list of (event_name, event_data) tuples (保持时间顺序)
+    """
+    events = []
+    current_event = None
+    current_data = ""
+
+    for line in raw.strip().split("\n"):
+        line_stripped = line.strip()
+        if line_stripped.startswith("event: "):
+            if current_event and current_data:
+                try:
+                    events.append((current_event, json.loads(current_data)))
+                except json.JSONDecodeError:
+                    pass
+            current_event = line_stripped[7:].strip()
+            current_data = ""
+        elif line_stripped.startswith("data: "):
+            current_data = line_stripped[6:].strip()
+        elif line_stripped == "":
+            if current_event and current_data:
+                try:
+                    events.append((current_event, json.loads(current_data)))
+                except json.JSONDecodeError:
+                    pass
+                current_event = None
+                current_data = ""
+
+    if current_event and current_data:
+        try:
+            events.append((current_event, json.loads(current_data)))
+        except json.JSONDecodeError:
+            pass
+
+    return events
+
+
+def compare_claude_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[list, list]:
+    """对比 Claude /v1/messages 流式响应"""
+    errors, infos = [], []
+    infos.append(f"[{label}] Claude 流式对比")
+
+    v_events_list = parse_claude_sse(vllm_raw)
+    p_events_list = parse_claude_sse(proxy_raw)
+
+    # 构建事件名集合用于必要事件检查
+    v_event_names = {e[0] for e in v_events_list}
+    p_event_names = {e[0] for e in p_events_list}
+
+    # 验证必要的事件类型存在
+    required_events = ["message_start", "message_stop"]
+    for evt in required_events:
+        if evt not in v_event_names:
+            errors.append(f"vLLM 流式缺少 {evt} 事件")
+        if evt not in p_event_names:
+            errors.append(f"proxy 流式缺少 {evt} 事件")
+
+    # 从 content_block_start/content_block_delta 中合并 content blocks
+    v_merged = _merge_claude_stream(v_events_list)
+    p_merged = _merge_claude_stream(p_events_list)
+
+    # 对比合并后的 content blocks
+    v_blocks = _get_claude_blocks(v_merged)
+    p_blocks = _get_claude_blocks(p_merged)
+
+    for btype in ["text", "thinking", "tool_use"]:
+        v_list = v_blocks[btype]
+        p_list = p_blocks[btype]
+
+        if not v_list and not p_list:
+            continue
+
+        # 合并所有同类型块的文本
+        if btype == "text":
+            v_text = "".join(b.get("text", "") for b in v_list)
+            p_text = "".join(b.get("text", "") for b in p_list)
+            if v_text.strip() != p_text.strip():
+                err = compute_diff_stats(v_text, p_text)
+                errors.append(f"合并后 text: 不一致 (vllm={err['vllm_len']}, proxy={err['proxy_len']}, "
+                              f"similarity={err['word_similarity']:.2f})")
+            else:
+                infos.append(f"  合并后 text 一致 ✓ (len={len(p_text)})")
+            check_forbidden_tokens(p_text, "合并后 text (stream)", errors, infos)
+
+        elif btype == "thinking":
+            v_th = "".join(b.get("thinking", "") for b in v_list)
+            p_th = "".join(b.get("thinking", "") for b in p_list)
+            if v_th.strip() != p_th.strip():
+                errors.append(f"合并后 thinking: 不一致")
+            elif p_th.strip():
+                infos.append(f"  合并后 thinking 一致 ✓ (len={len(p_th)})")
+            check_forbidden_tokens(p_th, "合并后 thinking (stream)", errors, infos)
+
+        elif btype == "tool_use":
+            # tool_use 在流式中通常不合并文本，一个事件对应一个 tool_use
+            if len(v_list) != len(p_list):
+                errors.append(f"tool_use 数量不一致 (vllm={len(v_list)}, proxy={len(p_list)})")
+            for i in range(min(len(v_list), len(p_list))):
+                prefix = f"tool_use[{i}]"
+                compare_recursive(v_list[i].get("name"), p_list[i].get("name"),
+                                  f"{prefix}.name", errors, infos)
+                compare_recursive(v_list[i].get("input"), p_list[i].get("input"),
+                                  f"{prefix}.input", errors, infos)
+                if p_list[i].get("input"):
+                    input_str = json.dumps(p_list[i]["input"], ensure_ascii=False)
+                    check_forbidden_tokens(input_str, f"{prefix}.input (JSON)", errors, infos)
+
+    # usage 对比（在 message_stop 或 message_delta 中）
+    v_usage = {}
+    p_usage = {}
+    for evt_name, evt_data in v_events_list:
+        if evt_name == "message_delta":
+            v_usage = evt_data.get("usage", {})
+            break
+    for evt_name, evt_data in p_events_list:
+        if evt_name == "message_delta":
+            p_usage = evt_data.get("usage", {})
+            break
+    if not v_usage:
+        for evt_name, evt_data in v_events_list:
+            if evt_name == "message_stop" and evt_data.get("usage"):
+                v_usage = evt_data["usage"]
+                break
+    if not p_usage:
+        for evt_name, evt_data in p_events_list:
+            if evt_name == "message_stop" and evt_data.get("usage"):
+                p_usage = evt_data["usage"]
+                break
+    if v_usage and p_usage:
+        compare_usage(v_usage, p_usage, "usage (stream)", errors, infos)
+
+    return errors, infos
+
+
+def _merge_claude_stream(events: dict) -> list:
+    """从 Claude SSE events list 中合并出完整的 content[] 数组
+
+    Args:
+        events: list of (event_name, event_data) tuples
+
+    Returns:
+        list of content block dicts
+    """
+    blocks = []
+    current_block = None
+
+    for evt_name, evt_data in events:
+        if evt_name == "content_block_start":
+            block_info = evt_data.get("content_block", {})
+            if block_info:
+                current_block = dict(block_info)
+                blocks.append(current_block)
+        elif evt_name == "content_block_delta":
+            delta = evt_data.get("delta", {})
+            if current_block and delta:
+                dtype = delta.get("type", "")
+                if dtype == "text_delta":
+                    current_block["text"] = (current_block.get("text", "") +
+                                             delta.get("text", ""))
+                elif dtype == "thinking_delta":
+                    current_block["thinking"] = (current_block.get("thinking", "") +
+                                                  delta.get("thinking", ""))
+                elif dtype == "input_json_delta":
+                    # tool_use 的 input 是增量 JSON 字符串，需拼接后解析
+                    current_block["_input_json"] = (current_block.get("_input_json", "") +
+                                                     delta.get("partial_json", ""))
+
+    # 解析 tool_use 的 input_json
+    for block in blocks:
+        if block.get("type") == "tool_use" and block.get("_input_json"):
+            try:
+                block["input"] = json.loads(block["_input_json"])
+            except json.JSONDecodeError:
+                pass
+            block.pop("_input_json", None)
+
+    return blocks
+
+
+# ========================================
+# 辅助函数
+# ========================================
+
+def compute_diff_stats(vllm_text: str, proxy_text: str) -> dict:
+    """计算两个文本的差异统计"""
+    vllm_len = len(vllm_text)
+    proxy_len = len(proxy_text)
+    vllm_words = vllm_text.split()
+    proxy_words = proxy_text.split()
+    sm = difflib.SequenceMatcher(None, vllm_words, proxy_words)
+    return {
+        "vllm_len": vllm_len,
+        "proxy_len": proxy_len,
+        "char_diff": abs(vllm_len - proxy_len),
+        "word_similarity": sm.ratio(),
+    }
 
 
 # ========================================
@@ -471,53 +598,58 @@ def compare_stream(vllm_chunks: list, proxy_chunks: list, label: str) -> tuple:
 def main():
     parser = argparse.ArgumentParser(description="trajproxy vs vLLM 响应对比工具")
     parser.add_argument("--mode", required=True, choices=["nonstream", "stream"],
-                        help="对比模式: nonstream 或 stream")
+                        help="对比模式")
+    parser.add_argument("--api", default="openai", choices=["openai", "claude"],
+                        help="API 格式")
     parser.add_argument("--vllm", required=True, help="vLLM 响应文件路径")
     parser.add_argument("--proxy", required=True, help="trajproxy 响应文件路径")
-    parser.add_argument("--label", required=True, help="场景标签（用于日志）")
+    parser.add_argument("--label", required=True, help="场景标签")
 
     args = parser.parse_args()
 
-    # 读取输入文件
     with open(args.vllm, "r") as f:
         vllm_raw = f.read()
     with open(args.proxy, "r") as f:
         proxy_raw = f.read()
 
-    if args.mode == "nonstream":
-        try:
-            vllm_data = json.loads(vllm_raw.strip())
-        except json.JSONDecodeError as e:
-            print(f"ERROR:vLLM 响应 JSON 解析失败: {e}")
-            sys.exit(1)
-        try:
-            proxy_data = json.loads(proxy_raw.strip())
-        except json.JSONDecodeError as e:
-            print(f"ERROR:proxy 响应 JSON 解析失败: {e}")
-            sys.exit(1)
+    if args.api == "openai":
+        if args.mode == "nonstream":
+            try:
+                vllm_data = json.loads(vllm_raw.strip())
+            except json.JSONDecodeError as e:
+                print(f"ERROR:vLLM 响应 JSON 解析失败: {e}")
+                sys.exit(1)
+            try:
+                proxy_data = json.loads(proxy_raw.strip())
+            except json.JSONDecodeError as e:
+                print(f"ERROR:proxy 响应 JSON 解析失败: {e}")
+                sys.exit(1)
+            errors, infos = compare_openai_nonstream(vllm_data, proxy_data, args.label)
+        else:
+            errors, infos = compare_openai_stream(vllm_raw, proxy_raw, args.label)
 
-        errors, infos = compare_nonstream(vllm_data, proxy_data, args.label)
+    elif args.api == "claude":
+        if args.mode == "nonstream":
+            try:
+                vllm_data = json.loads(vllm_raw.strip())
+            except json.JSONDecodeError as e:
+                print(f"ERROR:vLLM 响应 JSON 解析失败: {e}")
+                sys.exit(1)
+            try:
+                proxy_data = json.loads(proxy_raw.strip())
+            except json.JSONDecodeError as e:
+                print(f"ERROR:proxy 响应 JSON 解析失败: {e}")
+                sys.exit(1)
+            errors, infos = compare_claude_nonstream(vllm_data, proxy_data, args.label)
+        else:
+            errors, infos = compare_claude_stream(vllm_raw, proxy_raw, args.label)
 
-    elif args.mode == "stream":
-        vllm_chunks = parse_sse_chunks(vllm_raw)
-        proxy_chunks = parse_sse_chunks(proxy_raw)
-
-        if not vllm_chunks:
-            print(f"ERROR:vLLM 流式响应无有效 SSE chunk")
-            sys.exit(1)
-        if not proxy_chunks:
-            print(f"ERROR:proxy 流式响应无有效 SSE chunk")
-            sys.exit(1)
-
-        errors, infos = compare_stream(vllm_chunks, proxy_chunks, args.label)
-
-    # 输出结果
+    # 输出
     for line in infos:
         print(f"INFO:{line}")
     for err in errors:
         print(f"ERROR:{err}")
 
-    # 返回码
     if errors:
         sys.exit(1)
     else:

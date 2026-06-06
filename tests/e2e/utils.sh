@@ -185,3 +185,103 @@ print_summary() {
         return 1
     fi
 }
+
+# ========================================
+# 缓存命中校验辅助函数
+# ========================================
+
+# 验证缓存命中递增和 token_ids 长度校验
+# 参数: $1 - session_id
+#        $2 - 期望轮次数
+#        $3 - 验证模式: incremental(正常递增), nosession(恒为0), kwargs_change(第2轮失效), tools_change(第2轮失效)
+verify_cache_incremental() {
+    local session_id="$1"
+    local expected_rounds="$2"
+    local verify_mode="${3:-incremental}"
+
+    log_step "验证缓存命中 (${verify_mode})"
+
+    TRAJ=$(curl -s "${BASE_URL}/trajectory?session_id=${session_id}&limit=10")
+
+    local tmpfile=$(mktemp)
+    echo "$TRAJ" > "$tmpfile"
+
+    local result=$(python3 -c "
+import json, sys
+
+with open('$tmpfile', 'r') as f:
+    data = json.loads(f.read())
+
+records = data.get('records', [])
+if len(records) < $expected_rounds:
+    print(f'FAIL:轨迹记录数不足, 期望>=${expected_rounds}, 实际:{len(records)}')
+    sys.exit(0)
+
+sorted_recs = sorted(records, key=lambda r: r.get('start_time', ''))
+
+errors = []
+
+for i, rec in enumerate(sorted_recs):
+    round_num = i + 1
+    cache_hit = rec.get('cache_hit_tokens', -1)
+    full_conv_ids = rec.get('full_conversation_token_ids', [])
+    token_ids = rec.get('token_ids', [])
+    response_ids = rec.get('response_ids', [])
+
+    # 校验2: len(full_conversation_token_ids) == len(token_ids) + len(response_ids)
+    if full_conv_ids and token_ids and response_ids:
+        if len(full_conv_ids) != len(token_ids) + len(response_ids):
+            errors.append(f'R{round_num}校验2: full_conv={len(full_conv_ids)} != token_ids={len(token_ids)}+response_ids={len(response_ids)}={len(token_ids)+len(response_ids)}')
+
+    if '$verify_mode' == 'nosession':
+        if cache_hit != 0:
+            errors.append(f'R{round_num}: cache_hit={cache_hit}, 期望=0(无session)')
+    elif '$verify_mode' == 'kwargs_change':
+        if round_num == 1:
+            if cache_hit != 0:
+                errors.append(f'R1: cache_hit={cache_hit}, 期望=0')
+        else:
+            if cache_hit != 0:
+                errors.append(f'R{round_num}: cache_hit={cache_hit}, 期望=0(kwargs变更)')
+    elif '$verify_mode' == 'tools_change':
+        if round_num == 1:
+            if cache_hit != 0:
+                errors.append(f'R1: cache_hit={cache_hit}, 期望=0')
+        else:
+            if cache_hit != 0:
+                errors.append(f'R{round_num}: cache_hit={cache_hit}, 期望=0(tools变更)')
+    elif '$verify_mode' == 'incremental':
+        if round_num == 1:
+            if cache_hit != 0:
+                errors.append(f'R1校验1: cache_hit={cache_hit}, 期望=0')
+        else:
+            prev_ids = sorted_recs[i-1].get('full_conversation_token_ids', [])
+            expected = len(prev_ids)
+            if cache_hit != expected:
+                errors.append(f'R{round_num}校验1: cache_hit={cache_hit}, 期望={expected}')
+
+if errors:
+    print('FAIL:' + '; '.join(errors))
+else:
+    summary = []
+    for i, rec in enumerate(sorted_recs):
+        ch = rec.get('cache_hit_tokens', '?')
+        fl = len(rec.get('full_conversation_token_ids', []))
+        ti = len(rec.get('token_ids', []))
+        ri = len(rec.get('response_ids', []))
+        summary.append(f'R{i+1}:cache_hit={ch},full_conv={fl},token_ids={ti},response_ids={ri}')
+    print('PASS:' + ', '.join(summary))
+" 2>/dev/null)
+
+    rm -f "$tmpfile"
+
+    if echo "$result" | grep -q "^PASS:"; then
+        log_success "$result"
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        log_error "$result"
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+}

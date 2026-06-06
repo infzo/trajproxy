@@ -227,6 +227,9 @@ custom_parsers/
 # E2E test cache
 tests/e2e/cache_store/
 
+# Test backups
+tests_bak/
+
 # macOS
 .DS_Store
 

@@ -1,40 +1,27 @@
 #!/bin/bash
-# Layer 4 测试运行器: 对比测试层（vLLM port 8000 vs trajproxy port 12300）
+# Comparison Layer 测试运行器
 # 用法:
 #   ./run_layer.sh           # 运行本层所有测试
-#   ./run_layer.sh C300      # 运行指定场景
-#   ./run_layer.sh C300 C301 # 运行多个场景
+#   ./run_layer.sh C101      # 运行指定场景
 
-# 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIOS_DIR="${SCRIPT_DIR}/scenarios"
+LAYER_NAME="Comparison Layer"
 
-LAYER_NAME="Layer 4 - Comparison (vLLM:8000 vs Proxy:12300)"
-
-# 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# 全局测试计数
 TOTAL_SCENARIOS=0
 PASSED_SCENARIOS=0
 FAILED_SCENARIOS=0
 
-# 打印帮助
 print_usage() {
     echo "用法:"
     echo "  $0             运行本层所有测试场景"
-    echo "  $0 <场景编号>  运行指定场景（如: $0 C300）"
-    echo "  $0 C300 C301   运行多个场景"
-    echo ""
-    echo "当前层: ${LAYER_NAME}"
-    echo ""
-    echo "前提条件:"
-    echo "  - vLLM 推理服务已启动 (port 8000)"
-    echo "  - trajproxy 服务已启动 (port 12300)"
+    echo "  $0 <场景编号>  运行指定场景（如: $0 C101）"
     echo ""
     echo "可用的测试场景:"
     for f in "${SCENARIOS_DIR}"/*.sh; do
@@ -45,12 +32,9 @@ print_usage() {
     done
 }
 
-# 运行单个测试场景
 run_scenario() {
     local scenario_id="$1"
-    local scenario_file="${SCENARIOS_DIR}/${scenario_id}*.sh"
-
-    # 查找匹配的场景文件
+    local scenario_file="${SCENARIOS_DIR}/${scenario_id}_"*".sh"
     local matched_files=( $scenario_file )
 
     if [ ${#matched_files[@]} -eq 0 ] || [ ! -f "${matched_files[0]}" ]; then
@@ -67,34 +51,22 @@ run_scenario() {
     echo "========================================"
 
     TOTAL_SCENARIOS=$((TOTAL_SCENARIOS + 1))
-
-    # 运行测试脚本并记录耗时
     local start_ts=$(date +%s)
     if bash "$scenario_path"; then
         local end_ts=$(date +%s)
-        local elapsed=$((end_ts - start_ts))
-        if [ -n "${TIMING_LOG:-}" ]; then
-            echo "${scenario_name}|${elapsed}" >> "$TIMING_LOG"
-        fi
-        echo -e "${GREEN}场景 ${scenario_name} 耗时: ${elapsed}s${NC}"
+        echo -e "${GREEN}场景 ${scenario_name} 耗时: $((end_ts - start_ts))s${NC}"
         PASSED_SCENARIOS=$((PASSED_SCENARIOS + 1))
         return 0
     else
         local end_ts=$(date +%s)
-        local elapsed=$((end_ts - start_ts))
-        if [ -n "${TIMING_LOG:-}" ]; then
-            echo "${scenario_name}|${elapsed}" >> "$TIMING_LOG"
-        fi
-        echo -e "${RED}场景 ${scenario_name} 耗时: ${elapsed}s (失败)${NC}"
+        echo -e "${RED}场景 ${scenario_name} 耗时: $((end_ts - start_ts))s (失败)${NC}"
         FAILED_SCENARIOS=$((FAILED_SCENARIOS + 1))
         return 1
     fi
 }
 
-# 运行所有测试场景
 run_all_scenarios() {
     echo -e "${YELLOW}[${LAYER_NAME}] 运行所有测试场景...${NC}"
-
     for f in "${SCENARIOS_DIR}"/*.sh; do
         if [ -f "$f" ]; then
             local scenario_name=$(basename "$f" .sh)
@@ -104,7 +76,6 @@ run_all_scenarios() {
     done
 }
 
-# 打印最终摘要
 print_final_summary() {
     echo ""
     echo "========================================"
@@ -114,7 +85,6 @@ print_final_summary() {
     echo -e "场景通过: ${GREEN}${PASSED_SCENARIOS}${NC}"
     echo -e "场景失败: ${RED}${FAILED_SCENARIOS}${NC}"
     echo "========================================"
-
     if [ $FAILED_SCENARIOS -eq 0 ]; then
         echo -e "${GREEN}所有测试通过！${NC}"
         exit 0
@@ -124,38 +94,31 @@ print_final_summary() {
     fi
 }
 
-# 主入口
 main() {
-    # 检查 scenarios 目录
     if [ ! -d "$SCENARIOS_DIR" ]; then
         echo -e "${RED}错误: scenarios 目录不存在${NC}"
         exit 1
     fi
 
-    # 前置健康检查
     source "${SCRIPT_DIR}/utils.sh"
-    echo -e "${YELLOW}前置检查: 确认两个服务均可用...${NC}"
+    echo -e "${YELLOW}前置检查: 确认服务可用...${NC}"
     if ! check_vllm_health; then
-        echo -e "${RED}前置检查失败: vLLM 服务不可用，请先启动 vLLM (port 8000)${NC}"
+        echo -e "${RED}前置检查失败: vLLM 服务不可用${NC}"
         exit 1
     fi
     if ! check_proxy_health; then
-        echo -e "${RED}前置检查失败: trajproxy 服务不可用，请先启动 trajproxy (port 12300)${NC}"
+        echo -e "${RED}前置检查失败: trajproxy 服务不可用${NC}"
         exit 1
     fi
     echo -e "${GREEN}前置检查通过${NC}"
     echo ""
 
-    # 根据参数运行测试
     if [ $# -eq 0 ]; then
-        # 运行所有测试
         run_all_scenarios
     elif [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
-        # 显示帮助
         print_usage
         exit 0
     else
-        # 运行指定的测试场景
         for scenario_id in "$@"; do
             run_scenario "$scenario_id"
         done

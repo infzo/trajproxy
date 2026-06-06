@@ -115,8 +115,8 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
             # 同时设置 reasoning 和 reasoning_content 确保兼容
             message["reasoning_content"] = reasoning
 
-        # 始终包含 tool_calls 字段（为空时设置为空列表），与 vLLM 行为一致
-        message["tool_calls"] = tool_calls if tool_calls else []
+        if tool_calls:
+            message["tool_calls"] = tool_calls
 
         choice = {
             "index": 0,

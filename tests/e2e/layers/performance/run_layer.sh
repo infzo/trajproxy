@@ -1,7 +1,8 @@
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIOS_DIR="${SCRIPT_DIR}/scenarios"
-echo "=== Proxy Layer ==="
+
+echo "=== Performance Layer ==="
 for f in "${SCENARIOS_DIR}"/*.sh; do
     if [ -f "$f" ]; then
         echo "Running: $(basename "$f")"

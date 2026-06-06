@@ -132,3 +132,63 @@ PYEOF
 
     rm -f "$tmpfile"
 }
+
+# ========================================
+# 内容提取辅助函数
+# ========================================
+
+# 从非流式响应中提取 assistant content
+# 参数: $1 - 非流式响应体 JSON
+extract_assistant_content() {
+    local body="$1"
+    echo "$body" | python3 -c "
+import sys, json
+try:
+    data = json.loads(sys.stdin.read())
+    msg = data['choices'][0]['message']
+    # 合并 content + reasoning_content (如有)
+    content = msg.get('content', '') or ''
+    reasoning = msg.get('reasoning_content', '') or msg.get('reasoning', '') or ''
+    if reasoning:
+        content = reasoning + content
+    print(content)
+except Exception as e:
+    print(f'ERROR:提取assistant内容失败: {e}')
+" 2>/dev/null
+}
+
+# 从流式响应中重建 assistant content
+# 参数: $1 - 流式响应全文本
+extract_stream_assistant_content() {
+    local stream_text="$1"
+    echo "$stream_text" | python3 -c "
+import sys, json
+content_parts = []
+reasoning_parts = []
+for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith('data: '):
+        continue
+    payload = line[6:]
+    if payload == '[DONE]':
+        break
+    try:
+        data = json.loads(payload)
+        for choice in data.get('choices', []):
+            delta = choice.get('delta', {})
+            rc = delta.get('reasoning_content', '') or delta.get('reasoning', '') or ''
+            c = delta.get('content', '') or ''
+            if rc:
+                reasoning_parts.append(rc)
+            if c:
+                content_parts.append(c)
+    except json.JSONDecodeError:
+        continue
+reasoning = ''.join(reasoning_parts)
+content = ''.join(content_parts)
+if reasoning:
+    print(reasoning + content)
+else:
+    print(content)
+" 2>/dev/null
+}

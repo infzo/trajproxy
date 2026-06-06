@@ -113,11 +113,13 @@ class TokenConverter(BaseConverter):
         # 追加到缓冲区
         context.stream_buffer_ids.extend(token_ids)
 
-        # 尝试解码整个缓冲区
-        # 保留特殊 token（如 <tool_call>、</tool_call>），确保 tool parser 文本检测正常工作
+# 对齐 vLLM SamplingParams 默认 skip_special_tokens=True
+        # tokenizer 层面过滤特殊 token（含 EOS），客户端直接收到干净文本
+        # Parser 用 delta_token_ids 检测边界，当 text 中标记被 strip 时返回 None（已兼容）
+        # 存储由 _finalize_stream() 从 stream_buffer_ids 用 skip_special_tokens=False 重解码
         full_text = self.tokenizer.decode(
             context.stream_buffer_ids,
-            skip_special_tokens=False
+            skip_special_tokens=True
         )
 
         # 计算新增的文本
