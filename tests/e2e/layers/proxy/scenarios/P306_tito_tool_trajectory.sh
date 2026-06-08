@@ -1,14 +1,14 @@
 #!/bin/bash
-# F208: TITO Tool 轨迹存储（新增）
+# P306: TITO Tool 轨迹存储（新增）
 # 矩阵: TITO×Tool×单轮×轨迹
 # 验证目标: tool_calls 和 assistant 含 tool_calls 的完整记录
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F208: TITO Tool 轨迹 ==="
+echo "=== P306: TITO Tool 轨迹 ==="
 
-RUN_ID="run-f208"
+RUN_ID="run-p306"
 SESS_ID="sess-f208-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 

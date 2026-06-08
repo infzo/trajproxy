@@ -1,14 +1,14 @@
 #!/bin/bash
-# F310: TITO ns T+R 2轮 kwargs变化缓存失效
+# P410: TITO ns T+R 2轮 kwargs变化缓存失效
 # 矩阵: TITO×ns×T+R×2轮×session=有×kwargs=thinking=false变
 # 来源: F3xx异常缓存矩阵 - kwargs变化导致缓存失效
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F310: TITO ns T+R 2轮 kwargs变化缓存失效 ==="
+echo "=== P410: TITO ns T+R 2轮 kwargs变化缓存失效 ==="
 
-RUN_ID="run-f310"
+RUN_ID="run-p410"
 SESS_ID="sess-f310-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 

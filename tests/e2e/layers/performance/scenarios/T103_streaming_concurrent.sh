@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 P102: 流式并发压测（Performance 层）
+# 场景 T103: 流式并发压测（Performance 层）
 # 来源: 保留, 目录要求100并发×流式
 # 测试流程：注册模型 -> 并发发送流式请求(100并发，共100个) -> 统计响应时间、chunk数和失败次数 -> 删除模型
 
@@ -8,12 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 P102: 流式并发压测（Performance 层）"
+echo "场景 T103: 流式并发压测（Performance 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 CONCURRENT_TEST_BASE_URL="${BASE_URL}"
 CONCURRENT_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 CONCURRENT_TEST_RUN_ID="run-${SCENARIO_ID}"

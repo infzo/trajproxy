@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F111: chat_template_kwargs 透传与消费测试（Proxy 层）
+# 场景 P204: chat_template_kwargs 透传与消费测试（Proxy 层）
 # 测试流程：启动mock服务 -> 注册模型 -> 发送请求(带chat_template_kwargs) -> 验证mock收到的请求 -> 删除模型 -> 停止mock
 #
 # 验证要点：
@@ -12,12 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F111: chat_template_kwargs 透传与消费测试（Proxy 层）"
+echo "场景 P204: chat_template_kwargs 透传与消费测试（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 TEST_BASE_URL="${BASE_URL}"
 
 # DirectPipeline 配置

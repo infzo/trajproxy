@@ -1,5 +1,5 @@
 #!/bin/bash
-# F305: TITO 非流式 Reasoning 3轮缓存
+# P405: TITO 非流式 Reasoning 3轮缓存
 # 矩阵: TITO×ns×Reasoning×3轮×session
 # 验证目标: reasoning_content 回传匹配 + 缓存递增
 # 校验公式:
@@ -9,9 +9,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F305: TITO 非流式 Reasoning 3轮 ==="
+echo "=== P405: TITO 非流式 Reasoning 3轮 ==="
 
-RUN_ID="run-f305"
+RUN_ID="run-p405"
 SESS_ID="sess-f305-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 

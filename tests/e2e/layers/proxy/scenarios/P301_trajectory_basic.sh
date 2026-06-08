@@ -1,17 +1,17 @@
 #!/bin/bash
-# 场景 F201: 轨迹捕获基础（Proxy 层）
+# 场景 P301: 轨迹捕获基础（Proxy 层）
 # 来源: 原F103, 保留; 测试流程：注册TITO模型 -> 非流式请求 -> 查询轨迹确认记录存在 -> 删除模型
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F201: 轨迹捕获基础"
+echo "场景 P301: 轨迹捕获基础"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 TEST_BASE_URL="${BASE_URL}"
 TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TEST_RUN_ID="run-${SCENARIO_ID}"

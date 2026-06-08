@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F203: 基础 chat 轨迹存储（降级冒烟，Nginx 层）
+# 场景 N101: 基础 chat 轨迹存储（降级冒烟，Nginx 层）
 # 来源: 原F100降级为轻量冒烟; 测试流程：注册模型 -> 非流式请求 -> 验证响应 -> 删除模型
 
 # 获取脚本目录
@@ -7,12 +7,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F203: 基础 chat 轨迹存储（降级冒烟，Nginx 层）"
+echo "场景 N101: 基础 chat 轨迹存储（降级冒烟，Nginx 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 CHAT_TEST_BASE_URL="${BASE_URL}"
 CHAT_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 CHAT_TEST_RUN_ID="run-${SCENARIO_ID}"

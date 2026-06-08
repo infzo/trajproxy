@@ -1,13 +1,13 @@
 #!/bin/bash
-# F103: 重复注册模型 - 幂等性验证（新增）
+# P103: 重复注册模型 - 幂等性验证（新增）
 # 矩阵: 基础API×模型管理×幂等
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F103: 重复注册模型 ==="
+echo "=== P103: 重复注册模型 ==="
 
-RUN_ID="run-f103"
+RUN_ID="run-p103"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 
 log_step "首次注册"

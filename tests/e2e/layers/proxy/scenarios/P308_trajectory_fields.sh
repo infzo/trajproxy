@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F210: 轨迹查询 fields 参数测试（Proxy 层）
+# 场景 P308: 轨迹查询 fields 参数测试（Proxy 层）
 # 测试 fields 查询参数支持：
 #   - 包含语法: ?fields=model,prompt_tokens（只返回指定字段）
 #   - 排除语法: ?fields=-raw_request,-raw_response（排除指定字段）
@@ -12,12 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F210: 轨迹查询 fields 参数测试（Proxy 层）"
+echo "场景 P308: 轨迹查询 fields 参数测试（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 TEST_BASE_URL="${BASE_URL}"
 TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TEST_RUN_ID="run-${SCENARIO_ID}"

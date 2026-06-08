@@ -1,14 +1,14 @@
 #!/bin/bash
-# F311: TITO ns Tool 2轮 tools变更缓存失效
+# P411: TITO ns Tool 2轮 tools变更缓存失效
 # 矩阵: TITO×ns×Tool×2轮×session=有×tools=不同
 # 来源: F3xx异常缓存矩阵 - tools变更导致缓存失效
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F311: TITO ns Tool 2轮 tools变更缓存失效 ==="
+echo "=== P411: TITO ns Tool 2轮 tools变更缓存失效 ==="
 
-RUN_ID="run-f311"
+RUN_ID="run-p411"
 SESS_ID="sess-f311-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 

@@ -1,14 +1,14 @@
 #!/bin/bash
-# F211: 轨迹字段与请求内容交叉验证（新增）
+# P309: 轨迹字段与请求内容交叉验证（新增）
 # 矩阵: TITO×ns×单轮×交叉校验
 # 来源: 新增; 验证存储的messages/token_ids与实际请求内容一致
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F211: 轨迹字段交叉验证 ==="
+echo "=== P309: 轨迹字段交叉验证 ==="
 
-RUN_ID="run-f211"
+RUN_ID="run-p309"
 SESS_ID="sess-f211-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TEST_PROMPT="Hello crosscheck test 211"

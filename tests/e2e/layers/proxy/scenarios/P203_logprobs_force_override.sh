@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F110: logprobs 和 token_ids 强制覆盖与返回过滤（Proxy 层）
+# 场景 P203: logprobs 和 token_ids 强制覆盖与返回过滤（Proxy 层）
 # 使用真实推理服务（vLLM）验证完整功能链路：
 #
 # 验证要点：
@@ -20,13 +20,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F110: logprobs 和 token_ids 强制覆盖与返回过滤（Proxy 层）"
+echo "场景 P203: logprobs 和 token_ids 强制覆盖与返回过滤（Proxy 层）"
 echo "使用真实推理服务验证"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 TEST_BASE_URL="${BASE_URL}"
 TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TEST_RUN_ID="run-${SCENARIO_ID}"

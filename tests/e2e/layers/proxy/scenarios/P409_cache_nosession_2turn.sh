@@ -1,14 +1,14 @@
 #!/bin/bash
-# F309: TITO ns Tool 2轮无session缓存
+# P409: TITO ns Tool 2轮无session缓存
 # 矩阵: TITO×ns×Tool×2轮×session=无
 # 来源: F3xx异常缓存矩阵 - 无session时cache_hit_tokens恒为0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F309: TITO ns Tool 2轮无session缓存 ==="
+echo "=== P409: TITO ns Tool 2轮无session缓存 ==="
 
-RUN_ID="run-f309"
+RUN_ID="run-p409"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 
 # Tool定义：get_weather

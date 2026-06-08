@@ -1,5 +1,5 @@
 #!/bin/bash
-# F304: TITO流式T+R 3轮缓存
+# P404: TITO流式T+R 3轮缓存
 # 矩阵: TITO×stream×T+R×3轮×session
 # 来源: TEST_CASE_CATALOG §6
 # 校验公式:
@@ -9,9 +9,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F304: TITO流式T+R 3轮缓存 ==="
+echo "=== P404: TITO流式T+R 3轮缓存 ==="
 
-RUN_ID="run-f304"
+RUN_ID="run-p404"
 SESS_ID="sess-f304-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TOOLS='[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}}]'

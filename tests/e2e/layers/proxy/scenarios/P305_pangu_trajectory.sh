@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F207: PANGU集成+轨迹抓取场景（Proxy 层）
+# 场景 P305: PANGU集成+轨迹抓取场景（Proxy 层）
 # 测试流程：
 #   1. 注册带run_id的模型
 #   2. 通过 /s/{session_id}/ 路径传入UUID格式的session_id，发送非流式请求
@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F207: PANGU集成+轨迹抓取场景（Proxy 层）"
+echo "场景 P305: PANGU集成+轨迹抓取场景（Proxy 层）"
 echo "========================================"
 echo ""
 

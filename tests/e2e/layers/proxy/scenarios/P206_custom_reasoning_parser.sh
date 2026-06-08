@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F117: 自定义 Reasoning Parser 场景（Proxy 层）
+# 场景 P206: 自定义 Reasoning Parser 场景（Proxy 层）
 # 测试流程：注册模型（带自定义reasoning_parser） -> 发送带推理内容的非流式请求 -> 验证响应中reasoning字段非空 -> 删除模型
 #
 # 本测试用于验证自定义 parser 按需发现机制：
@@ -12,12 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F117: 自定义 Reasoning Parser 场景（Proxy 层）"
+echo "场景 P206: 自定义 Reasoning Parser 场景（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 REASONING_TEST_BASE_URL="${BASE_URL}"
 REASONING_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 REASONING_TEST_RUN_ID="run-${SCENARIO_ID}"

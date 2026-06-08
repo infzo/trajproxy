@@ -1,5 +1,5 @@
 #!/bin/bash
-# F107: 并发限流（新增）
+# P107: 并发限流（新增）
 # 矩阵: 系统级×并发控制×429
 # 验证目标: 超出 max_concurrent_requests → 429
 # 发送 20 个并发请求，验证至少有部分被限流返回 429
@@ -7,9 +7,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F107: 并发限流 ==="
+echo "=== P107: 并发限流 ==="
 
-RUN_ID="run-f107"
+RUN_ID="run-p107"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 CONCURRENT_COUNT=20
 

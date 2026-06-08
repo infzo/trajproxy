@@ -1,19 +1,19 @@
 #!/bin/bash
-# 场景 F206: 直接转发模式下流式与非流式轨迹一致性验证（Proxy 层）
+# 场景 P304: 直接转发模式下流式与非流式轨迹一致性验证（Proxy 层）
 # 测试流程：注册模型（直接转发模式） -> 分别发送相同请求（流式和非流式） -> 查询两条轨迹 -> 比较关键字段一致性 -> 删除模型
-# 与 F014 区别：F014 测试 token_in_token_out=true，本场景测试 token_in_token_out=false（直接转发模式）
+# 与 P207 区别：P207 测试 token_in_token_out=true，本场景测试 token_in_token_out=false（直接转发模式）
 
 # 获取脚本目录
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F206: 直接转发模式下流式与非流式轨迹一致性验证（Proxy 层）"
+echo "场景 P304: 直接转发模式下流式与非流式轨迹一致性验证（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 DIRECT_TEST_BASE_URL="${BASE_URL}"
 DIRECT_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 DIRECT_TEST_RUN_ID="run-${SCENARIO_ID}"

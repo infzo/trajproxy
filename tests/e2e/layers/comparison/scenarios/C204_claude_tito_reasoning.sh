@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/../utils.sh"
 
 echo "=== C204: Claude TITO Reasoning 一致性 ==="
 
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE 'C[0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 RUN_ID="run-${SCENARIO_ID}"
 SESS_ID="sess-${SCENARIO_ID}-$(date +%s%N | md5sum | head -c 8)"
 SESS_PATH="s/${RUN_ID}/${SESS_ID}"

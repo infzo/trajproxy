@@ -1,11 +1,11 @@
 #!/bin/bash
-# F106: 无效 model 参数（新增）
+# P106: 无效 model 参数（新增）
 # 矩阵: 基础API×参数校验×422
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F106: 无效 model 参数 ==="
+echo "=== P106: 无效 model 参数 ==="
 
 # model=""
 log_step "model 为空字符串"

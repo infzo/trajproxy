@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F114: 预置模型懒加载验证（Proxy 层）
+# 场景 P110: 预置模型懒加载验证（Proxy 层）
 # 测试流程：使用 config.yaml 中预置模型 → 首次请求触发懒加载 → 缓存命中 → 验证不可 API 删除
 # 预置模型在 Worker 启动时仅存储配置，Processor 在首次请求时创建
 # 注意：本测试使用真实后端，不使用 mock 推理服务
@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F114: 预置模型懒加载验证（Proxy 层）"
+echo "场景 P110: 预置模型懒加载验证（Proxy 层）"
 echo "========================================"
 echo ""
 
@@ -18,7 +18,7 @@ TEST_BASE_URL="${BASE_URL}"
 # 使用 config.yaml 中预置的静态模型
 PRESET_MODEL="${DEFAULT_MODEL_NAME}"
 PRESET_RUN_ID_APP="app-001"
-TEST_SESSION_ID="session-f217-$(date +%s%N | md5sum | head -c 8)"
+TEST_SESSION_ID="session-p110-$(date +%s%N | md5sum | head -c 8)"
 
 # 步骤 1: 列出所有模型，确认预置模型已存在
 log_step "步骤 1: 列出所有模型，确认预置模型已注册（仅配置，未加载 Processor）"

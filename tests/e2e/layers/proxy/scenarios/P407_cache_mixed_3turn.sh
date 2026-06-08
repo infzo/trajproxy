@@ -1,5 +1,5 @@
 #!/bin/bash
-# F307: 混合模式 s→ns→s T+R 3轮缓存
+# P407: 混合模式 s→ns→s T+R 3轮缓存
 # 矩阵: TITO×交替(s→ns→s)×T+R×3轮×session
 # 验证目标: 跨存储模式缓存兼容 + T+R tool_calls 正确回传
 # 校验公式:
@@ -9,9 +9,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F307: 混合模式 3轮缓存 ==="
+echo "=== P407: 混合模式 3轮缓存 ==="
 
-RUN_ID="run-f307"
+RUN_ID="run-p407"
 SESS_ID="sess-f307-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TOOLS='[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}}]'

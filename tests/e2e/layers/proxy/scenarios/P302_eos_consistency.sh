@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F202: EOS Token 一致性测试（Nginx 层）
+# 场景 P302: EOS Token 一致性测试（Nginx 层）
 # 验证 full_conversation_text 与 full_conversation_token_ids 的 EOS 一致性，
 # 确保前缀匹配缓存不出现双重 EOS。
 #
@@ -9,12 +9,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F202: EOS Token 一致性测试"
+echo "场景 P302: EOS Token 一致性测试"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 TEST_BASE_URL="${BASE_URL}"
 TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TEST_RUN_ID="run-${SCENARIO_ID}"

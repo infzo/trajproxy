@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F113: Processor LRU 缓存命中与淘汰验证（Proxy 层）
+# 场景 P109: Processor LRU 缓存命中与淘汰验证（Proxy 层）
 # 测试流程：注册多个模型 → 交替请求 → 验证均成功 → 清理
 # 注意：使用真实后端，不依赖 mock 推理服务
 
@@ -8,13 +8,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F113: Processor LRU 缓存命中与淘汰验证（Proxy 层）"
+echo "场景 P109: Processor LRU 缓存命中与淘汰验证（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
 TEST_BASE_URL="${BASE_URL}"
-TEST_SESSION_ID_PREFIX="session-f216-$(date +%s%N | md5sum | head -c 8)"
+TEST_SESSION_ID_PREFIX="session-p109-$(date +%s%N | md5sum | head -c 8)"
 
 # 注册多个模型验证 LRU 缓存管理
 # 所有模型使用同一个真实模型名称（通过 DEFAULT_MODEL_NAME 配置），通过不同 run_id 区分

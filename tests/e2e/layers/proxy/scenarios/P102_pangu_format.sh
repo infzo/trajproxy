@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F102: PANGU集成场景（Proxy 层）
+# 场景 P102: PANGU集成场景（Proxy 层）
 # 测试流程：注册带run-id模型 -> 发送非流式推理请求 -> 发送流式推理请求 -> 删除模型
 # 特点：model参数格式为 {model_name},{run_id}
 
@@ -8,12 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F102: PANGU集成场景（Proxy 层）"
+echo "场景 P102: PANGU集成场景（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 PANGU_TEST_BASE_URL="${BASE_URL}"
 PANGU_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 PANGU_TEST_RUN_ID="run-${SCENARIO_ID}"

@@ -1,13 +1,13 @@
 #!/bin/bash
-# F119: TITO Token 流式基础冒烟（新增）
+# P208: TITO Token 流式基础冒烟（新增）
 # 矩阵: TITO×s×单轮×冒烟
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F119: TITO Token 流式 ==="
+echo "=== P208: TITO Token 流式 ==="
 
-RUN_ID="run-f119"
+RUN_ID="run-p208"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 
 log_step "注册 TITO 模型"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F112: Processor 懒加载验证（Proxy 层）
+# 场景 P108: Processor 懒加载验证（Proxy 层）
 # 测试流程：注册模型 → 首次请求懒加载 → 缓存命中 → 清理
 # 注意：使用真实后端，不依赖 mock 推理服务
 
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F112: Processor 懒加载验证（Proxy 层）"
+echo "场景 P108: Processor 懒加载验证（Proxy 层）"
 echo "========================================"
 echo ""
 
@@ -16,7 +16,7 @@ echo ""
 TEST_BASE_URL="${BASE_URL}"
 TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TEST_RUN_ID="run-lazy-001"
-TEST_SESSION_ID="session-f215-$(date +%s%N | md5sum | head -c 8)"
+TEST_SESSION_ID="session-p108-$(date +%s%N | md5sum | head -c 8)"
 
 # 步骤 1: 动态注册模型（仅存储配置，不加载 Processor）
 log_step "步骤 1: 动态注册模型（仅存储配置，不加载 Processor）"

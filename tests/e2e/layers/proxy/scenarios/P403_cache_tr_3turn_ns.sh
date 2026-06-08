@@ -1,5 +1,5 @@
 #!/bin/bash
-# F303: TITO非流式T+R 3轮缓存
+# P403: TITO非流式T+R 3轮缓存
 # 矩阵: TITO×ns×T+R×3轮×session
 # 来源: TEST_CASE_CATALOG §6
 # 校验公式:
@@ -9,9 +9,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F303: TITO非流式T+R 3轮缓存 ==="
+echo "=== P403: TITO非流式T+R 3轮缓存 ==="
 
-RUN_ID="run-f303"
+RUN_ID="run-p403"
 SESS_ID="sess-f303-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TOOLS='[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}}]'

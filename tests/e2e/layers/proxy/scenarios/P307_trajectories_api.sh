@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F209: Trajectories API 测试用例（Proxy 层）
+# 场景 P307: Trajectories API 测试用例（Proxy 层）
 # 测试新的轨迹查询接口：
 #   - GET /trajectories?run_id={run_id}
 #   - GET /trajectories/{session_id}?limit=10000
@@ -10,12 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F209: Trajectories API 测试用例（Proxy 层）"
+echo "场景 P307: Trajectories API 测试用例（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 TRAJ_API_BASE_URL="${BASE_URL}"
 TRAJ_API_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TRAJ_API_RUN_ID="run-${SCENARIO_ID}"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F116: 自定义 Tool Parser 场景（Proxy 层）
+# 场景 P205: 自定义 Tool Parser 场景（Proxy 层）
 # 测试流程：注册模型（带自定义tool_parser） -> 发送带tools的非流式推理请求 -> 验证响应中tool_calls字段非空 -> 删除模型
 #
 # 本测试用于验证自定义 parser 按需发现机制：
@@ -12,12 +12,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F116: 自定义 Tool Parser 场景（Proxy 层）"
+echo "场景 P205: 自定义 Tool Parser 场景（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
-SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[FP][0-9]+' | tr '[:upper:]' '[:lower:]')
+SCENARIO_ID=$(basename "${BASH_SOURCE[0]}" .sh | grep -oE '[A-Z][0-9]+' | tr '[:upper:]' '[:lower:]')
 TOOL_TEST_BASE_URL="${BASE_URL}"
 TOOL_TEST_MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TOOL_TEST_RUN_ID="run-${SCENARIO_ID}"

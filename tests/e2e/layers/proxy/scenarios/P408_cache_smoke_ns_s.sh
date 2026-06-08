@@ -1,13 +1,13 @@
 #!/bin/bash
-# F308: TITO T+R 单轮 ns+s 降级冒烟，不验缓存
+# P408: TITO T+R 单轮 ns+s 降级冒烟，不验缓存
 # 矩阵: TITO×(ns+s)降级×T+R×单轮×冒烟
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F308: 降级冒烟 ns+s（不验缓存）==="
+echo "=== P408: 降级冒烟 ns+s（不验缓存）==="
 
-RUN_ID="run-f308"
+RUN_ID="run-p408"
 SESS_ID="sess-f308-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 TOOLS='[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}}]'

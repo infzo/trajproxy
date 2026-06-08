@@ -1,5 +1,5 @@
 #!/bin/bash
-# F104: 删除预置模型保护（新增）
+# P104: 删除预置模型保护（新增）
 # 矩阵: 基础API×模型管理×保护
 # 验证目标: DELETE 预置模型 → 拒绝/返回 404
 # 预置模型定义在 config.yaml 中，不属于 dynamic configs，不应允许 API 删除
@@ -7,7 +7,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F104: 删除预置模型 ==="
+echo "=== P104: 删除预置模型 ==="
 
 PRESET_MODEL="${DEFAULT_MODEL_NAME}"
 

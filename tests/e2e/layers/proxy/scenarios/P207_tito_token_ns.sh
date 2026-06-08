@@ -1,14 +1,14 @@
 #!/bin/bash
-# F118: TITO Token 模式基础冒烟（非流式）
+# P207: TITO Token 模式基础冒烟（非流式）
 # 矩阵: TITO×ns×单轮×冒烟
 # 来源: 保留, 原F104; 验证TITO基础请求+response_ids存在
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F118: TITO Token 非流式基础冒烟 ==="
+echo "=== P207: TITO Token 非流式基础冒烟 ==="
 
-RUN_ID="run-f118"
+RUN_ID="run-p207"
 SESS_ID="sess-f118-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 

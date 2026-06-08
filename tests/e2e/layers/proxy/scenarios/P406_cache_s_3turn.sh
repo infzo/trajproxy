@@ -1,13 +1,13 @@
 #!/bin/bash
-# F306: TITO 流式 无Parser 3轮缓存
+# P406: TITO 流式 无Parser 3轮缓存
 # 矩阵: TITO×s×无Parser×3轮×session
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== F306: TITO 流式 3轮缓存 ==="
+echo "=== P406: TITO 流式 3轮缓存 ==="
 
-RUN_ID="run-f306"
+RUN_ID="run-p406"
 SESS_ID="sess-f306-$(date +%s%N | md5sum | head -c 8)"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 

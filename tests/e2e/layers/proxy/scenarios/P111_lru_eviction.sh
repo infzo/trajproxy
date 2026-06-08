@@ -1,5 +1,5 @@
 #!/bin/bash
-# 场景 F115: Processor LRU 淘汰与重加载验证（Proxy 层）
+# 场景 P111: Processor LRU 淘汰与重加载验证（Proxy 层）
 # 测试流程：批量注册模型超过缓存上限 → 依次请求触发淘汰 → 验证淘汰后重加载 → 清理
 # 默认 LRU 缓存上限 32，注册 35 个模型确保触发淘汰机制
 # 注意：使用真实后端，不依赖 mock 推理服务
@@ -9,13 +9,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
 echo "========================================"
-echo "场景 F115: Processor LRU 淘汰与重加载验证（Proxy 层）"
+echo "场景 P111: Processor LRU 淘汰与重加载验证（Proxy 层）"
 echo "========================================"
 echo ""
 
 # 测试配置
 TEST_BASE_URL="${BASE_URL}"
-TEST_SESSION_ID_PREFIX="session-f218-$(date +%s%N | md5sum | head -c 8)"
+TEST_SESSION_ID_PREFIX="session-p111-$(date +%s%N | md5sum | head -c 8)"
 
 # 注册 35 个模型以超过默认缓存上限 32，确保触发 LRU 淘汰
 # 前 32 个模型会填满缓存，第 33-35 个触发淘汰
