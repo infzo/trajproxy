@@ -40,19 +40,19 @@ data = json.loads(os.environ['R1_BODY'])
 msg = data['choices'][0]['message']
 
 # 构造assistant消息，保留原始content、reasoning和tool_calls
-    assistant_msg = {'role': 'assistant'}
-    content = msg.get('content')
-    if content is not None:
-        assistant_msg['content'] = content
-    elif not msg.get('tool_calls'):
-        assistant_msg['content'] = ''
-    reasoning = msg.get('reasoning_content') or msg.get('reasoning') or ''
-    if reasoning:
-        assistant_msg['reasoning'] = reasoning
-        assistant_msg['reasoning_content'] = reasoning
-    tool_calls = msg.get('tool_calls')
-    if tool_calls:
-        assistant_msg['tool_calls'] = tool_calls
+assistant_msg = {'role': 'assistant'}
+content = msg.get('content')
+if content is not None:
+    assistant_msg['content'] = content
+elif not msg.get('tool_calls'):
+    assistant_msg['content'] = ''
+reasoning = msg.get('reasoning_content') or msg.get('reasoning') or ''
+if reasoning:
+    assistant_msg['reasoning'] = reasoning
+    assistant_msg['reasoning_content'] = reasoning
+tool_calls = msg.get('tool_calls')
+if tool_calls:
+    assistant_msg['tool_calls'] = tool_calls
 
 messages = [{'role': 'user', 'content': 'What is the weather in Shanghai?'}]
 messages.append(assistant_msg)

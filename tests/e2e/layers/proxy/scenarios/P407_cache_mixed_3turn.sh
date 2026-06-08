@@ -109,19 +109,19 @@ msg_data = json.loads(os.environ['MSG_DATA'])
 next_content = os.environ['NEXT_USER_CONTENT']
 
 # 构造 assistant 消息
-    assistant_msg = {'role': 'assistant'}
-    content = msg_data.get('content')
-    if content is not None and content != '':
-        assistant_msg['content'] = content
-    elif not msg_data.get('tool_calls'):
-        assistant_msg['content'] = ''
-    reasoning = msg_data.get('reasoning_content') or msg_data.get('reasoning') or ''
-    if reasoning:
-        assistant_msg['reasoning'] = reasoning
-        assistant_msg['reasoning_content'] = reasoning
-    tool_calls = msg_data.get('tool_calls')
-    if tool_calls:
-        assistant_msg['tool_calls'] = tool_calls
+assistant_msg = {'role': 'assistant'}
+content = msg_data.get('content')
+if content is not None and content != '':
+    assistant_msg['content'] = content
+elif not msg_data.get('tool_calls'):
+    assistant_msg['content'] = ''
+reasoning = msg_data.get('reasoning_content') or msg_data.get('reasoning') or ''
+if reasoning:
+    assistant_msg['reasoning'] = reasoning
+    assistant_msg['reasoning_content'] = reasoning
+tool_calls = msg_data.get('tool_calls')
+if tool_calls:
+    assistant_msg['tool_calls'] = tool_calls
 
 messages = prev_messages + [assistant_msg]
 # 添加 tool role 消息（如有 tool_calls）
@@ -138,7 +138,7 @@ print(json.dumps(messages, ensure_ascii=False))
 log_step "第1轮: 流式 s (${CITIES[0]})"
 R1_STREAM=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in ${CITIES[0]}? Think then call tool.\"}],\"tools\":${TOOLS},\"max_tokens\":256,\"stream\":true}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in ${CITIES[0]}? Think then call tool.\"}],\"tools\":${TOOLS},\"max_tokens\":256,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 assert_contains "$R1_STREAM" "data:" "第1轮流式包含 data:"
 R1_MSG=$(parse_stream_to_msg "$R1_STREAM")
 sleep 1
@@ -150,7 +150,7 @@ R2_MESSAGES=$(PREV_MESSAGES='[{"role":"user","content":"Weather in Shanghai? Thi
 R2_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R2_BODY=$(echo "$R2_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R2_RESP" | sed -n '$p')" "第2轮 ns 200"
 R2_MSG=$(parse_ns_to_msg "$R2_BODY")
@@ -162,7 +162,7 @@ R3_MESSAGES=$(PREV_MESSAGES="$R2_MESSAGES" MSG_DATA="$R2_MSG" NEXT_USER_CONTENT=
 
 R3_STREAM=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256,\"stream\":true}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 assert_contains "$R3_STREAM" "data:" "第3轮流式包含 data:"
 sleep 1
 

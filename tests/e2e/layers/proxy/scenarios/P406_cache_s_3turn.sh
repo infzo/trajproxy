@@ -21,7 +21,7 @@ sleep 1
 log_step "第1轮 流式请求"
 R1_STREAM=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is 10 + 5?\"}],\"max_tokens\":64,\"stream\":true}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is 10 + 5?\"}],\"max_tokens\":64,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":false}}")
 assert_contains "$R1_STREAM" "data:" "第1轮流式包含 data:"
 R1_CONTENT=$(extract_stream_assistant_content "$R1_STREAM")
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
@@ -46,7 +46,7 @@ print(json.dumps(messages, ensure_ascii=False))
 ")
 R2_STREAM=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"max_tokens\":64,\"stream\":true}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"max_tokens\":64,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":false}}")
 assert_contains "$R2_STREAM" "data:" "第2轮流式包含 data:"
 R2_CONTENT=$(extract_stream_assistant_content "$R2_STREAM")
 TESTS_TOTAL=$((TESTS_TOTAL + 1))
@@ -73,7 +73,7 @@ print(json.dumps(messages, ensure_ascii=False))
 ")
 R3_STREAM=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"max_tokens\":64,\"stream\":true}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"max_tokens\":64,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":false}}")
 assert_contains "$R3_STREAM" "data:" "第3轮流式包含 data:"
 sleep 1
 
