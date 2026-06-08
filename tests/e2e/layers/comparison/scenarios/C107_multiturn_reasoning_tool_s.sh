@@ -44,7 +44,7 @@ rm -f "$VLLM_R3" "$PROXY_R3"
 
 # 第4轮: tool_choice=named 流式
 log_step "第4轮: tool_choice=named 流式"
-R4_REQ=$(echo "$R1_REQ" | sed 's/"stream":true/"stream":true,"tool_choice":{"type":"function","name":"get_weather"}/')
+R4_REQ=$(echo "$R1_REQ" | sed 's/"stream":true/"stream":true,"tool_choice":{"type":"function","function":{"name":"get_weather"}}/')
 VLLM_R4=$(send_openai_stream "$VLLM_URL" "$R4_REQ")
 PROXY_R4=$(send_openai_stream "$NGINX_URL" "$R4_REQ" "$SESS_PATH")
 compare_openai_stream "$VLLM_R4" "$PROXY_R4" "C107-round4-named-stream"
