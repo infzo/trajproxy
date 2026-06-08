@@ -42,7 +42,7 @@ start_mock() {
             return 1
         fi
 
-        health_result=$(curl -s --noproxy '*' --max-time 2 "${MOCK_URL}/mock/health" 2>&1)
+        health_result=$(command curl -s --noproxy '*' --max-time 2 "${MOCK_URL}/mock/health" 2>&1)
         # 只检查响应内容是否包含 "ok"，不依赖 curl 退出码
         # （某些环境下 curl 可能返回数据但退出码非零）
         if echo "$health_result" | grep -q "ok"; then
@@ -77,7 +77,7 @@ stop_mock() {
 
 # 清空Mock服务的请求记录
 clear_mock_records() {
-    curl -s --noproxy '*' --max-time 5 -X DELETE "${MOCK_URL}/mock/requests" > /dev/null
+    command curl -s --noproxy '*' --max-time 5 -X DELETE "${MOCK_URL}/mock/requests" > /dev/null
 }
 
 # 从Mock服务获取推理请求记录
@@ -89,7 +89,7 @@ verify_infer_request() {
     local header_params="${2:-}"
     local tmpfile
     tmpfile=$(mktemp)
-    curl -s --noproxy '*' --max-time 5 "${MOCK_URL}/mock/requests" > "$tmpfile"
+    command curl -s --noproxy '*' --max-time 5 "${MOCK_URL}/mock/requests" > "$tmpfile"
 
     python3 << PYEOF
 import json

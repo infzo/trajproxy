@@ -141,6 +141,99 @@ log_separator() {
     echo "----------------------------------------"
 }
 
+# ========================================
+# HTTP请求封装函数：自动打印curl命令、响应结果、请求耗时
+# ========================================
+# 所有日志输出到stderr，不影响stdout返回值（与原始curl行为一致）
+# 用法: curl_with_log [curl参数...]
+# 示例: RESPONSE=$(curl_with_log -s -w "\n%{http_code}" -X POST "url" ...)
+#       curl_with_log -s -X DELETE "url" > /dev/null        # 仅看日志，丢弃stdout
+# 注意: 内部调用(健康检查/mock服务)请使用 command curl 跳过日志
+curl_with_log() {
+    local start_ms
+    start_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+
+    local response
+    response=$(command curl "$@")
+    local curl_exit=$?
+
+    local end_ms
+    end_ms=$(python3 -c "import time; print(int(time.time()*1000))")
+    local duration=$((end_ms - start_ms))
+
+    # 检测 -w/--write-out 参数（含HTTP状态码的响应模式）
+    local has_w=false
+    for arg in "$@"; do
+        if [[ "$arg" == "-w" ]] || [[ "$arg" == "--write-out" ]]; then
+            has_w=true
+            break
+        fi
+        if [[ "$arg" == -w* ]] && [[ "$arg" != "-w" ]]; then
+            has_w=true
+            break
+        fi
+        if [[ "$arg" == --write-out=* ]]; then
+            has_w=true
+            break
+        fi
+    done
+
+    # 构建可读curl命令字符串（含空格/花括号的参数加单引号）
+    local curl_cmd=""
+    for arg in "$@"; do
+        case "$arg" in
+            *' '*) curl_cmd="${curl_cmd} '${arg}'" ;;
+            *'{'*) curl_cmd="${curl_cmd} '${arg}'" ;;
+            *'}'*) curl_cmd="${curl_cmd} '${arg}'" ;;
+            *)     curl_cmd="${curl_cmd} ${arg}" ;;
+        esac
+    done
+
+    # 日志全部输出到stderr
+    >&2 echo -e "${BLUE}[CURL]${NC} curl${curl_cmd}"
+
+    if $has_w; then
+        # 含状态码模式：分离body和status
+        local body
+        body=$(echo "$response" | sed '$d')
+        local status
+        status=$(echo "$response" | sed -n '$p')
+        >&2 echo -e "${BLUE}[RES]${NC} HTTP Status: ${status}"
+        if [ -n "$body" ]; then
+            local line_count
+            line_count=$(echo "$body" | wc -l | tr -d ' ')
+            if [ "$line_count" -gt 30 ]; then
+                >&2 echo -e "${BLUE}[RES]${NC} 响应过长 (${line_count}行)，仅显示前10行:"
+                echo "$body" | head -10 >&2
+                >&2 echo "    ... 省略中间内容 ..."
+            else
+                >&2 log_response "${body}"
+            fi
+        fi
+    else
+        # 简单模式：直接记录响应
+        if [ -n "$response" ]; then
+            local line_count
+            line_count=$(echo "$response" | wc -l | tr -d ' ')
+            if [ "$line_count" -gt 30 ]; then
+                >&2 echo -e "${BLUE}[RES]${NC} 响应过长 (${line_count}行)，仅显示前5行和最后5行:"
+                echo "$response" | head -5 >&2
+                >&2 echo "    ... 省略中间 $(($line_count - 10)) 行 ..."
+                echo "$response" | tail -5 >&2
+            else
+                >&2 log_response "${response}"
+            fi
+        fi
+    fi
+
+    >&2 echo -e "${YELLOW}[TIME]${NC} ${duration}ms"
+    >&2 log_separator
+
+    # 返回原始响应到stdout（与原始curl行为一致）
+    echo "$response"
+    return $curl_exit
+}
+
 # 提取 JSON 字段值（使用 grep 和 sed，不依赖 jq）
 json_get() {
     local json="$1"
@@ -201,7 +294,7 @@ verify_cache_incremental() {
 
     log_step "验证缓存命中 (${verify_mode})"
 
-    TRAJ=$(curl -s "${BASE_URL}/trajectory?session_id=${session_id}&limit=10")
+    TRAJ=$(curl_with_log -s "${BASE_URL}/trajectory?session_id=${session_id}&limit=10")
 
     local tmpfile=$(mktemp)
     echo "$TRAJ" > "$tmpfile"

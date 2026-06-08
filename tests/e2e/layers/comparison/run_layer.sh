@@ -54,13 +54,22 @@ run_scenario() {
     local start_ts=$(date +%s)
     if bash "$scenario_path"; then
         local end_ts=$(date +%s)
-        echo -e "${GREEN}场景 ${scenario_name} 耗时: $((end_ts - start_ts))s${NC}"
+        local duration=$((end_ts - start_ts))
+        echo -e "${GREEN}场景 ${scenario_name} 耗时: ${duration}s${NC}"
         PASSED_SCENARIOS=$((PASSED_SCENARIOS + 1))
+        # 写入计时日志（供顶层 run_tests.sh 汇总）
+        if [ -n "${TIMING_LOG:-}" ] && [ -w "${TIMING_LOG:-}" ]; then
+            echo "${scenario_name}|${duration}" >> "$TIMING_LOG"
+        fi
         return 0
     else
         local end_ts=$(date +%s)
-        echo -e "${RED}场景 ${scenario_name} 耗时: $((end_ts - start_ts))s (失败)${NC}"
+        local duration=$((end_ts - start_ts))
+        echo -e "${RED}场景 ${scenario_name} 耗时: ${duration}s (失败)${NC}"
         FAILED_SCENARIOS=$((FAILED_SCENARIOS + 1))
+        if [ -n "${TIMING_LOG:-}" ] && [ -w "${TIMING_LOG:-}" ]; then
+            echo "${scenario_name}|${duration}" >> "$TIMING_LOG"
+        fi
         return 1
     fi
 }

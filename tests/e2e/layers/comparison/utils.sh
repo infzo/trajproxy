@@ -14,7 +14,7 @@ COMPARE_PY="${_LAYER_DIR}/compare.py"
 check_vllm_health() {
     log_info "检查 vLLM 服务健康状态 (${VLLM_URL})..."
     local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" --noproxy '*' --max-time 5 "${VLLM_URL}/health" 2>&1)
+    http_code=$(command curl -s -o /dev/null -w "%{http_code}" --noproxy '*' --max-time 5 "${VLLM_URL}/health" 2>&1)
     if [ "$http_code" = "200" ]; then
         log_success "vLLM 服务可用"
         return 0
@@ -27,7 +27,7 @@ check_vllm_health() {
 check_proxy_health() {
     log_info "检查 trajproxy 服务健康状态 (${PROXY_URL})..."
     local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" --noproxy '*' --max-time 5 "${PROXY_URL}/health" 2>&1)
+    http_code=$(command curl -s -o /dev/null -w "%{http_code}" --noproxy '*' --max-time 5 "${PROXY_URL}/health" 2>&1)
     if [ "$http_code" = "200" ]; then
         log_success "trajproxy 服务可用"
         return 0
@@ -40,7 +40,7 @@ check_proxy_health() {
 check_nginx_health() {
     log_info "检查 NGINX 服务健康状态 (${NGINX_URL})..."
     local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" --noproxy '*' --max-time 5 "${NGINX_URL}/health" 2>&1)
+    http_code=$(command curl -s -o /dev/null -w "%{http_code}" --noproxy '*' --max-time 5 "${NGINX_URL}/health" 2>&1)
     if [ "$http_code" = "200" ]; then
         log_success "NGINX 服务可用"
         return 0
@@ -74,7 +74,7 @@ register_model() {
 
     log_step "注册模型: ${model_name} (run_id=${run_id}, tito=${tito}${extra_fields})"
 
-    REGISTER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${PROXY_URL}/models/register" \
+    REGISTER_RESPONSE=$(curl_with_log -s -w "\n%{http_code}" -X POST "${PROXY_URL}/models/register" \
         -H "Content-Type: application/json" \
         -d "{
             \"run_id\": \"${run_id}\",
@@ -87,9 +87,6 @@ register_model() {
     REGISTER_BODY=$(echo "$REGISTER_RESPONSE" | sed '$d')
     REGISTER_STATUS=$(echo "$REGISTER_RESPONSE" | sed -n '$p')
 
-    log_response "HTTP Status: ${REGISTER_STATUS}"
-    log_response "${REGISTER_BODY}"
-
     assert_http_status "200" "$REGISTER_STATUS" "注册模型 HTTP 状态码应为 200"
     local register_result=$(json_get "$REGISTER_BODY" "status")
     assert_eq "success" "$register_result" "注册模型应返回 success"
@@ -101,12 +98,10 @@ delete_model() {
     local run_id="$2"
 
     log_step "删除模型: ${model_name} (run_id=${run_id})"
-    DELETE_RESPONSE=$(curl -s -w "\n%{http_code}" -X DELETE "${PROXY_URL}/models?model_name=${model_name}&run_id=${run_id}")
+    DELETE_RESPONSE=$(curl_with_log -s -w "\n%{http_code}" -X DELETE "${PROXY_URL}/models?model_name=${model_name}&run_id=${run_id}")
     DELETE_BODY=$(echo "$DELETE_RESPONSE" | sed '$d')
     DELETE_STATUS=$(echo "$DELETE_RESPONSE" | sed -n '$p')
 
-    log_response "HTTP Status: ${DELETE_STATUS}"
-    log_response "${DELETE_BODY}"
     assert_http_status "200" "$DELETE_STATUS" "删除模型 HTTP 状态码应为 200"
     local delete_result=$(json_get "$DELETE_BODY" "status")
     assert_eq "success" "$delete_result" "删除模型应返回 success"
@@ -128,17 +123,13 @@ send_openai_nonstream() {
         full_url="${url}/v1/chat/completions"
     fi
 
-    local response=$(curl -s --noproxy '*' --max-time 120 -w "\n%{http_code}" \
+    local response=$(curl_with_log -s --noproxy '*' --max-time 120 -w "\n%{http_code}" \
         -X POST "$full_url" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${COMPARISON_API_KEY}" \
         -d "$body")
 
     local body_part=$(echo "$response" | sed '$d')
-    local status=$(echo "$response" | sed -n '$p')
-
-    >&2 log_response "HTTP Status: ${status}"
-    >&2 log_response "${body_part}"
 
     local tmpfile=$(mktemp)
     echo "$body_part" > "$tmpfile"
@@ -158,13 +149,13 @@ send_openai_stream() {
     fi
 
     local tmpfile=$(mktemp)
-    curl -s --no-buffer --noproxy '*' --max-time 120 \
+
+    curl_with_log -s --no-buffer --noproxy '*' --max-time 120 \
         -X POST "$full_url" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${COMPARISON_API_KEY}" \
         -d "$body" > "$tmpfile"
 
-    >&2 log_response "流式响应已保存到: ${tmpfile}"
     echo "$tmpfile"
 }
 
@@ -184,7 +175,7 @@ send_claude_nonstream() {
         full_url="${url}/v1/messages"
     fi
 
-    local response=$(curl -s --noproxy '*' --max-time 120 -w "\n%{http_code}" \
+    local response=$(curl_with_log -s --noproxy '*' --max-time 120 -w "\n%{http_code}" \
         -X POST "$full_url" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${COMPARISON_API_KEY}" \
@@ -192,10 +183,6 @@ send_claude_nonstream() {
         -d "$body")
 
     local body_part=$(echo "$response" | sed '$d')
-    local status=$(echo "$response" | sed -n '$p')
-
-    >&2 log_response "HTTP Status: ${status}"
-    >&2 log_response "${body_part}"
 
     local tmpfile=$(mktemp)
     echo "$body_part" > "$tmpfile"
@@ -215,14 +202,14 @@ send_claude_stream() {
     fi
 
     local tmpfile=$(mktemp)
-    curl -s --no-buffer --noproxy '*' --max-time 120 \
+
+    curl_with_log -s --no-buffer --noproxy '*' --max-time 120 \
         -X POST "$full_url" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${COMPARISON_API_KEY}" \
         -H "anthropic-version: 2023-06-01" \
         -d "$body" > "$tmpfile"
 
-    >&2 log_response "流式响应已保存到: ${tmpfile}"
     echo "$tmpfile"
 }
 
