@@ -279,12 +279,12 @@ compare_claude_stream() {
 
 build_openai_plain_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":128}"
+    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":128,\"chat_template_kwargs\":{\"enable_thinking\":false}}"
 }
 
 build_openai_plain_stream_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":128}"
+    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":128,\"chat_template_kwargs\":{\"enable_thinking\":false}}"
 }
 
 build_openai_tool_request() {

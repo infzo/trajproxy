@@ -155,8 +155,8 @@ class DirectPipeline(BasePipeline):
             # 存储到数据库（保留完整的 logprobs/token_ids）
             await self._store_trajectory(context, run_id=context.run_id)
 
-            # 从响应中剥离 logprobs 和 token_ids，不返回给客户端
-            self._strip_logprobs_token_ids(context.raw_response)
+            # 确保响应中所有可选字段有默认值
+            self._ensure_response_defaults(context.raw_response)
 
             return context
 
@@ -206,8 +206,7 @@ class DirectPipeline(BasePipeline):
                 # 累积流式响应中的所有字段
                 self._accumulate_stream_fields(context, chunk)
                 context.stream_chunk_count += 1
-                # 剥离 logprobs 和 token_ids 后再返回给客户端
-                yield self._strip_chunk_logprobs_token_ids(chunk)
+                yield chunk
 
             # 记录推理总耗时
             context.inference_duration_ms = (time.perf_counter() - infer_start_time) * 1000
@@ -341,7 +340,11 @@ class DirectPipeline(BasePipeline):
         # 构建最终响应
         message = {
             "role": context.stream_role or "assistant",
-            "content": context.response_text or None
+            "content": context.response_text or None,
+            "annotations": None,
+            "audio": None,
+            "function_call": context.stream_function_call,
+            "refusal": None,
         }
 
         # 添加 reasoning（vLLM 扩展）
@@ -361,20 +364,15 @@ class DirectPipeline(BasePipeline):
         choice = {
             "index": 0,
             "message": message,
+            "logprobs": context.stream_logprobs,
+            "token_ids": context.stream_token_ids,
             "finish_reason": context.stream_finish_reason or "stop"
         }
 
-        # logprobs 和 token_ids 存入 raw_response 用于数据库轨迹记录，
-        # 客户端侧已在流式阶段通过 _strip_chunk_logprobs_token_ids 剥离，不会收到。
-        if context.stream_logprobs:
-            choice["logprobs"] = context.stream_logprobs
-
+        # logprobs/token_ids 已在 choice 中
         # 添加 vLLM 扩展字段（stop_reason 总是返回）
         if context.stream_stop_reason is not None:
             choice["stop_reason"] = context.stream_stop_reason
-        # token_ids 同 logprobs，仅用于 DB 存储
-        if context.stream_token_ids:
-            choice["token_ids"] = context.stream_token_ids
 
         # 使用累积的响应元数据构建 raw_response，保持与非流式结构一致
         # 流式 chunk 的 object 是 "chat.completion.chunk"，需改为非流式格式
@@ -403,10 +401,16 @@ class DirectPipeline(BasePipeline):
                 "total_tokens": context.total_tokens
             }
 
-        # 确保顶级 prompt_token_ids 包含在 raw_response 中（vLLM 扩展字段，仅用于 DB 存储）
-        # prompt_token_ids 是顶级字段（与 id/model/choices/usage 同级），不在 choices 内
-        if context.stream_prompt_token_ids is not None:
-            context.raw_response["prompt_token_ids"] = context.stream_prompt_token_ids
+        # 确保顶级字段默认值
+        for key in ("kv_transfer_params", "prompt_logprobs",
+                    "prompt_token_ids", "service_tier", "system_fingerprint"):
+            context.raw_response.setdefault(key, None)
+
+        # 确保 usage 子字段默认值
+        usage_obj = context.raw_response.get("usage", {}) or {}
+        usage_obj.setdefault("prompt_tokens_details", None)
+        usage_obj.setdefault("completion_tokens_details", None)
+        context.raw_response["usage"] = usage_obj
 
         # 提取累积的 token_ids 字段到 context，用于轨迹记录独立列
         if context.stream_prompt_token_ids is not None:
@@ -433,22 +437,22 @@ class DirectPipeline(BasePipeline):
         await self._store_trajectory(context, run_id=context.run_id)
 
     @staticmethod
-    def _strip_logprobs_token_ids(response: Dict[str, Any]) -> None:
-        """从响应的 choices 中移除 logprobs 和 token_ids（原地修改）"""
+    def _ensure_response_defaults(response: Dict[str, Any]) -> None:
+        """确保响应中所有可选字段有默认值（原地修改）"""
         if not response or "choices" not in response:
             return
         for choice in response.get("choices", []):
-            choice.pop("logprobs", None)
-            choice.pop("token_ids", None)
-
-    @staticmethod
-    def _strip_chunk_logprobs_token_ids(chunk: Dict[str, Any]) -> Dict[str, Any]:
-        """从流式响应块中移除 logprobs 和 token_ids（返回浅拷贝）"""
-        if "choices" not in chunk:
-            return chunk
-        stripped = {k: v for k, v in chunk.items() if k != "choices"}
-        stripped["choices"] = [
-            {k: v for k, v in c.items() if k not in ("logprobs", "token_ids")}
-            for c in chunk["choices"]
-        ]
-        return stripped
+            choice.setdefault("logprobs", None)
+            choice.setdefault("token_ids", None)
+            msg = choice.get("message", {}) or {}
+            msg.setdefault("annotations", None)
+            msg.setdefault("audio", None)
+            msg.setdefault("function_call", None)
+            msg.setdefault("refusal", None)
+        for key in ("kv_transfer_params", "prompt_logprobs",
+                    "prompt_token_ids", "service_tier", "system_fingerprint"):
+            response.setdefault(key, None)
+        usage_obj = response.get("usage", {}) or {}
+        usage_obj.setdefault("prompt_tokens_details", None)
+        usage_obj.setdefault("completion_tokens_details", None)
+        response["usage"] = usage_obj

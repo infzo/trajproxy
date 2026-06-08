@@ -53,12 +53,17 @@ class StreamChunkBuilder(BaseResponseBuilder):
         # 流式场景下，build 方法构建最终汇总的响应
         message = {
             "role": "assistant",
-            "content": content or None
+            "content": content or None,
+            "annotations": None,
+            "audio": None,
+            "function_call": context.stream_function_call,
+            "refusal": None,
         }
 
         # 添加 reasoning
         if context.stream_reasoning:
             message["reasoning"] = context.stream_reasoning
+            message["reasoning_content"] = context.stream_reasoning
 
         # 添加 tool_calls
         if context.stream_tool_calls:
@@ -68,17 +73,20 @@ class StreamChunkBuilder(BaseResponseBuilder):
         if context.stream_function_call:
             message["function_call"] = context.stream_function_call
 
-        # 构建选择项
+        # 构建 choice
         choice = {
             "index": 0,
             "message": message,
-            "finish_reason": context.stream_finish_reason or "stop"
+            "logprobs": context.stream_logprobs,
+            "token_ids": context.stream_token_ids,
+            "finish_reason": context.stream_finish_reason or "stop",
         }
 
         # stop_reason 属于 vLLM 扩展字段，始终返回给客户端
         if context.stream_stop_reason is not None:
             choice["stop_reason"] = context.stream_stop_reason
 
+        stream_usage = context.stream_usage_full or {}
         return {
             "id": f"chatcmpl-{context.request_id}",
             "object": "chat.completion",
@@ -86,10 +94,17 @@ class StreamChunkBuilder(BaseResponseBuilder):
             "model": self.model,
             "choices": [choice],
             "usage": {
-                "prompt_tokens": context.prompt_tokens,
-                "completion_tokens": context.completion_tokens,
-                "total_tokens": context.total_tokens
-            }
+                "prompt_tokens": context.prompt_tokens or 0,
+                "completion_tokens": context.completion_tokens or 0,
+                "total_tokens": context.total_tokens or 0,
+                "prompt_tokens_details": stream_usage.get("prompt_tokens_details"),
+                "completion_tokens_details": stream_usage.get("completion_tokens_details"),
+            },
+            "kv_transfer_params": None,
+            "prompt_logprobs": None,
+            "prompt_token_ids": None,
+            "service_tier": None,
+            "system_fingerprint": None,
         }
 
     def build_chunk(
@@ -147,6 +162,11 @@ class StreamChunkBuilder(BaseResponseBuilder):
             delta["tool_calls"] = tool_calls_delta
 
         chunk["choices"][0]["delta"] = delta
+
+        if finish_reason is not None:
+            chunk["choices"][0]["logprobs"] = None
+            chunk["choices"][0]["token_ids"] = None
+
         return chunk
 
     def build_from_delta(

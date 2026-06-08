@@ -599,6 +599,11 @@ class TokenPipeline(BasePipeline):
         # 构建用户响应（不含 EOS）
         context.raw_response = self.response_builder.build(clean_user_text, context)
 
+        # 补全顶级默认字段
+        for key in ("kv_transfer_params", "prompt_logprobs",
+                    "prompt_token_ids", "service_tier", "system_fingerprint"):
+            context.raw_response.setdefault(key, None)
+
         # 2. re-decode response，保留 EOS，与 response_ids 一致（用于存储和前缀缓存）
         if context.response_ids:
             context.response_text = self.token_converter.tokenizer.decode(

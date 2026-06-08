@@ -55,13 +55,25 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         final_content = content
         finish_reason = "stop"
 
-        # 1. 尝试从 token_response 获取预置的 tool_calls
+        # 1. 从 token_response 获取预置字段
         infer_response = getattr(context, "token_response", None)
+        choice_logprobs = None
+        choice_token_ids = None
+        msg_refusal = None
+        msg_audio = None
+        msg_function_call = None
         if infer_response:
             choices = infer_response.get("choices", [])
             if choices:
-                tool_calls = choices[0].get("tool_calls")
-                finish_reason = choices[0].get("finish_reason", "stop")
+                choice0 = choices[0]
+                tool_calls = choice0.get("tool_calls")
+                finish_reason = choice0.get("finish_reason", "stop")
+                choice_logprobs = choice0.get("logprobs")
+                choice_token_ids = choice0.get("token_ids")
+                msg0 = choice0.get("message", {}) or {}
+                msg_refusal = msg0.get("refusal")
+                msg_audio = msg0.get("audio")
+                msg_function_call = msg0.get("function_call")
 
         # 2. 如果没有预置 tool_calls，尝试从响应文本解析
         if not tool_calls:
@@ -106,13 +118,15 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         normalized_content = final_content if (final_content and final_content.strip()) else None
         message = {
             "role": "assistant",
-            "content": normalized_content
+            "content": normalized_content,
+            "annotations": None,
+            "audio": msg_audio,
+            "function_call": msg_function_call,
+            "refusal": msg_refusal,
         }
 
         if reasoning:
             message["reasoning"] = reasoning
-            # LiteLLM 的 OpenAI→Claude 适配器只检查 reasoning_content 字段
-            # 同时设置 reasoning 和 reasoning_content 确保兼容
             message["reasoning_content"] = reasoning
 
         if tool_calls:
@@ -121,9 +135,12 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         choice = {
             "index": 0,
             "message": message,
-            "finish_reason": finish_reason
+            "logprobs": choice_logprobs,
+            "token_ids": choice_token_ids,
+            "finish_reason": finish_reason,
         }
 
+        raw_usage = (infer_response or {}).get("usage", {}) or {}
         return {
             "id": f"chatcmpl-{context.request_id}",
             "object": "chat.completion",
@@ -134,8 +151,14 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                 "prompt_tokens": context.prompt_tokens or 0,
                 "completion_tokens": context.completion_tokens or 0,
                 "total_tokens": context.total_tokens or 0,
-                "prompt_tokens_details": None
-            }
+                "prompt_tokens_details": raw_usage.get("prompt_tokens_details"),
+                "completion_tokens_details": raw_usage.get("completion_tokens_details"),
+            },
+            "kv_transfer_params": None,
+            "prompt_logprobs": None,
+            "prompt_token_ids": None,
+            "service_tier": None,
+            "system_fingerprint": None,
         }
 
     def build_chunk(

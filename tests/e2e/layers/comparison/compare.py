@@ -34,7 +34,7 @@ from typing import Any, List, Tuple
 # ========================================
 
 # OpenAI 格式需要跳过的运行时动态字段
-OPENAI_SKIP_FIELDS = {"id", "created", "completion_tokens_details"}
+OPENAI_SKIP_FIELDS = {"id", "created"}
 OPENAI_STREAM_SKIP_FIELDS = OPENAI_SKIP_FIELDS | {"seed"}
 
 # Claude 格式需要跳过的运行时动态字段
