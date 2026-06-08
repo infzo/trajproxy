@@ -3,18 +3,18 @@
 # 支持按层运行或跨层运行测试用例
 #
 # 用法:
-#   ./run_tests.sh                          运行全部四层（默认不含 P*/A* 场景）
-#   ./run_tests.sh --all                    运行全部四层（包含 P*/A* 场景）
+#   ./run_tests.sh                          运行全部五层（默认不含 T*/A* 场景）
+#   ./run_tests.sh --all                    运行全部五层（包含 T*/A* 场景）
 #   ./run_tests.sh --layer nginx            仅运行 Nginx 层 (port 12345)
 #   ./run_tests.sh --layer proxy            仅运行 Proxy 层 (port 12300)
-#   ./run_tests.sh F100                     按编号搜索两层运行
-#   ./run_tests.sh --layer nginx F100 F101  指定层内特定用例
+#   ./run_tests.sh P101                     按编号搜索各层运行
+#   ./run_tests.sh --layer nginx N101 N102  指定层内特定用例
 #
 # 默认行为:
 #   - 直接访问真实推理服务
-#   - 跳过性能测试（P 开头）和归档测试（A 开头）用例
-#   - --all 运行全部用例（含 P*/A*）
-#   - 显式指定场景编号时不过滤（如 ./run_tests.sh P100 会正常执行）
+#   - 跳过性能测试（T 开头）和归档测试（A 开头）用例
+#   - --all 运行全部用例（含 T*/A*）
+#   - 显式指定场景编号时不过滤（如 ./run_tests.sh T101 会正常执行）
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -33,25 +33,26 @@ FAILED_SCENARIOS=0
 # 计时日志文件（由 run_tests.sh 创建，传递给 run_layer.sh 使用）
 TIMING_LOG=""
 
-# 默认跳过的场景前缀（P=性能测试, A=归档测试），显式指定场景编号时不过滤
+# 默认跳过的场景前缀（T=性能测试, A=归档测试），显式指定场景编号时不过滤
 # 可通过 --all 清除此过滤，或通过 SKIP_PREFIXES 环境变量自定义
-SKIP_PREFIXES="${SKIP_PREFIXES:-P,A}"
+SKIP_PREFIXES="${SKIP_PREFIXES:-T,A}"
 
 # 打印帮助
 print_usage() {
     echo "用法:"
-    echo "  $0                          运行全部四层（默认跳过 P*/A* 场景）"
-    echo "  $0 --all                    运行全部四层（包含 P*/A* 所有场景）"
+    echo "  $0                          运行全部五层（默认跳过 T*/A* 场景）"
+    echo "  $0 --all                    运行全部五层（包含 T*/A* 所有场景）"
     echo "  $0 --layer nginx            仅运行 Nginx 层 (port 12345)"
     echo "  $0 --layer proxy            仅运行 Proxy 层 (port 12300)"
     echo "  $0 --layer archive          仅运行 Archive 层"
     echo "  $0 --layer comparison       仅运行 Comparison 层"
-    echo "  $0 <场景编号>                按编号搜索各层运行 (如: $0 F200)"
-    echo "  $0 --layer nginx F100 F101  指定层内特定用例"
+    echo "  $0 --layer performance      仅运行 Performance 层"
+    echo "  $0 <场景编号>                按编号搜索各层运行 (如: $0 P101)"
+    echo "  $0 --layer nginx N101 N102  指定层内特定用例"
     echo ""
     echo "场景过滤:"
-    echo "  --all                       运行全部场景（含 P*/A*，默认跳过性能和归档用例）"
-    echo "  SKIP_PREFIXES=P,A           自定义跳过前缀（逗号分隔，默认跳过 P 和 A）"
+    echo "  --all                       运行全部场景（含 T*/A*，默认跳过性能和归档用例）"
+    echo "  SKIP_PREFIXES=T,A           自定义跳过前缀（逗号分隔，默认跳过 T 和 A）"
     echo "  SKIP_PREFIXES=''            清空前缀过滤，等同 --all"
     echo ""
     echo "可用层:"
@@ -59,6 +60,7 @@ print_usage() {
     echo "  proxy      - 直连 Proxy 层测试 (port 12300)"
     echo "  archive    - 归档调度层测试"
     echo "  comparison - 对比测试层 (vLLM:8000 vs Proxy:12300)"
+    echo "  performance - 性能压力测试层 (port 12345)"
 }
 
 # 获取指定层过滤后的场景 ID 列表
@@ -120,7 +122,7 @@ run_scenario_cross_layer() {
     local scenario_id="$1"
     local found=0
 
-    for layer_dir in "${SCRIPT_DIR}/layers/nginx" "${SCRIPT_DIR}/layers/proxy" "${SCRIPT_DIR}/layers/archive" "${SCRIPT_DIR}/layers/comparison"; do
+    for layer_dir in "${SCRIPT_DIR}/layers/nginx" "${SCRIPT_DIR}/layers/proxy" "${SCRIPT_DIR}/layers/archive" "${SCRIPT_DIR}/layers/comparison" "${SCRIPT_DIR}/layers/performance"; do
         local matches=("${layer_dir}/scenarios/${scenario_id}"*.sh)
         if [ -f "${matches[0]}" ]; then
             if run_layer "$layer_dir" "$scenario_id"; then
@@ -289,8 +291,12 @@ main() {
                 run_layer_with_filter "${SCRIPT_DIR}/layers/comparison"
                 TOTAL_SCENARIOS=$?
                 ;;
+            performance|5)
+                run_layer_with_filter "${SCRIPT_DIR}/layers/performance"
+                TOTAL_SCENARIOS=$?
+                ;;
             *)
-                echo -e "${RED}未知层: ${LAYER}（可用: nginx, proxy, archive, comparison）${NC}"
+                echo -e "${RED}未知层: ${LAYER}（可用: nginx, proxy, archive, comparison, performance）${NC}"
                 exit 1
                 ;;
         esac
@@ -303,11 +309,11 @@ main() {
         done
         print_final_summary
     else
-        # 无参数 -> 运行全部四层（默认过滤 P*/A*）
+        # 无参数 -> 运行全部五层（默认过滤 T*/A*）
         if [ -n "${SKIP_PREFIXES:-}" ]; then
-            echo -e "${YELLOW}运行全部四层测试（跳过前缀 [${SKIP_PREFIXES}] 的场景）...${NC}"
+            echo -e "${YELLOW}运行全部五层测试（跳过前缀 [${SKIP_PREFIXES}] 的场景）...${NC}"
         else
-            echo -e "${YELLOW}运行全部四层测试（包含全部场景）...${NC}"
+            echo -e "${YELLOW}运行全部五层测试（包含全部场景）...${NC}"
         fi
 
         echo ""
@@ -332,6 +338,12 @@ main() {
         echo -e "${BLUE}Layer 4: Comparison (vLLM:8000 vs Proxy:12300)${NC}"
         echo "=========================================="
         run_layer_with_filter "${SCRIPT_DIR}/layers/comparison" || true
+
+        echo ""
+        echo "=========================================="
+        echo -e "${BLUE}Layer 5: Performance (port 12345)${NC}"
+        echo "=========================================="
+        run_layer_with_filter "${SCRIPT_DIR}/layers/performance" || true
 
         # 汇总
         echo ""

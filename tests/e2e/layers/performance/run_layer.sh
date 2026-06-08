@@ -2,8 +2,8 @@
 # Performance Layer 测试运行器
 # 用法:
 #   ./run_layer.sh           # 运行本层所有测试
-#   ./run_layer.sh P101      # 运行指定场景
-#   ./run_layer.sh P101 P102 # 运行多个指定场景
+#   ./run_layer.sh T101      # 运行指定场景
+#   ./run_layer.sh T101 T102 # 运行多个指定场景
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIOS_DIR="${SCRIPT_DIR}/scenarios"
 

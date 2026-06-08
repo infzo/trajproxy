@@ -2,8 +2,8 @@
 # Proxy Layer 测试运行器
 # 用法:
 #   ./run_layer.sh           # 运行本层所有测试
-#   ./run_layer.sh F101      # 运行指定场景
-#   ./run_layer.sh F101 F102 # 运行多个指定场景
+#   ./run_layer.sh P101      # 运行指定场景
+#   ./run_layer.sh P101 P102 # 运行多个指定场景
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIOS_DIR="${SCRIPT_DIR}/scenarios"
 
@@ -48,7 +48,7 @@ run_scenario() {
 if [ $# -gt 0 ]; then
     # 只运行指定的场景
     for scenario_id in "$@"; do
-        # 搜索匹配的场景文件（如 F101 匹配 F101_model_crud.sh）
+        # 搜索匹配的场景文件（如 P101 匹配 P101_model_crud.sh）
         matched_files=("${SCENARIOS_DIR}/${scenario_id}_"*".sh")
         if [ -f "${matched_files[0]}" ]; then
             run_scenario "${matched_files[0]}" || true
