@@ -33,16 +33,46 @@ R1_RESP=$(curl_with_log -s -w "
 R1_STATUS=$(echo "$R1_RESP" | sed -n '$p')
 assert_http_status "200" "$R1_STATUS" "第1轮 tools1 200"
 R1_BODY=$(echo "$R1_RESP" | sed '$d')
+R1_MSG=$(echo "$R1_BODY" | python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+msg = data['choices'][0]['message']
+result = {'role': 'assistant'}
+content = msg.get('content', '') or ''
+if content:
+    result['content'] = content
+elif not msg.get('tool_calls'):
+    result['content'] = ''
+reasoning = msg.get('reasoning_content') or msg.get('reasoning') or ''
+if reasoning:
+    result['reasoning'] = reasoning
+    result['reasoning_content'] = reasoning
+tool_calls = msg.get('tool_calls')
+if tool_calls:
+    result['tool_calls'] = tool_calls
+print(json.dumps(result, ensure_ascii=False))
+" 2>/dev/null)
 sleep 1
 
 # ===== 第2轮: tools2（get_weather + get_time），tools定义不同 =====
 log_step "第2轮 非流式 Tool 请求（tools2: get_weather+get_time，tools变更）"
-# 注意：tools变更导致缓存失效，第2轮messages不含第1轮assistant回复
-# 因为第1轮回复基于tools1，第2轮tools2改变了定义，不应复用旧回复
+# 第2轮包含第1轮完整历史，缓存因tools key不匹配而失效
+R2_MESSAGES=$(R1_MSG="$R1_MSG" python3 -c "
+import json, os
+r1_msg = json.loads(os.environ['R1_MSG'])
+messages = [{'role':'user','content':'Weather in Beijing?'}]
+messages.append(r1_msg)
+if r1_msg.get('tool_calls'):
+    for tc in r1_msg['tool_calls']:
+        messages.append({'role':'tool','tool_call_id':tc['id'],
+                         'content':json.dumps({'temperature':18,'condition':'cloudy'})})
+messages.append({'role':'user','content':'What time is it in Beijing?'})
+print(json.dumps(messages, ensure_ascii=False))
+")
 R2_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"What time is it in Beijing?\"}],\"tools\":${TOOLS2},\"max_tokens\":128}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS2},\"max_tokens\":128}")
 R2_STATUS=$(echo "$R2_RESP" | sed -n '$p')
 assert_http_status "200" "$R2_STATUS" "第2轮 tools2 200"
 R2_BODY=$(echo "$R2_RESP" | sed '$d')

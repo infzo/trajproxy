@@ -30,17 +30,39 @@ R1_RESP=$(curl_with_log -s -w "
 R1_STATUS=$(echo "$R1_RESP" | sed -n '$p')
 assert_http_status "200" "$R1_STATUS" "第1轮 200"
 R1_BODY=$(echo "$R1_RESP" | sed '$d')
-R1_CONTENT=$(extract_assistant_content "$R1_BODY")
+R1_MSG=$(echo "$R1_BODY" | python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+msg = data['choices'][0]['message']
+result = {'role': 'assistant'}
+content = msg.get('content', '') or ''
+if content:
+    result['content'] = content
+elif not msg.get('tool_calls'):
+    result['content'] = ''
+reasoning = msg.get('reasoning_content') or msg.get('reasoning') or ''
+if reasoning:
+    result['reasoning'] = reasoning
+    result['reasoning_content'] = reasoning
+tool_calls = msg.get('tool_calls')
+if tool_calls:
+    result['tool_calls'] = tool_calls
+print(json.dumps(result, ensure_ascii=False))
+" 2>/dev/null)
 sleep 1
 
 # ===== 第2轮: enable_thinking=false，同一session但kwargs不同 =====
 log_step "第2轮 非流式 Tool+Reasoning 请求（enable_thinking=false，kwargs变化）"
-# 构造增量messages（含第1轮assistant回复）
-R2_MESSAGES=$(R1_CONTENT="$R1_CONTENT" python3 -c "
+R2_MESSAGES=$(R1_MSG="$R1_MSG" python3 -c "
 import json, os
-messages = [{'role':'user','content':'Weather in Beijing?'},
-            {'role':'assistant','content':os.environ['R1_CONTENT']},
-            {'role':'user','content':'Weather in Shanghai?'}]
+r1_msg = json.loads(os.environ['R1_MSG'])
+messages = [{'role':'user','content':'Weather in Beijing?'}]
+messages.append(r1_msg)
+if r1_msg.get('tool_calls'):
+    for tc in r1_msg['tool_calls']:
+        messages.append({'role':'tool','tool_call_id':tc['id'],
+                         'content':json.dumps({'temperature':18,'condition':'cloudy'})})
+messages.append({'role':'user','content':'Weather in Shanghai?'})
 print(json.dumps(messages, ensure_ascii=False))
 ")
 R2_RESP=$(curl_with_log -s -w "

@@ -109,15 +109,19 @@ msg_data = json.loads(os.environ['MSG_DATA'])
 next_content = os.environ['NEXT_USER_CONTENT']
 
 # 构造 assistant 消息
-assistant_msg = {'role': 'assistant'}
-content = msg_data.get('content')
-if content is not None and content != '':
-    assistant_msg['content'] = content
-elif not msg_data.get('tool_calls'):
-    assistant_msg['content'] = ''
-tool_calls = msg_data.get('tool_calls')
-if tool_calls:
-    assistant_msg['tool_calls'] = tool_calls
+    assistant_msg = {'role': 'assistant'}
+    content = msg_data.get('content')
+    if content is not None and content != '':
+        assistant_msg['content'] = content
+    elif not msg_data.get('tool_calls'):
+        assistant_msg['content'] = ''
+    reasoning = msg_data.get('reasoning_content') or msg_data.get('reasoning') or ''
+    if reasoning:
+        assistant_msg['reasoning'] = reasoning
+        assistant_msg['reasoning_content'] = reasoning
+    tool_calls = msg_data.get('tool_calls')
+    if tool_calls:
+        assistant_msg['tool_calls'] = tool_calls
 
 messages = prev_messages + [assistant_msg]
 # 添加 tool role 消息（如有 tool_calls）

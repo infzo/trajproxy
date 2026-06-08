@@ -12,7 +12,7 @@ RUN_ID="run-p409"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 
 # Tool定义：get_weather
-TOOLS='[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}}'
+TOOLS='[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}}}]'
 
 log_step "注册 TITO + tool_parser + reasoning_parser"
 curl_with_log -s -X POST "${BASE_URL}/models/register" \
@@ -24,7 +24,7 @@ sleep 1
 log_step "第1轮 非流式 Tool 请求（无session路径）"
 R1_RESP=$(curl_with_log -s -w "\n%{http_code}" -X POST "${BASE_URL}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in Beijing?\"}],\"tools\":${TOOLS},\"max_tokens\":128}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in Beijing?\"}],\"tools\":${TOOLS},\"max_tokens\":512}")
 R1_STATUS=$(echo "$R1_RESP" | sed -n '$p')
 assert_http_status "200" "$R1_STATUS" "第1轮 非流式 200"
 R1_BODY=$(echo "$R1_RESP" | sed '$d')
@@ -35,7 +35,7 @@ sleep 1
 log_step "第2轮 非流式 Tool 请求（无session路径，不同content）"
 R2_RESP=$(curl_with_log -s -w "\n%{http_code}" -X POST "${BASE_URL}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in Shanghai?\"}],\"tools\":${TOOLS},\"max_tokens\":128}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in Shanghai?\"}],\"tools\":${TOOLS},\"max_tokens\":512}")
 R2_STATUS=$(echo "$R2_RESP" | sed -n '$p')
 assert_http_status "200" "$R2_STATUS" "第2轮 非流式 200"
 R2_BODY=$(echo "$R2_RESP" | sed '$d')

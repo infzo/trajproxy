@@ -30,7 +30,7 @@ log_step "第1轮非流式T+R请求 (${CITIES[0]})"
 R1_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in ${CITIES[0]}? Think first then call tool.\"}],\"tools\":${TOOLS},\"max_tokens\":256}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in ${CITIES[0]}? Think first then call tool.\"}],\"tools\":${TOOLS},\"max_tokens\":256,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R1_BODY=$(echo "$R1_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R1_RESP" | sed -n '$p')" "第1轮 200"
 sleep 1
@@ -48,6 +48,10 @@ if content is not None:
     assistant_msg['content'] = content
 elif not msg.get('tool_calls'):
     assistant_msg['content'] = ''
+reasoning = msg.get('reasoning_content') or msg.get('reasoning') or ''
+if reasoning:
+    assistant_msg['reasoning'] = reasoning
+    assistant_msg['reasoning_content'] = reasoning
 tool_calls = msg.get('tool_calls')
 if tool_calls:
     assistant_msg['tool_calls'] = tool_calls
@@ -67,7 +71,7 @@ log_step "第2轮非流式T+R请求 (${CITIES[1]})"
 R2_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R2_BODY=$(echo "$R2_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R2_RESP" | sed -n '$p')" "第2轮 200"
 sleep 1
@@ -86,6 +90,10 @@ def extract_assistant(body_str):
         assistant_msg['content'] = content
     elif not msg.get('tool_calls'):
         assistant_msg['content'] = ''
+    reasoning = msg.get('reasoning_content') or msg.get('reasoning') or ''
+    if reasoning:
+        assistant_msg['reasoning'] = reasoning
+        assistant_msg['reasoning_content'] = reasoning
     tool_calls = msg.get('tool_calls')
     if tool_calls:
         assistant_msg['tool_calls'] = tool_calls
@@ -115,7 +123,7 @@ log_step "第3轮非流式T+R请求 (${CITIES[2]})"
 R3_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R3_BODY=$(echo "$R3_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R3_RESP" | sed -n '$p')" "第3轮 200"
 

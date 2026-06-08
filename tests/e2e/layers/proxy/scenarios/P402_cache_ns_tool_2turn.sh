@@ -27,7 +27,7 @@ log_step "第1轮非流式Tool请求"
 R1_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Shanghai?\"}],\"tools\":${TOOLS},\"max_tokens\":256}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Shanghai?\"}],\"tools\":${TOOLS},\"max_tokens\":256,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R1_BODY=$(echo "$R1_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R1_RESP" | sed -n '$p')" "第1轮 200"
 sleep 1
@@ -39,16 +39,20 @@ import json, os
 data = json.loads(os.environ['R1_BODY'])
 msg = data['choices'][0]['message']
 
-# 构造assistant消息，保留原始content和tool_calls
-assistant_msg = {'role': 'assistant'}
-content = msg.get('content')
-if content is not None:
-    assistant_msg['content'] = content
-elif not msg.get('tool_calls'):
-    assistant_msg['content'] = ''
-tool_calls = msg.get('tool_calls')
-if tool_calls:
-    assistant_msg['tool_calls'] = tool_calls
+# 构造assistant消息，保留原始content、reasoning和tool_calls
+    assistant_msg = {'role': 'assistant'}
+    content = msg.get('content')
+    if content is not None:
+        assistant_msg['content'] = content
+    elif not msg.get('tool_calls'):
+        assistant_msg['content'] = ''
+    reasoning = msg.get('reasoning_content') or msg.get('reasoning') or ''
+    if reasoning:
+        assistant_msg['reasoning'] = reasoning
+        assistant_msg['reasoning_content'] = reasoning
+    tool_calls = msg.get('tool_calls')
+    if tool_calls:
+        assistant_msg['tool_calls'] = tool_calls
 
 messages = [{'role': 'user', 'content': 'What is the weather in Shanghai?'}]
 messages.append(assistant_msg)
@@ -71,7 +75,7 @@ log_step "第2轮非流式Tool请求（含历史）"
 R2_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R2_BODY=$(echo "$R2_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R2_RESP" | sed -n '$p')" "第2轮 200"
 

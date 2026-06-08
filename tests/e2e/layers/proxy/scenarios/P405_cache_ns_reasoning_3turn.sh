@@ -26,7 +26,7 @@ log_step "第1轮 非流式 Reasoning"
 R1_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Think step by step: what is 5+3?\"}],\"max_tokens\":128,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Think step by step: what is 5+3?\"}],\"max_tokens\":512,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R1_BODY=$(echo "$R1_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R1_RESP" | sed -n '$p')" "第1轮 200"
 
@@ -65,12 +65,14 @@ sleep 1
 log_step "第2轮 非流式 Reasoning（增量messages，含 reasoning_content 回传）"
 R2_MESSAGES=$(R1_REASONING="$R1_REASONING" R1_CONTENT="$R1_CONTENT" python3 -c "
 import json, os
-# 构造 assistant 消息：content 中包含 reasoning 和普通回复
-# OpenAI 格式中 reasoning_content 不在 messages 中回传，仅回传 content
-# 但对于 reasoning_parser，回传的 assistant 消息需包含完整回复
 r1_content = os.environ['R1_CONTENT']
+r1_reasoning = os.environ['R1_REASONING']
+assistant_msg = {'role': 'assistant', 'content': r1_content}
+if r1_reasoning:
+    assistant_msg['reasoning'] = r1_reasoning
+    assistant_msg['reasoning_content'] = r1_reasoning
 messages = [{'role':'user','content':'Think step by step: what is 5+3?'},
-            {'role':'assistant','content':r1_content},
+            assistant_msg,
             {'role':'user','content':'Think step by step: what is 10+7?'}]
 print(json.dumps(messages, ensure_ascii=False))
 ")
@@ -78,7 +80,7 @@ print(json.dumps(messages, ensure_ascii=False))
 R2_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"max_tokens\":128,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"max_tokens\":512,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R2_BODY=$(echo "$R2_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R2_RESP" | sed -n '$p')" "第2轮 200"
 
@@ -111,19 +113,27 @@ sleep 1
 
 # ===== 第3轮: 构造增量 messages（含 R1 + R2 assistant 回复） =====
 log_step "第3轮 非流式 Reasoning（增量messages）"
-R3_MESSAGES=$(R1_CONTENT="$R1_CONTENT" R2_CONTENT="$R2_CONTENT" python3 -c "
+R3_MESSAGES=$(R1_CONTENT="$R1_CONTENT" R1_REASONING="$R1_REASONING" R2_CONTENT="$R2_CONTENT" R2_REASONING="$R2_REASONING" python3 -c "
 import json, os
+a1 = {'role': 'assistant', 'content': os.environ['R1_CONTENT']}
+if os.environ['R1_REASONING']:
+    a1['reasoning'] = os.environ['R1_REASONING']
+    a1['reasoning_content'] = os.environ['R1_REASONING']
+a2 = {'role': 'assistant', 'content': os.environ['R2_CONTENT']}
+if os.environ['R2_REASONING']:
+    a2['reasoning'] = os.environ['R2_REASONING']
+    a2['reasoning_content'] = os.environ['R2_REASONING']
 messages = [{'role':'user','content':'Think step by step: what is 5+3?'},
-            {'role':'assistant','content':os.environ['R1_CONTENT']},
+            a1,
             {'role':'user','content':'Think step by step: what is 10+7?'},
-            {'role':'assistant','content':os.environ['R2_CONTENT']},
+            a2,
             {'role':'user','content':'Think step by step: what is 20+15?'}]
 print(json.dumps(messages, ensure_ascii=False))
 ")
 R3_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"max_tokens\":128,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"max_tokens\":512,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R3_BODY=$(echo "$R3_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R3_RESP" | sed -n '$p')" "第3轮 200"
 sleep 1
