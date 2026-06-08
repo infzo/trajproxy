@@ -51,6 +51,7 @@ run_scenario() {
     echo "========================================"
 
     TOTAL_SCENARIOS=$((TOTAL_SCENARIOS + 1))
+    export FAILURE_CONTEXT="${scenario_name}"
     local start_ts=$(date +%s)
     if bash "$scenario_path"; then
         local end_ts=$(date +%s)

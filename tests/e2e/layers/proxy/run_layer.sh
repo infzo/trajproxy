@@ -24,6 +24,7 @@ run_scenario() {
     echo -e "${BLUE}[Proxy Layer] 运行场景: ${scenario_name}${NC}"
     echo "========================================"
 
+    export FAILURE_CONTEXT="${scenario_name}"
     local start_ts=$(date +%s)
     if bash "$scenario_file"; then
         local end_ts=$(date +%s)

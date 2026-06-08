@@ -31,6 +31,14 @@ log_step() {
     echo -e "${YELLOW}[STEP]${NC} $1"
 }
 
+# 失败日志记录函数：将失败信息写入 FAILURE_LOG 临时文件
+# 格式: 场景名|失败消息|详情
+log_failure() {
+    if [ -n "${FAILURE_LOG:-}" ] && [ -w "${FAILURE_LOG:-}" ]; then
+        echo "${FAILURE_CONTEXT:-unknown}|$1|$2" >> "$FAILURE_LOG"
+    fi
+}
+
 # 断言函数：相等
 assert_eq() {
     local expected="$1"
@@ -48,6 +56,7 @@ assert_eq() {
         echo "    期望: $expected"
         echo "    实际: $actual"
         TESTS_FAILED=$((TESTS_FAILED + 1))
+        log_failure "$message" "期望: ${expected}, 实际: ${actual}"
         return 1
     fi
 }
@@ -69,6 +78,7 @@ assert_contains() {
         echo "    未找到: $needle"
         echo "    内容: $haystack"
         TESTS_FAILED=$((TESTS_FAILED + 1))
+        log_failure "$message" "未找到: ${needle}"
         return 1
     fi
 }
@@ -90,6 +100,7 @@ assert_not_contains() {
         echo "    不应包含: $needle"
         echo "    内容: $haystack"
         TESTS_FAILED=$((TESTS_FAILED + 1))
+        log_failure "$message" "不应包含: ${needle}"
         return 1
     fi
 }

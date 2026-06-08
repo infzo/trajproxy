@@ -32,10 +32,12 @@ FAILED_SCENARIOS=0
 
 # 计时日志文件（由 run_tests.sh 创建，传递给 run_layer.sh 使用）
 TIMING_LOG=""
+FAILURE_LOG=""
 
 # 默认跳过的场景前缀（T=性能测试, A=归档测试），显式指定场景编号时不过滤
-# 可通过 --all 清除此过滤，或通过 SKIP_PREFIXES 环境变量自定义
+# 可通过 --all 清除此过滤，或通过 --skip / --only / SKIP_PREFIXES 环境变量自定义
 SKIP_PREFIXES="${SKIP_PREFIXES:-T,A}"
+ONLY_PREFIXES=""
 
 # 打印帮助
 print_usage() {
@@ -52,8 +54,11 @@ print_usage() {
     echo ""
     echo "场景过滤:"
     echo "  --all                       运行全部场景（含 T*/A*，默认跳过性能和归档用例）"
-    echo "  SKIP_PREFIXES=T,A           自定义跳过前缀（逗号分隔，默认跳过 T 和 A）"
-    echo "  SKIP_PREFIXES=''            清空前缀过滤，等同 --all"
+    echo "  --only, -o <前缀>           只运行指定前缀的场景，可多次使用（如: -o N -o P）"
+    echo "  --skip, -s <前缀>           自定义跳过前缀，逗号分隔（如: -s C,A）"
+    echo "  --only 与 --skip 互斥，不可同时使用"
+    echo ""
+    echo "  环境变量: SKIP_PREFIXES=T,A  （兼容旧用法，等同 --skip T,A）"
     echo ""
     echo "可用层:"
     echo "  nginx      - Nginx 入口层测试 (port 12345)"
@@ -186,6 +191,39 @@ print_timing_report() {
     echo "=========================================="
 }
 
+# 打印失败结果报告：汇总所有失败用例及原因
+print_failure_report() {
+    if [ -z "${FAILURE_LOG:-}" ] || [ ! -f "$FAILURE_LOG" ] || [ ! -s "$FAILURE_LOG" ]; then
+        return
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo -e "${RED}测试结果报告${NC}"
+    echo "=========================================="
+
+    local fail_count=0
+    local prev_scenario=""
+    local index=0
+
+    while IFS='|' read -r scenario message detail; do
+        if [ "$scenario" != "$prev_scenario" ]; then
+            index=$((index + 1))
+            echo ""
+            echo -e "  ${RED}#${index}  ${scenario}${NC}"
+            prev_scenario="$scenario"
+            fail_count=$((fail_count + 1))
+        fi
+        echo "      FAIL: ${message}"
+        [ -n "$detail" ] && echo "      ${detail}"
+    done < "$FAILURE_LOG"
+
+    echo ""
+    echo "──────────────────────────────────────────"
+    echo -e "  失败用例: ${RED}${fail_count} 个${NC}"
+    echo "=========================================="
+}
+
 # 打印最终摘要
 print_final_summary() {
     echo ""
@@ -199,6 +237,8 @@ print_final_summary() {
 
     # 输出耗时报告
     print_timing_report
+    # 输出失败结果报告
+    print_failure_report
 
     if [ $FAILED_SCENARIOS -eq 0 ]; then
         echo -e "${GREEN}所有测试通过！${NC}"
@@ -219,8 +259,9 @@ main() {
 
     # 创建计时日志临时文件，供各 run_layer.sh 写入
     TIMING_LOG=$(mktemp /tmp/e2e_timing_XXXXXX.log)
-    export TIMING_LOG
-    trap "rm -f '$TIMING_LOG'" EXIT
+    FAILURE_LOG=$(mktemp /tmp/e2e_failure_XXXXXX.log)
+    export TIMING_LOG FAILURE_LOG
+    trap "rm -f '$TIMING_LOG' '$FAILURE_LOG'" EXIT
 
     LAYER=""
     SCENARIO_IDS=()
@@ -236,6 +277,14 @@ main() {
                 SKIP_PREFIXES=""
                 shift
                 ;;
+            --skip|-s)
+                SKIP_PREFIXES="$2"
+                shift 2
+                ;;
+            --only|-o)
+                ONLY_PREFIXES="${ONLY_PREFIXES:+$ONLY_PREFIXES,}$2"
+                shift 2
+                ;;
             -h|--help)
                 print_usage
                 exit 0
@@ -246,6 +295,27 @@ main() {
                 ;;
         esac
     done
+
+    # --only 和 --skip 互斥校验
+    if [ -n "$ONLY_PREFIXES" ] && [ "${SKIP_PREFIXES}" != "T,A" ]; then
+        echo -e "${RED}错误: --only 和 --skip 不能同时使用（含 SKIP_PREFIXES 环境变量）${NC}" >&2
+        exit 1
+    fi
+
+    # --only 转 SKIP_PREFIXES：扫描所有层场景目录，不在 only 列表中的前缀全部跳过
+    if [ -n "$ONLY_PREFIXES" ]; then
+        IFS=',' read -ra only_arr <<< "${ONLY_PREFIXES}"
+        skip_list=()
+        for prefix in $(find "${SCRIPT_DIR}/layers" -path "*/scenarios/*.sh" \
+            -exec basename {} .sh \; | cut -d_ -f1 | sed 's/[0-9]*$//' | sort -u); do
+            found=false
+            for o in "${only_arr[@]}"; do
+                [ "$prefix" = "$o" ] && found=true && break
+            done
+            $found || skip_list+=("$prefix")
+        done
+        SKIP_PREFIXES=$(IFS=','; echo "${skip_list[*]}")
+    fi
 
     # ========================================
     # 运行测试
@@ -302,6 +372,8 @@ main() {
         esac
         # 单层层模式也输出耗时报告
         print_timing_report
+        # 单层层模式也输出失败结果报告
+        print_failure_report
     elif [ ${#SCENARIO_IDS[@]} -gt 0 ]; then
         # 未指定层，但有指定场景编号 -> 跨层搜索（显式指定，不过滤）
         for id in "${SCENARIO_IDS[@]}"; do
@@ -349,6 +421,7 @@ main() {
         echo ""
         echo -e "${GREEN}全部层测试执行完毕${NC}"
         print_timing_report
+        print_failure_report
     fi
 }
 
