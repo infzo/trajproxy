@@ -90,10 +90,14 @@ assert_contains "$STREAM_RESPONSE" "[DONE]" "流式响应应以 [DONE] 结束"
 CHUNK_COUNT=$(echo "$STREAM_RESPONSE" | grep -c "^data: {" || true)
 log_info "收到 ${CHUNK_COUNT} 个数据块"
 
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
 if [ "$CHUNK_COUNT" -gt 0 ]; then
     log_success "流式响应包含多个数据块"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "流式响应未包含有效数据块"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    log_failure "流式响应未包含有效数据块" ""
 fi
 
 echo ""

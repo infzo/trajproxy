@@ -124,6 +124,20 @@ class DirectPipeline(BasePipeline):
                 message = choice.get("message", {})
                 context.response_text = message.get("content", "")
 
+                # 提取 vLLM 扩展的 token_ids 字段，用于轨迹记录
+                # vLLM 在 return_token_ids=True 时会在 choices[0] 中返回 token_ids
+                if choice.get("token_ids") is not None:
+                    context.response_ids = choice["token_ids"]
+
+            # 提取顶级 prompt_token_ids（vLLM 扩展字段）
+            # 用于轨迹记录的 token_ids 列
+            if context.raw_response.get("prompt_token_ids") is not None:
+                context.token_ids = context.raw_response["prompt_token_ids"]
+
+            # 拼接完整对话 token ids（prompt + response）
+            if context.token_ids and context.response_ids:
+                context.full_conversation_token_ids = context.token_ids + context.response_ids
+
             # 提取 usage 信息
             if "usage" in context.raw_response:
                 usage = context.raw_response["usage"]
@@ -393,6 +407,15 @@ class DirectPipeline(BasePipeline):
         # prompt_token_ids 是顶级字段（与 id/model/choices/usage 同级），不在 choices 内
         if context.stream_prompt_token_ids is not None:
             context.raw_response["prompt_token_ids"] = context.stream_prompt_token_ids
+
+        # 提取累积的 token_ids 字段到 context，用于轨迹记录独立列
+        if context.stream_prompt_token_ids is not None:
+            context.token_ids = context.stream_prompt_token_ids
+        if context.stream_token_ids is not None:
+            context.response_ids = context.stream_token_ids
+        # 拼接完整对话 token ids（prompt + response）
+        if context.token_ids and context.response_ids:
+            context.full_conversation_token_ids = context.token_ids + context.response_ids
 
         # 直接转发模式下不构建 token_response（与非流式保持一致）
         # logprobs 和 token_ids 已包含在 raw_response 的 choices 中

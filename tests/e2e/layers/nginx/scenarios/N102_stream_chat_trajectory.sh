@@ -72,9 +72,10 @@ CHUNK_COUNT=$(echo "$STREAM_RESPONSE" | grep -c "^data: {" || true)
 log_info "收到 ${CHUNK_COUNT} 个数据块"
 
 if [ "$CHUNK_COUNT" -gt 0 ]; then
+    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
     log_success "流式响应包含多个数据块"
 else
-    log_error "流式响应未包含有效数据块"
+    assert_fail "流式响应未包含有效数据块"
 fi
 
 echo ""

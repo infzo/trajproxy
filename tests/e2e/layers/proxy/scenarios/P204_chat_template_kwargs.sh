@@ -138,9 +138,7 @@ if [ "$CTK_VAL" != "NOT_FOUND" ]; then
     # 进一步验证值包含 enable_thinking
     assert_contains "$CTK_VAL" "enable_thinking" "透传的 chat_template_kwargs 应包含 enable_thinking"
 else
-    log_error "DirectPipeline: chat_template_kwargs 未被透传到后端"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "DirectPipeline: chat_template_kwargs 未被透传到后端"
 fi
 
 echo ""
@@ -180,9 +178,7 @@ if [ "$CTK_STREAM_VAL" != "NOT_FOUND" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "DirectPipeline 流式: chat_template_kwargs 未被透传到后端"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "DirectPipeline 流式: chat_template_kwargs 未被透传到后端"
 fi
 
 echo ""

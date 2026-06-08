@@ -134,9 +134,7 @@ if [ "$TRAJ_COUNT" -ge 2 ] 2>/dev/null; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹记录数应 >= 2，实际: ${TRAJ_COUNT}"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹记录数应 >= 2" "实际: ${TRAJ_COUNT}"
 fi
 
 # 验证记录中包含正确的 model 字段

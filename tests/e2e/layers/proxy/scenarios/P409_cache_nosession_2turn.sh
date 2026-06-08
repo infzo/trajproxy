@@ -99,13 +99,11 @@ except Exception as e:
     fi
 done <<< "$SESSION_IDS"
 
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
 if [ "$ALL_CACHE_ZERO" = true ]; then
+    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
     log_success "所有轨迹记录cache_hit_tokens=0（无session确认）"
-    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "cache_hit_tokens不为0: ${ERRORS}"
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "cache_hit_tokens不为0" "${ERRORS}"
 fi
 
 # 清理

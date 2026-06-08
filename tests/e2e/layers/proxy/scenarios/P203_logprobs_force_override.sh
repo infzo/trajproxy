@@ -59,18 +59,22 @@ else:
 
     if [ "$should_contain" == "true" ]; then
         if [ "$field_exists" == "true" ]; then
+            TESTS_TOTAL=$((TESTS_TOTAL + 1))
+            TESTS_PASSED=$((TESTS_PASSED + 1))
             log_success "响应包含 $field 字段（符合预期）"
             return 0
         else
-            log_error "响应应包含 $field 字段但实际不包含"
+            assert_fail "响应应包含 $field 字段但实际不包含"
             return 1
         fi
     else
         if [ "$field_exists" == "false" ]; then
+            TESTS_TOTAL=$((TESTS_TOTAL + 1))
+            TESTS_PASSED=$((TESTS_PASSED + 1))
             log_success "响应不包含 $field 字段（符合预期）"
             return 0
         else
-            log_error "响应不应包含 $field 字段但实际包含"
+            assert_fail "响应不应包含 $field 字段但实际包含"
             return 1
         fi
     fi
@@ -251,12 +255,7 @@ assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
 # 2a: 验证客户端响应不含 logprobs 和 token_ids（剥离生效）
 log_info "验证客户端响应不含 logprobs 和 token_ids..."
 check_response_field "$CHAT_BODY" "logprobs" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
 check_response_field "$CHAT_BODY" "token_ids" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 2b: 等待轨迹存储，验证轨迹中包含 logprobs 和 token_ids（证明强制覆盖生效）
 sleep 0.5
@@ -269,9 +268,7 @@ if [ "$LOGPROBS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹中 logprobs 缺失或为空" "$LOGPROBS_RESULT"
 fi
 
 TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
@@ -280,9 +277,7 @@ if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹中 token_ids 缺失或为空" "$TOKEN_IDS_RESULT"
 fi
 
 echo ""
@@ -312,12 +307,7 @@ assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
 
 # 3a: 客户端响应不含 logprobs 和 token_ids
 check_response_field "$CHAT_BODY" "logprobs" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
 check_response_field "$CHAT_BODY" "token_ids" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 3b: 验证轨迹存储（覆盖 true → 1，仍能获取 logprobs）
 sleep 0.5
@@ -330,9 +320,7 @@ if [ "$LOGPROBS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹中 logprobs 缺失或为空" "$LOGPROBS_RESULT"
 fi
 
 TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
@@ -341,9 +329,7 @@ if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹中 token_ids 缺失或为空" "$TOKEN_IDS_RESULT"
 fi
 
 echo ""
@@ -373,12 +359,7 @@ assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
 
 # 4a: 客户端响应不含 logprobs 和 token_ids
 check_response_field "$CHAT_BODY" "logprobs" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
 check_response_field "$CHAT_BODY" "token_ids" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 4b: 验证轨迹存储
 sleep 0.5
@@ -391,9 +372,7 @@ if [ "$LOGPROBS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹中 logprobs 缺失或为空" "$LOGPROBS_RESULT"
 fi
 
 TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
@@ -402,9 +381,7 @@ if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹中 token_ids 缺失或为空" "$TOKEN_IDS_RESULT"
 fi
 
 echo ""
@@ -435,12 +412,7 @@ assert_http_status "200" "$CHAT_STATUS" "HTTP 状态码应为 200"
 
 # 5a: 客户端响应不含 logprobs 和 token_ids
 check_response_field "$CHAT_BODY" "logprobs" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
-
 check_response_field "$CHAT_BODY" "token_ids" "false"
-TESTS_TOTAL=$((TESTS_TOTAL + 1))
-[ $? -eq 0 ] && TESTS_PASSED=$((TESTS_PASSED + 1)) || TESTS_FAILED=$((TESTS_FAILED + 1))
 
 # 5b: 验证轨迹存储
 sleep 0.5
@@ -453,9 +425,7 @@ if [ "$LOGPROBS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹中 logprobs 缺失或为空" "$LOGPROBS_RESULT"
 fi
 
 TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
@@ -464,9 +434,7 @@ if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "轨迹中 token_ids 缺失或为空" "$TOKEN_IDS_RESULT"
 fi
 
 echo ""
@@ -497,9 +465,7 @@ if [ "$STREAM_CHECK" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式响应包含 logprobs 或 token_ids: $STREAM_CHECK"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式响应不应包含 logprobs 或 token_ids" "$STREAM_CHECK"
 fi
 
 # 6b: 验证轨迹存储
@@ -513,9 +479,7 @@ if [ "$LOGPROBS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式轨迹中 logprobs 缺失或为空" "$LOGPROBS_RESULT"
 fi
 
 TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
@@ -524,9 +488,7 @@ if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式轨迹中 token_ids 缺失或为空" "$TOKEN_IDS_RESULT"
 fi
 
 echo ""
@@ -558,9 +520,7 @@ if [ "$STREAM_CHECK" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式响应包含 logprobs 或 token_ids: $STREAM_CHECK"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式响应不应包含 logprobs 或 token_ids" "$STREAM_CHECK"
 fi
 
 # 7b: 验证轨迹存储（覆盖 true → 1）
@@ -574,9 +534,7 @@ if [ "$LOGPROBS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式轨迹中 logprobs 缺失或为空" "$LOGPROBS_RESULT"
 fi
 
 TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
@@ -585,9 +543,7 @@ if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式轨迹中 token_ids 缺失或为空" "$TOKEN_IDS_RESULT"
 fi
 
 echo ""
@@ -619,9 +575,7 @@ if [ "$STREAM_CHECK" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式响应包含 logprobs 或 token_ids: $STREAM_CHECK"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式响应不应包含 logprobs 或 token_ids" "$STREAM_CHECK"
 fi
 
 # 8b: 验证轨迹存储
@@ -635,9 +589,7 @@ if [ "$LOGPROBS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式轨迹中 logprobs 缺失或为空" "$LOGPROBS_RESULT"
 fi
 
 TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
@@ -646,9 +598,7 @@ if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式轨迹中 token_ids 缺失或为空" "$TOKEN_IDS_RESULT"
 fi
 
 echo ""
@@ -681,9 +631,7 @@ if [ "$STREAM_CHECK" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式响应包含 logprobs 或 token_ids: $STREAM_CHECK"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式响应不应包含 logprobs 或 token_ids" "$STREAM_CHECK"
 fi
 
 # 9b: 验证轨迹存储
@@ -697,9 +645,7 @@ if [ "$LOGPROBS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式轨迹中 logprobs 缺失或为空: $LOGPROBS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式轨迹中 logprobs 缺失或为空" "$LOGPROBS_RESULT"
 fi
 
 TOKEN_IDS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:token_ids=" | cut -d= -f2 | cut -d'(' -f1)
@@ -708,9 +654,7 @@ if [ "$TOKEN_IDS_RESULT" == "OK" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "流式轨迹中 token_ids 缺失或为空: $TOKEN_IDS_RESULT"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "流式轨迹中 token_ids 缺失或为空" "$TOKEN_IDS_RESULT"
 fi
 
 echo ""

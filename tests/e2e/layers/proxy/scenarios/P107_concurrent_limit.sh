@@ -51,8 +51,7 @@ if [ $((SUCCESS + LIMITED + OTHER)) -gt 0 ]; then
     log_success "并发请求未导致系统崩溃 (${SUCCESS}+${LIMITED}+${OTHER} > 0)"
     TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "无有效响应（系统可能崩溃）"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "并发请求无有效响应（系统可能崩溃）"
 fi
 
 # 断言2: 至少有 429 限流响应出现（验证限流机制生效）
@@ -71,8 +70,7 @@ if [ $SUCCESS -gt 0 ]; then
     log_success "正常请求被处理: ${SUCCESS} 个成功"
     TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "无 200 成功响应（所有请求被限流或失败）"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "无 200 成功响应（所有请求被限流或失败）"
 fi
 
 rm -f /tmp/f107_*.txt /tmp/f107_st_*.txt

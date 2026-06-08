@@ -110,26 +110,23 @@ assert_contains "$CHAT_BODY" "choices" "响应应包含 choices 字段"
 
 # 验证 tool_calls 字段非空（Tool场景关键字段）
 if echo "$CHAT_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*null'; then
-    log_error "tool_calls 字段为 null，Tool场景应有工具调用"
-    TEST_FAILED=1
+    assert_fail "tool_calls 字段为 null，Tool场景应有工具调用"
 elif echo "$CHAT_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\[\]'; then
-    log_error "tool_calls 字段为空数组，Tool场景应有工具调用"
-    TEST_FAILED=1
+    assert_fail "tool_calls 字段为空数组，Tool场景应有工具调用"
 elif echo "$CHAT_BODY" | grep -q '"tool_calls"[[:space:]]*:[[:space:]]*\['; then
     # 检查 tool_calls 数组中是否有内容（包含 function 字段表示有工具调用）
     if echo "$CHAT_BODY" | grep -q '"function"'; then
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
         log_success "tool_calls 字段非空，检测到工具调用，验证通过"
         log_success "自定义 parser 'test_tool_parser' 按需发现并加载成功"
     else
-        log_error "tool_calls 数组存在但未检测到 function 字段"
-        TEST_FAILED=1
+        assert_fail "tool_calls 数组存在但未检测到 function 字段"
     fi
 elif ! echo "$CHAT_BODY" | grep -q '"tool_calls"'; then
-    log_error "响应中无 tool_calls 字段，Tool场景应有工具调用"
-    TEST_FAILED=1
+    assert_fail "响应中无 tool_calls 字段，Tool场景应有工具调用"
 else
-    log_error "tool_calls 字段格式异常"
-    TEST_FAILED=1
+    assert_fail "tool_calls 字段格式异常"
 fi
 
 echo ""
@@ -157,10 +154,11 @@ assert_eq "$TOOL_TEST_SESSION_ID" "$TRAJ_SESSION_ID" "session_id 应为 ${TOOL_T
 # 验证记录数大于0
 TRAJ_COUNT=$(json_get_number "$TRAJ_BODY" "count")
 if [ "$TRAJ_COUNT" -gt 0 ] 2>/dev/null; then
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
     log_success "轨迹记录数: ${TRAJ_COUNT}，确认轨迹已捕获"
 else
-    log_error "轨迹记录数应为大于0，实际为: ${TRAJ_COUNT}"
-    TEST_FAILED=1
+    assert_fail "轨迹记录数应为大于0" "实际: ${TRAJ_COUNT}"
 fi
 
 echo ""

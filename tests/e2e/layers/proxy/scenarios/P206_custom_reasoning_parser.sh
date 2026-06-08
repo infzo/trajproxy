@@ -91,17 +91,16 @@ assert_contains "$CHAT_BODY" "choices" "响应应包含 choices 字段"
 
 # 验证 reasoning 字段非空（Reasoning场景关键字段）
 if echo "$CHAT_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*null'; then
-    log_error "reasoning 字段为 null，Reasoning场景应有推理内容"
-    TEST_FAILED=1
+    assert_fail "reasoning 字段为 null，Reasoning场景应有推理内容"
 elif echo "$CHAT_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*""'; then
-    log_error "reasoning 字段为空字符串，Reasoning场景应有推理内容"
-    TEST_FAILED=1
+    assert_fail "reasoning 字段为空字符串，Reasoning场景应有推理内容"
 elif echo "$CHAT_BODY" | grep -q '"reasoning"[[:space:]]*:[[:space:]]*"'; then
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
     log_success "reasoning 字段非空，检测到推理内容，验证通过"
     log_success "自定义 parser 'test_reasoning_parser' 按需发现并加载成功"
 else
-    log_error "响应中无 reasoning 字段，Reasoning场景应有推理内容"
-    TEST_FAILED=1
+    assert_fail "响应中无 reasoning 字段，Reasoning场景应有推理内容"
 fi
 
 echo ""
@@ -129,10 +128,11 @@ assert_eq "$REASONING_TEST_SESSION_ID" "$TRAJ_SESSION_ID" "session_id 应为 ${R
 # 验证记录数大于0
 TRAJ_COUNT=$(json_get_number "$TRAJ_BODY" "count")
 if [ "$TRAJ_COUNT" -gt 0 ] 2>/dev/null; then
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
     log_success "轨迹记录数: ${TRAJ_COUNT}，确认轨迹已捕获"
 else
-    log_error "轨迹记录数应为大于0，实际为: ${TRAJ_COUNT}"
-    TEST_FAILED=1
+    assert_fail "轨迹记录数应为大于0" "实际: ${TRAJ_COUNT}"
 fi
 
 echo ""

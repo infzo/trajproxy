@@ -22,11 +22,7 @@ REG2=$(curl_with_log -s -w "\n%{http_code}" -X POST "${BASE_URL}/models/register
     -H "Content-Type: application/json" \
     -d "{\"run_id\":\"${RUN_ID}\",\"model_name\":\"${MODEL_NAME}\",\"url\":\"${BACKEND_MODEL_URL}\",\"api_key\":\"${CHAT_API_KEY}\",\"token_in_token_out\":false}")
 STATUS2=$(echo "$REG2" | sed -n '$p')
-if [ "$STATUS2" = "200" ] || [ "$STATUS2" = "409" ]; then
-    log_success "重复注册返回 $STATUS2（幂等）"
-else
-    log_error "重复注册应返回 200/409，实际: $STATUS2"
-fi
+assert_one_of "$STATUS2" "200 409" "重复注册应返回 200/409（幂等）"
 
 curl_with_log -s -X DELETE "${BASE_URL}/models?model_name=${MODEL_NAME}&run_id=${RUN_ID}" > /dev/null
 print_summary

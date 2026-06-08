@@ -99,7 +99,7 @@ record = records[0]
 errors = []
 
 # 验证核心字段存在且非空
-required_fields = ['run_id', 'session_id', 'model_name']
+required_fields = ['run_id', 'session_id', 'model']
 for field in required_fields:
     val = record.get(field, '')
     if not val:
@@ -137,8 +137,10 @@ else:
 
 if echo "$TRAJ_CHECK_RESULT" | grep -q "^PASS:"; then
     log_success "$TRAJ_CHECK_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "$TRAJ_CHECK_RESULT"
+    assert_fail "$TRAJ_CHECK_RESULT"
 fi
 
 echo ""

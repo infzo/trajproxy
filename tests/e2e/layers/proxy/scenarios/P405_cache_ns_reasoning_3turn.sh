@@ -49,7 +49,7 @@ if [ -n "$R1_REASONING" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "第1轮 reasoning_content 为空（reasoning_parser 可能未生效）"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1)); log_failure "第1轮 reasoning_content 为空（reasoning_parser 可能未生效）" ""
 fi
 
 if [ -n "$R1_CONTENT" ]; then
@@ -57,7 +57,7 @@ if [ -n "$R1_CONTENT" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "第1轮 content 为空"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1)); log_failure "第1轮 content 为空" ""
 fi
 sleep 1
 
@@ -105,7 +105,7 @@ if [ -n "$R2_CONTENT" ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     log_error "第2轮 content 为空"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1)); log_failure "第2轮 content 为空" ""
 fi
 sleep 1
 

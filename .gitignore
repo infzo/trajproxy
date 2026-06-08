@@ -222,7 +222,6 @@ postgres_data/
 dockers/images/
 models/
 archives/
-custom_parsers/
 
 # E2E test cache
 tests/e2e/cache_store/

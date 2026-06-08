@@ -12,10 +12,6 @@ CHAT=$(curl_with_log -s -w "\n%{http_code}" -X POST "${BASE_URL}/v1/chat/complet
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{\"model\":\"unregistered_model_xyz\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"max_tokens\":10}")
 STATUS=$(echo "$CHAT" | sed -n '$p')
-if [ "$STATUS" = "404" ] || [ "$STATUS" = "400" ]; then
-    log_success "未注册模型返回 $STATUS"
-else
-    log_error "未注册模型应返回 404/400，实际: $STATUS"
-fi
+assert_one_of "$STATUS" "404 400" "未注册模型应返回 404/400"
 
 print_summary

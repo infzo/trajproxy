@@ -114,6 +114,54 @@ assert_http_status() {
     assert_eq "$expected" "$actual" "$message"
 }
 
+# 断言函数：无条件失败（用于复杂条件判断后的失败报告）
+# 用法: assert_fail "消息" ["详情"]
+# 示例: assert_fail "响应中无 tool_calls 字段"
+#       assert_fail "重复注册返回异常状态" "实际: 400"
+assert_fail() {
+    local message="$1"
+    local detail="${2:-}"
+
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    log_error "$message"
+    [ -n "$detail" ] && echo "    $detail"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    log_failure "$message" "$detail"
+    return 1
+}
+
+# 断言函数：实际值应为期望值列表之一
+# 用法: assert_one_of "$actual" "200 409" "消息"
+# 示例: assert_one_of "$STATUS" "200 409" "重复注册应返回 200/409"
+assert_one_of() {
+    local actual="$1"
+    local expected_list="$2"
+    local message="$3"
+
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+
+    local found=false
+    for expected in $expected_list; do
+        if [ "$actual" == "$expected" ]; then
+            found=true
+            break
+        fi
+    done
+
+    if $found; then
+        log_success "$message (实际: $actual)"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+        return 0
+    else
+        log_error "$message"
+        echo "    期望之一: $expected_list"
+        echo "    实际: $actual"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        log_failure "$message" "期望之一: ${expected_list}, 实际: ${actual}"
+        return 1
+    fi
+}
+
 # 打印 curl 命令（格式化输出）
 log_curl_cmd() {
     echo -e "${BLUE}[CMD]${NC}"
@@ -387,5 +435,6 @@ else:
         log_error "$result"
         TESTS_TOTAL=$((TESTS_TOTAL + 1))
         TESTS_FAILED=$((TESTS_FAILED + 1))
+        log_failure "$result" ""
     fi
 }

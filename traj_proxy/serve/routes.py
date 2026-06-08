@@ -365,7 +365,7 @@ async def register_model(request: Request, req: RegisterModelRequest):
     except ValueError as e:
         # 模型已存在
         logger.warning(f"注册模型失败: {str(e)}")
-        raise HTTPException(status_code=400, detail={
+        raise HTTPException(status_code=409, detail={
             "type": "model_already_exists",
             "message": str(e),
         })

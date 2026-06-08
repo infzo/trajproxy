@@ -76,8 +76,7 @@ if echo "$TOOL_CHECK" | grep -q "^PASS:"; then
     log_success "$TOOL_CHECK"
     TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "$TOOL_CHECK"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "$TOOL_CHECK"
 fi
 
 # 步骤 4: 查询轨迹，验证 tool_calls 存在于存储记录中
@@ -97,7 +96,7 @@ record = records[0]
 errors = []
 
 # 验证基本字段
-for field in ['run_id', 'session_id', 'model_name']:
+for field in ['run_id', 'session_id', 'model']:
     val = record.get(field, '')
     if not val:
         errors.append(f'{field} 为空或缺失')
@@ -161,8 +160,7 @@ if echo "$TRAJ_CHECK" | grep -q "^PASS:"; then
     log_success "$TRAJ_CHECK"
     TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "$TRAJ_CHECK"
-    TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_FAILED=$((TESTS_FAILED + 1))
+    assert_fail "$TRAJ_CHECK"
 fi
 
 # 步骤 5: 清理

@@ -49,7 +49,7 @@ for run_id in "${MODEL_RUN_IDS[@]}"; do
     if [ "$REGISTER_STATUS" = "200" ]; then
         REGISTER_OK=$((REGISTER_OK + 1))
     else
-        log_error "注册模型 ${MODEL_NAME} (run_id: ${run_id}) 失败: HTTP ${REGISTER_STATUS}"
+        assert_fail "注册模型 ${MODEL_NAME} (run_id: ${run_id}) 失败" "HTTP ${REGISTER_STATUS}"
     fi
 done
 
@@ -84,7 +84,7 @@ for idx in $(seq 0 $((MODEL_COUNT - 1))); do
     if [ "$CHAT_STATUS" = "200" ] && echo "$CHAT_BODY" | grep -q "choices"; then
         FIRST_ROUND_OK=$((FIRST_ROUND_OK + 1))
     else
-        log_error "${MODEL_NAME} (run_id: ${run_id}): 首轮请求失败 (HTTP ${CHAT_STATUS})"
+        assert_fail "${MODEL_NAME} (run_id: ${run_id}): 首轮请求失败" "HTTP ${CHAT_STATUS}"
     fi
 done
 
@@ -118,9 +118,10 @@ for idx in "${EVICTED_INDICES[@]}"; do
 
     if [ "$CHAT_STATUS" = "200" ] && echo "$CHAT_BODY" | grep -q "choices"; then
         EVICTED_RELOAD_OK=$((EVICTED_RELOAD_OK + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
         log_success "模型 ${MODEL_NAME} (run_id: ${run_id}): 淘汰后重新加载成功"
     else
-        log_error "模型 ${MODEL_NAME} (run_id: ${run_id}): 淘汰后重新加载失败 (HTTP ${CHAT_STATUS})"
+        assert_fail "模型 ${MODEL_NAME} (run_id: ${run_id}): 淘汰后重新加载失败" "HTTP ${CHAT_STATUS}"
     fi
 done
 
@@ -154,9 +155,10 @@ for idx in "${CACHED_INDICES[@]}"; do
 
     if [ "$CHAT_STATUS" = "200" ] && echo "$CHAT_BODY" | grep -q "choices"; then
         CACHED_OK=$((CACHED_OK + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
         log_success "模型 ${MODEL_NAME} (run_id: ${run_id}): 缓存命中，请求成功"
     else
-        log_error "模型 ${MODEL_NAME} (run_id: ${run_id}): 请求失败 (HTTP ${CHAT_STATUS})"
+        assert_fail "模型 ${MODEL_NAME} (run_id: ${run_id}): 请求失败" "HTTP ${CHAT_STATUS}"
     fi
 done
 
@@ -178,7 +180,7 @@ for run_id in "${MODEL_RUN_IDS[@]}"; do
     if [ "$DELETE_STATUS" = "200" ]; then
         DELETE_OK=$((DELETE_OK + 1))
     else
-        log_error "删除模型 ${MODEL_NAME} (run_id: ${run_id}) 失败: HTTP ${DELETE_STATUS}"
+        assert_fail "删除模型 ${MODEL_NAME} (run_id: ${run_id}) 失败" "HTTP ${DELETE_STATUS}"
     fi
 done
 

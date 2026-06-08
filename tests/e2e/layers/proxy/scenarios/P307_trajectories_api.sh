@@ -132,9 +132,10 @@ assert_eq "$TRAJ_API_RUN_ID" "$RESPONSE_RUN_ID" "run_id 应为 ${TRAJ_API_RUN_ID
 SESSION_COUNT=$(echo "$SESSIONS_BODY" | grep -o '"session_id"' | wc -l | tr -d ' ')
 if [ "$SESSION_COUNT" -ge 3 ] 2>/dev/null; then
     log_success "轨迹数量: ${SESSION_COUNT}，符合预期（>= 3）"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹数量应为 >= 3，实际为: ${SESSION_COUNT}"
-    TEST_FAILED=1
+    assert_fail "轨迹数量应为 >= 3" "实际: ${SESSION_COUNT}"
 fi
 
 # 验证返回的 session_id 包含我们创建的
@@ -155,13 +156,7 @@ NO_RUNID_BODY=$(echo "$NO_RUNID_RESPONSE" | sed '$d')
 NO_RUNID_STATUS=$(echo "$NO_RUNID_RESPONSE" | sed -n '$p')
 
 
-# FastAPI 对于缺少必填查询参数返回 422
-if [ "$NO_RUNID_STATUS" = "422" ] || [ "$NO_RUNID_STATUS" = "400" ]; then
-    log_success "缺少 run_id 参数应返回 422/400，实际返回: ${NO_RUNID_STATUS}"
-else
-    log_error "缺少 run_id 参数应返回 422/400，实际返回: ${NO_RUNID_STATUS}"
-    TEST_FAILED=1
-fi
+assert_one_of "$NO_RUNID_STATUS" "422 400" "缺少 run_id 参数应返回 422/400"
 
 echo ""
 
@@ -190,9 +185,10 @@ assert_eq "$TRAJ_API_SESSION_ID_1" "$RESPONSE_SESSION_ID" "session_id 应为 ${T
 RECORDS_COUNT=$(echo "$RECORDS_BODY" | grep -o '"unique_id"' | wc -l | tr -d ' ')
 if [ "$RECORDS_COUNT" -gt 0 ] 2>/dev/null; then
     log_success "轨迹记录数: ${RECORDS_COUNT}，确认记录已获取"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "轨迹记录数应大于 0，实际为: ${RECORDS_COUNT}"
-    TEST_FAILED=1
+    assert_fail "轨迹记录数应大于 0" "实际: ${RECORDS_COUNT}"
 fi
 
 # 验证记录包含必要字段
@@ -247,9 +243,10 @@ assert_eq "$TRAJ_API_SESSION_ID_1" "$LEGACY_SESSION_ID" "session_id 应为 ${TRA
 LEGACY_COUNT=$(json_get_number "$LEGACY_BODY" "count")
 if [ -n "$LEGACY_COUNT" ] && [ "$LEGACY_COUNT" -gt 0 ] 2>/dev/null; then
     log_success "旧接口 count 字段正常: ${LEGACY_COUNT}"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "旧接口 count 字段异常: ${LEGACY_COUNT}"
-    TEST_FAILED=1
+    assert_fail "旧接口 count 字段异常" "${LEGACY_COUNT}"
 fi
 
 echo ""
@@ -272,9 +269,10 @@ assert_contains "$NOTEXIST_BODY" "records" "响应应包含 records 字段"
 NOTEXIST_RECORDS_COUNT=$(echo "$NOTEXIST_BODY" | grep -o '"unique_id"' | wc -l | tr -d ' ')
 if [ "$NOTEXIST_RECORDS_COUNT" -eq 0 ] 2>/dev/null; then
     log_success "不存在的 session 返回空记录列表"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "不存在的 session 应返回空记录，实际有: ${NOTEXIST_RECORDS_COUNT} 条"
-    TEST_FAILED=1
+    assert_fail "不存在的 session 应返回空记录" "实际: ${NOTEXIST_RECORDS_COUNT} 条"
 fi
 
 echo ""

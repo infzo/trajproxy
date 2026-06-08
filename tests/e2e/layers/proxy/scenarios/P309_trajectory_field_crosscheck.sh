@@ -88,8 +88,10 @@ else:
 
 if echo "$CROSSCHECK" | grep -q "^PASS:"; then
     log_success "$CROSSCHECK"
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    log_error "$CROSSCHECK"
+    assert_fail "$CROSSCHECK"
 fi
 
 curl_with_log -s -X DELETE "${BASE_URL}/models?model_name=${MODEL_NAME}&run_id=${RUN_ID}" > /dev/null
