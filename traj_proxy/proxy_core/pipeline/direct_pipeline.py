@@ -124,6 +124,14 @@ class DirectPipeline(BasePipeline):
                 message = choice.get("message", {})
                 context.response_text = message.get("content", "")
 
+                # reasoning 双字段镜像：确保 reasoning 和 reasoning_content 同时存在
+                reasoning_content = message.get("reasoning_content")
+                reasoning = message.get("reasoning")
+                if reasoning_content and not reasoning:
+                    message["reasoning"] = reasoning_content
+                elif reasoning and not reasoning_content:
+                    message["reasoning_content"] = reasoning
+
                 # 提取 vLLM 扩展的 token_ids 字段，用于轨迹记录
                 # vLLM 在 return_token_ids=True 时会在 choices[0] 中返回 token_ids
                 if choice.get("token_ids") is not None:
@@ -154,6 +162,14 @@ class DirectPipeline(BasePipeline):
 
             # 存储到数据库（保留完整的 logprobs/token_ids）
             await self._store_trajectory(context, run_id=context.run_id)
+
+            # 过滤内部字段，不返回给客户端
+            # （与 TITO 模式行为对齐，logprobs/token_ids 仅用于轨迹记录）
+            if "choices" in context.raw_response:
+                for choice in context.raw_response["choices"]:
+                    choice.pop("logprobs", None)
+                    choice.pop("token_ids", None)
+            context.raw_response.pop("prompt_token_ids", None)
 
             # 确保响应中所有可选字段有默认值
             self._ensure_response_defaults(context.raw_response)
@@ -206,6 +222,15 @@ class DirectPipeline(BasePipeline):
                 # 累积流式响应中的所有字段
                 self._accumulate_stream_fields(context, chunk)
                 context.stream_chunk_count += 1
+
+                # 过滤内部字段，不返回给客户端
+                # （与 TITO 模式行为对齐，logprobs/token_ids 仅用于轨迹记录）
+                if "choices" in chunk and chunk["choices"]:
+                    choice = chunk["choices"][0]
+                    choice.pop("logprobs", None)
+                    choice.pop("token_ids", None)
+                chunk.pop("prompt_token_ids", None)
+
                 yield chunk
 
             # 记录推理总耗时
@@ -449,6 +474,8 @@ class DirectPipeline(BasePipeline):
             msg.setdefault("audio", None)
             msg.setdefault("function_call", None)
             msg.setdefault("refusal", None)
+            msg.setdefault("reasoning", None)
+            msg.setdefault("reasoning_content", None)
         for key in ("kv_transfer_params", "prompt_logprobs",
                     "prompt_token_ids", "service_tier", "system_fingerprint"):
             response.setdefault(key, None)

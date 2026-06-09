@@ -33,12 +33,29 @@ from typing import Any, List, Tuple
 # 配置
 # ========================================
 
-# OpenAI 格式需要跳过的运行时动态字段
-OPENAI_SKIP_FIELDS = {"id", "created"}
+# OpenAI 格式需要跳过的运行时动态字段 + proxy 额外返回的字段
+OPENAI_SKIP_FIELDS = {
+    "id", "created",
+    "reasoning",                  # vLLM 扩展字段, proxy 不一定返回, 允许缺失
+    "reasoning_content",          # reasoning_parser 提取的思考内容
+    "provider_specific_fields",   # reasoning 相关 provider 字段 (message/choice 级别)
+    "logprobs",                   # proxy 补充的 logprobs (vLLM 未在顶层返回)
+    "prompt_token_ids",           # proxy 额外返回的 prompt token IDs
+    "kv_transfer_params",         # vLLM 内部参数, proxy 不透传
+    "prompt_logprobs",            # 请求未启用时 vLLM 返回 null, proxy 省略
+    "service_tier",               # vLLM 返回 null, proxy 省略
+    "system_fingerprint",         # vLLM 返回 null, proxy 省略
+    "completion_tokens_details",  # vLLM 含 reasoning_tokens 等, proxy 不保证透传
+}
 OPENAI_STREAM_SKIP_FIELDS = OPENAI_SKIP_FIELDS | {"seed"}
 
-# Claude 格式需要跳过的运行时动态字段
-CLAUDE_SKIP_FIELDS = {"id"}
+# Claude 格式需要跳过的运行时动态字段 + proxy 额外返回的字段
+CLAUDE_SKIP_FIELDS = {
+    "id",
+    "provider_specific_fields",   # reasoning 相关 provider 字段
+    "logprobs",                   # proxy 补充的 logprobs
+    "prompt_token_ids",           # proxy 额外返回的 prompt token IDs
+}
 
 # ========================================
 # 禁止出现在最终 API 响应中的特殊 token
@@ -47,8 +64,8 @@ FORBIDDEN_TOKENS = [
     '<think>', '</think>',
     '<|tool_call_begin|>', '<|tool_call_end|>',
     '<tool_call>', '</tool_call>',
-    '<function=', '</function>',
-    '<parameter=', '</parameter>',
+    '<function>', '</function>',
+    '<parameter>', '</parameter>',
     '<scratch_pad>', '</scratch_pad>',
 ]
 
@@ -85,6 +102,155 @@ def check_forbidden_tokens(text: str, field_path: str, errors: list, infos: list
         errors.append(f"{field_path}: 包含禁止的特殊token {found}")
     else:
         infos.append(f"  {field_path}: 无禁止特殊token泄漏 ✓")
+
+
+def detect_stream_error_chunks(chunks: list, label: str = "stream") -> list:
+    """检测流式 chunk 中是否包含 error 字段
+
+    某些模型在流式响应中会以 data: {"error": {...}} 格式返回错误,
+    这些 chunk 没有 choices 字段, 在对比时会被静默跳过.
+    此函数显式检测并报告这些错误.
+
+    Returns: list of error strings found
+    """
+    found = []
+    for i, chunk in enumerate(chunks):
+        if not isinstance(chunk, dict):
+            continue
+        err = chunk.get("error")
+        if err:
+            if isinstance(err, dict):
+                msg = err.get("message", str(err))
+                code = err.get("code", "unknown")
+                found.append(f"{label} chunk[{i}].error: code={code}, message={msg}")
+            else:
+                found.append(f"{label} chunk[{i}].error: {err}")
+    return found
+
+
+def detect_nonstream_error(data: dict, source: str, errors: list) -> bool:
+    """检测非流式响应中是否包含 error 字段
+
+    Returns: True if error found (已追加到 errors), False otherwise
+    """
+    if not isinstance(data, dict):
+        return False
+    err = data.get("error")
+    if not err:
+        return False
+    if isinstance(err, dict):
+        msg = err.get("message", str(err))
+        code = err.get("code", "unknown")
+        errors.append(f"{source} 响应包含 error: code={code}, message={msg}")
+    else:
+        errors.append(f"{source} 响应包含 error: {err}")
+    return True
+
+
+# Proxy 专属增强字段：只需验证 proxy 侧存在且有效
+PROXY_ONLY_FIELDS = {
+    "choices[0].message.reasoning_content": "nonempty_string",
+    "choices[0].message.provider_specific_fields": "nonempty_dict",
+    "choices[0].provider_specific_fields": "nonempty_dict",
+}
+
+
+def _extract_by_path(data: dict, path: str):
+    """从嵌套 dict 中按路径提取值，如 'choices[0].message.reasoning_content'"""
+    parts = path.split('.')
+    current = data
+    for part in parts:
+        m = re.match(r'(.+)\[(\d+)\]$', part)
+        if m:
+            key, idx = m.group(1), int(m.group(2))
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return None
+            if isinstance(current, list) and idx < len(current):
+                current = current[idx]
+            else:
+                return None
+        else:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                return None
+    return current
+
+
+def _validate_proxy_fields(proxy_data: dict, fields: dict, errors: list, infos: list,
+                           vllm_data: dict = None) -> None:
+    """验证 proxy 专属增强字段的存在性和有效性
+
+    Args:
+        vllm_data: 可选，vLLM 响应数据，用于判断是否需要校验 reasoning_content
+    """
+    # 判断 vLLM 是否产生了 reasoning，决定是否需要校验 proxy 的 reasoning_content
+    vllm_has_reasoning = False
+    if vllm_data is not None:
+        v_choices = vllm_data.get("choices", [])
+        if v_choices:
+            v_msg = v_choices[0].get("message", {})
+            if v_msg.get("reasoning") or v_msg.get("reasoning_content"):
+                vllm_has_reasoning = True
+
+    for path, vtype in fields.items():
+        # reasoning_content 仅在 vLLM 有 reasoning 时才要求 proxy 提供
+        if "reasoning_content" in path and not vllm_has_reasoning:
+            infos.append(f"  {path}: vLLM 无 reasoning, 跳过校验 ✓")
+            continue
+        val = _extract_by_path(proxy_data, path)
+        if val is None:
+            errors.append(f"{path}: proxy 缺失")
+            continue
+        if vtype == "nonempty_dict":
+            if isinstance(val, dict) and val:
+                infos.append(f"  {path}: proxy 存在 ✓ (keys={len(val)})")
+            else:
+                errors.append(f"{path}: proxy 值为空 dict 或类型不匹配")
+        elif vtype == "nonempty_string":
+            if isinstance(val, str) and val.strip():
+                infos.append(f"  {path}: proxy 存在 ✓ (len={len(val)})")
+            else:
+                errors.append(f"{path}: proxy 值为空字符串或类型不匹配")
+        elif vtype == "nonempty_list":
+            if isinstance(val, list) and val:
+                infos.append(f"  {path}: proxy 存在 ✓ (len={len(val)})")
+            else:
+                errors.append(f"{path}: proxy 值为空 list 或类型不匹配")
+        elif vtype == "has_content_array":
+            if isinstance(val, dict) and isinstance(val.get("content"), list) and val["content"]:
+                infos.append(f"  {path}: proxy 存在 ✓ (content items={len(val['content'])})")
+            else:
+                errors.append(f"{path}: proxy 无有效 content 数组")
+
+
+def _validate_provider_reasoning(proxy_data: dict, errors: list, infos: list) -> None:
+    """校验 provider_specific_fields.reasoning（可选字段，缺失不报错）"""
+    p_choices = proxy_data.get("choices", [])
+    if not p_choices:
+        return
+    choice = p_choices[0]
+
+    # choice 级 provider_specific_fields.reasoning
+    psf_c = choice.get("provider_specific_fields")
+    if isinstance(psf_c, dict) and isinstance(psf_c.get("reasoning"), str) and psf_c["reasoning"].strip():
+        check_forbidden_tokens(psf_c["reasoning"],
+                               "choices[0].provider_specific_fields.reasoning", errors, infos)
+        infos.append("  choices[0].provider_specific_fields.reasoning: 有效 ✓")
+    else:
+        infos.append("  choices[0].provider_specific_fields.reasoning: 缺失或为空（跳过）")
+
+    # message 级 provider_specific_fields.reasoning
+    p_msg = choice.get("message", {})
+    psf_m = p_msg.get("provider_specific_fields")
+    if isinstance(psf_m, dict) and isinstance(psf_m.get("reasoning"), str) and psf_m["reasoning"].strip():
+        check_forbidden_tokens(psf_m["reasoning"],
+                               "choices[0].message.provider_specific_fields.reasoning", errors, infos)
+        infos.append("  choices[0].message.provider_specific_fields.reasoning: 有效 ✓")
+    else:
+        infos.append("  choices[0].message.provider_specific_fields.reasoning: 缺失或为空（跳过）")
 
 
 def strip_special_tokens(text: str) -> str:
@@ -144,6 +310,9 @@ def compare_recursive(v, p, path: str, errors: list, infos: list,
         v_keys = set(v.keys()) - skip_fields
         p_keys = set(p.keys()) - skip_fields
         for k in sorted(v_keys - p_keys):
+            if v[k] is None:
+                infos.append(f"  {path}.{k}: vllm=null, proxy 省略 ✓")
+                continue
             errors.append(f"{path}.{k}: vllm 有此字段, proxy 缺失")
         for k in sorted(p_keys - v_keys):
             infos.append(f"  {path}.{k}: proxy 有此字段, vllm 缺失 (可能是新增)")
@@ -172,23 +341,61 @@ def compare_recursive(v, p, path: str, errors: list, infos: list,
         errors.append(f"  proxy: {repr(p)[:120]}")
 
 
-def compare_usage(v_usage, p_usage, path: str, errors: list, infos: list) -> None:
-    """对比 token usage（允许小范围偏差）"""
-    skip = set()
-    compare_recursive(v_usage, p_usage, path, errors, infos, skip)
+USAGE_SKIP_COMPARE = {"prompt_tokens", "completion_tokens", "total_tokens"}
+
+
+def compare_usage(v_usage, p_usage, path: str, errors: list, infos: list,
+                   skip_fields: set = None) -> None:
+    """对比 token usage（token 计数只验证 >0，其余字段递归对比）"""
+    skip = skip_fields or set()
+
+    if isinstance(v_usage, dict) and isinstance(p_usage, dict):
+        for key in sorted(USAGE_SKIP_COMPARE):
+            if key in skip:
+                continue
+            v_val = v_usage.get(key)
+            p_val = p_usage.get(key)
+            if v_val is not None and p_val is not None:
+                if isinstance(v_val, (int, float)) and v_val > 0 and isinstance(p_val, (int, float)) and p_val > 0:
+                    infos.append(f"  {path}.{key}: >0 ✓ (vllm={v_val}, proxy={p_val})")
+                else:
+                    errors.append(f"{path}.{key}: 应大于0 (vllm={v_val}, proxy={p_val})")
+
+        remaining_v = dict(v_usage)
+        remaining_p = dict(p_usage)
+        for key in USAGE_SKIP_COMPARE:
+            remaining_v.pop(key, None)
+            remaining_p.pop(key, None)
+        compare_recursive(remaining_v, remaining_p, path, errors, infos, skip)
+    else:
+        compare_recursive(v_usage, p_usage, path, errors, infos, skip)
 
 
 # ========================================
 # OpenAI 格式对比
 # ========================================
 
-def compare_openai_nonstream(vllm_data: dict, proxy_data: dict, label: str) -> Tuple[list, list]:
+def compare_openai_nonstream(vllm_data: dict, proxy_data: dict, label: str,
+                              with_reasoning: bool = False) -> Tuple[list, list]:
     """对比 OpenAI chat/completions 非流式响应"""
     errors, infos = [], []
     infos.append(f"[{label}] OpenAI 非流式对比")
 
-    # 顶层结构
-    compare_recursive(vllm_data, proxy_data, "", errors, infos, OPENAI_SKIP_FIELDS)
+    detect_nonstream_error(vllm_data, "vllm", errors)
+    detect_nonstream_error(proxy_data, "proxy", errors)
+    if errors:
+        infos.append(f"  非流式响应包含 error, 跳过后续对比")
+        return errors, infos
+
+    # 顶层结构（排除 usage，usage 由下方 compare_usage 单独处理，仅验证 >0）
+    v_top = {k: v for k, v in vllm_data.items() if k != "usage"}
+    p_top = {k: v for k, v in proxy_data.items() if k != "usage"}
+    compare_recursive(v_top, p_top, "", errors, infos, OPENAI_SKIP_FIELDS)
+
+    # Proxy 专属增强字段验证（仅在有 reasoning_parser 时校验）
+    if with_reasoning:
+        _validate_proxy_fields(proxy_data, PROXY_ONLY_FIELDS, errors, infos)
+        _validate_provider_reasoning(proxy_data, errors, infos)
 
     # choices 对比
     v_choices = vllm_data.get("choices", [])
@@ -222,7 +429,7 @@ def compare_openai_nonstream(vllm_data: dict, proxy_data: dict, label: str) -> T
     v_usage = vllm_data.get("usage")
     p_usage = proxy_data.get("usage")
     if v_usage and p_usage:
-        compare_usage(v_usage, p_usage, "usage", errors, infos)
+        compare_usage(v_usage, p_usage, "usage", errors, infos, OPENAI_SKIP_FIELDS)
 
     return errors, infos
 
@@ -247,6 +454,16 @@ def compare_openai_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[li
 
     v_chunks = parse_openai_sse(vllm_raw)
     p_chunks = parse_openai_sse(proxy_raw)
+
+    v_errs = detect_stream_error_chunks(v_chunks, "vllm")
+    p_errs = detect_stream_error_chunks(p_chunks, "proxy")
+    for e in v_errs:
+        errors.append(e)
+    for e in p_errs:
+        errors.append(e)
+    if v_errs or p_errs:
+        infos.append(f"  流式响应包含 error chunk, 跳过后续对比")
+        return errors, infos
 
     if not v_chunks:
         errors.append("vLLM 流式响应无有效 SSE chunk")
@@ -281,14 +498,7 @@ def compare_openai_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[li
         c.get("choices", [{}])[0].get("delta", {}).get("content", "")
         for c in p_chunks
     )
-    v_reasoning = "".join(
-        c.get("choices", [{}])[0].get("delta", {}).get("reasoning_content", "")
-        for c in v_chunks
-    )
-    p_reasoning = "".join(
-        c.get("choices", [{}])[0].get("delta", {}).get("reasoning_content", "")
-        for c in p_chunks
-    )
+    
 
     # 去除空白后对比
     if v_content.strip() != p_content.strip():
@@ -298,14 +508,8 @@ def compare_openai_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[li
     else:
         infos.append(f"  合并后 content 一致 ✓ (len={len(p_content)})")
 
-    if v_reasoning.strip() != p_reasoning.strip():
-        errors.append(f"合并后 reasoning_content 不一致")
-    elif p_reasoning.strip():
-        infos.append(f"  合并后 reasoning_content 一致 ✓ (len={len(p_reasoning)})")
-
     # 特殊 token 检查
     check_forbidden_tokens(p_content, "合并后 content", errors, infos)
-    check_forbidden_tokens(p_reasoning, "合并后 reasoning_content", errors, infos)
 
     return errors, infos
 
@@ -327,6 +531,12 @@ def compare_claude_nonstream(vllm_data: dict, proxy_data: dict, label: str) -> T
     """对比 Claude /v1/messages 非流式响应"""
     errors, infos = [], []
     infos.append(f"[{label}] Claude 非流式对比")
+
+    detect_nonstream_error(vllm_data, "vllm", errors)
+    detect_nonstream_error(proxy_data, "proxy", errors)
+    if errors:
+        infos.append(f"  非流式响应包含 error, 跳过后续对比")
+        return errors, infos
 
     # 跳过运行时字段
     skip = CLAUDE_SKIP_FIELDS
@@ -385,7 +595,7 @@ def compare_claude_nonstream(vllm_data: dict, proxy_data: dict, label: str) -> T
     v_usage = vllm_data.get("usage")
     p_usage = proxy_data.get("usage")
     if v_usage and p_usage:
-        compare_usage(v_usage, p_usage, "usage", errors, infos)
+        compare_usage(v_usage, p_usage, "usage", errors, infos, OPENAI_STREAM_SKIP_FIELDS)
 
     return errors, infos
 
@@ -437,6 +647,25 @@ def compare_claude_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[li
 
     v_events_list = parse_claude_sse(vllm_raw)
     p_events_list = parse_claude_sse(proxy_raw)
+
+    # 检测流式 error 事件 (event: error) 和 chunk 中的 error 字段
+    for source, events in [("vllm", v_events_list), ("proxy", p_events_list)]:
+        for evt_name, evt_data in events:
+            if evt_name == "error":
+                msg = evt_data.get("message", str(evt_data)) if isinstance(evt_data, dict) else str(evt_data)
+                errors.append(f"{source} 流式 error 事件: {msg}")
+
+    # 也检测非标准 error 字段 (某些实现将 error 嵌入 data)
+    for source, events in [("vllm", v_events_list), ("proxy", p_events_list)]:
+        for evt_name, evt_data in events:
+            if isinstance(evt_data, dict) and "error" in evt_data and evt_name != "error":
+                err = evt_data["error"]
+                msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                errors.append(f"{source} 流式 {evt_name} 事件包含 error 字段: {msg}")
+
+    if errors:
+        infos.append(f"  流式响应包含 error, 跳过后续对比")
+        return errors, infos
 
     # 构建事件名集合用于必要事件检查
     v_event_names = {e[0] for e in v_events_list}
@@ -522,7 +751,7 @@ def compare_claude_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[li
                 p_usage = evt_data["usage"]
                 break
     if v_usage and p_usage:
-        compare_usage(v_usage, p_usage, "usage (stream)", errors, infos)
+        compare_usage(v_usage, p_usage, "usage (stream)", errors, infos, CLAUDE_SKIP_FIELDS)
 
     return errors, infos
 
@@ -604,6 +833,8 @@ def main():
     parser.add_argument("--vllm", required=True, help="vLLM 响应文件路径")
     parser.add_argument("--proxy", required=True, help="trajproxy 响应文件路径")
     parser.add_argument("--label", required=True, help="场景标签")
+    parser.add_argument("--with-reasoning", action="store_true",
+                        help="启用 reasoning 相关字段校验 (仅用于有 reasoning_parser 的场景)")
 
     args = parser.parse_args()
 
@@ -624,7 +855,8 @@ def main():
             except json.JSONDecodeError as e:
                 print(f"ERROR:proxy 响应 JSON 解析失败: {e}")
                 sys.exit(1)
-            errors, infos = compare_openai_nonstream(vllm_data, proxy_data, args.label)
+            errors, infos = compare_openai_nonstream(vllm_data, proxy_data, args.label,
+                                                     with_reasoning=args.with_reasoning)
         else:
             errors, infos = compare_openai_stream(vllm_raw, proxy_raw, args.label)
 

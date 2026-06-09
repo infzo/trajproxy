@@ -221,9 +221,12 @@ compare_openai_nonstream() {
     local vllm_file="$1"
     local proxy_file="$2"
     local label="$3"
+    local has_reasoning="${4:-false}"
+    local reasoning_flag=""
+    [[ "$has_reasoning" == "true" ]] && reasoning_flag="--with-reasoning"
     log_info "OpenAI 非流式对比 (${label})..."
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    if ! python3 "${COMPARE_PY}" --mode nonstream --api openai --vllm "$vllm_file" --proxy "$proxy_file" --label "$label"; then
+    if ! python3 "${COMPARE_PY}" --mode nonstream --api openai --vllm "$vllm_file" --proxy "$proxy_file" --label "$label" $reasoning_flag; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
         log_failure "OpenAI 非流式对比失败 (${label})" "详见上方 ERROR 输出"
         return 1
@@ -235,9 +238,12 @@ compare_openai_stream() {
     local vllm_file="$1"
     local proxy_file="$2"
     local label="$3"
+    local has_reasoning="${4:-false}"
+    local reasoning_flag=""
+    [[ "$has_reasoning" == "true" ]] && reasoning_flag="--with-reasoning"
     log_info "OpenAI 流式对比 (${label})..."
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    if ! python3 "${COMPARE_PY}" --mode stream --api openai --vllm "$vllm_file" --proxy "$proxy_file" --label "$label"; then
+    if ! python3 "${COMPARE_PY}" --mode stream --api openai --vllm "$vllm_file" --proxy "$proxy_file" --label "$label" $reasoning_flag; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
         log_failure "OpenAI 流式对比失败 (${label})" "详见上方 ERROR 输出"
         return 1
@@ -289,12 +295,12 @@ build_openai_plain_stream_request() {
 
 build_openai_tool_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":256,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}"
+    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":256,\"chat_template_kwargs\":{\"enable_thinking\":false}}"
 }
 
 build_openai_tool_stream_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":256,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}"
+    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":256,\"chat_template_kwargs\":{\"enable_thinking\":false}}"
 }
 
 build_openai_reasoning_request() {

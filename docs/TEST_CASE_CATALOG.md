@@ -254,7 +254,7 @@
 
 | 新编号 | 名称 | 说明 | 原编号(迁移前) | 来源 | 矩阵标签 |
 |--------|------|------|----------------|------|----------|
-| **C101** | Direct 纯文本一致性 | Direct 基线：透传模式一致性 | 原C300 | 保留 | `Direct×(ns+s)×无×单轮×OpenAI` |
+| **C101** | Direct T+R Parser 一致性 | Direct 模式下 Reasoning+Tool Parser 全字段对比 | 原C300 | 保留→升级 | `Direct×(ns+s)×T+R×单轮×OpenAI` |
 | **C102** | TITO 纯文本一致性 | TITO 基线：Token 编解码正确性 | 原C301 | 保留 | `TITO×(ns+s)×无×单轮×OpenAI` |
 | **C103** | TITO Tool 一致性 | tool_calls 结构 + arguments 禁止 token | 原C302 | 保留 | `TITO×(ns+s)×Tool×单轮×OpenAI`（默认 auto） |
 | **C104** | TITO Reasoning 一致性 | reasoning 字段一致性 + content 剥离 `</think>` | 原C303 | 保留 | `TITO×(ns+s)×Reasoning×单轮×OpenAI`（默认 preserve=true） |
@@ -272,7 +272,7 @@
 
 | 新编号 | 名称 | 说明 | 原编号(迁移前) | 来源 | 矩阵标签 |
 |--------|------|------|----------------|------|----------|
-| **C201** | Claude Direct 一致性 | 合并原 F101(ns)+F109(s)，升级为 compare.py 对比 | 原F101/F109 | 迁移+升级 | `Direct×(ns+s)×无×单轮×Claude` |
+| **C201** | Claude Direct T+R Parser 一致性 | Direct 模式下 Reasoning+Tool Parser 全字段对比（对等 C101） | 原F101/F109 | 迁移+升级→升级 | `Direct×(ns+s)×T+R×单轮×Claude` |
 | **C202** | Claude TITO 纯文本一致性 | 对等 C102 | — | 新增 | `TITO×(ns+s)×无×单轮×Claude` |
 | **C203** | Claude TITO Tool 一致性 | 对等 C103 | — | 新增 | `TITO×(ns+s)×Tool×单轮×Claude` |
 | **C204** | Claude TITO Reasoning 一致性 | 对等 C104 | — | 新增 | `TITO×(ns+s)×Reasoning×单轮×Claude` |
@@ -422,7 +422,7 @@ C101-C107、C201-C207、A100-A103 编号与内容均不变，无需迁移。
 
 | 核心维度 | C1 (OpenAI) | C2 (Claude) | 对等? |
 |------|------------|------------|-------|
-| Direct 纯文本（ns+s） | C101 ✅ | C201 ✅ | ✅ |
+| Direct T+R（ns+s） | C101 ✅ | C201 ✅ | ✅ |
 | TITO 纯文本（ns+s） | C102 ✅ | C202 ✅ | ✅ |
 | TITO Tool（ns+s） | C103 ✅ | C203 ✅ | ✅ |
 | TITO Reasoning（ns+s） | C104 ✅ | C204 ✅ | ✅ |
