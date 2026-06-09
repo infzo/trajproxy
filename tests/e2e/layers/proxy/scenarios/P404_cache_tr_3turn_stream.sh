@@ -82,7 +82,7 @@ print(json.dumps(result, ensure_ascii=False))
 log_step "第1轮流式T+R请求 (${CITIES[0]})"
 R1_STREAM=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in ${CITIES[0]}? Think first then call tool.\"}],\"tools\":${TOOLS},\"max_tokens\":256,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in ${CITIES[0]}? Think first then call tool.\"}],\"tools\":${TOOLS},\"max_tokens\":512,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 assert_contains "$R1_STREAM" "data:" "第1轮流式包含data:"
 R1_TMP=$(mktemp)
 echo "$R1_STREAM" > "$R1_TMP"
@@ -124,7 +124,7 @@ print(json.dumps(messages, ensure_ascii=False))
 log_step "第2轮流式T+R请求 (${CITIES[1]})"
 R2_STREAM=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":512,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 assert_contains "$R2_STREAM" "data:" "第2轮流式包含data:"
 R2_TMP=$(mktemp)
 echo "$R2_STREAM" > "$R2_TMP"
@@ -178,7 +178,7 @@ print(json.dumps(messages, ensure_ascii=False))
 log_step "第3轮流式T+R请求 (${CITIES[2]})"
 R3_STREAM=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":256,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"tools\":${TOOLS},\"max_tokens\":512,\"stream\":true,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 assert_contains "$R3_STREAM" "data:" "第3轮流式包含data:"
 
 # 验证缓存递增（校验1+校验2）

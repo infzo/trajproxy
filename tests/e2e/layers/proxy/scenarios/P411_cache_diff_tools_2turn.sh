@@ -29,7 +29,7 @@ log_step "第1轮 非流式 Tool 请求（tools1: get_weather）"
 R1_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in Beijing?\"}],\"tools\":${TOOLS1},\"max_tokens\":128}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in Beijing?\"}],\"tools\":${TOOLS1},\"max_tokens\":512}")
 R1_STATUS=$(echo "$R1_RESP" | sed -n '$p')
 assert_http_status "200" "$R1_STATUS" "第1轮 tools1 200"
 R1_BODY=$(echo "$R1_RESP" | sed '$d')
@@ -72,7 +72,7 @@ print(json.dumps(messages, ensure_ascii=False))
 R2_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS2},\"max_tokens\":128}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"tools\":${TOOLS2},\"max_tokens\":512}")
 R2_STATUS=$(echo "$R2_RESP" | sed -n '$p')
 assert_http_status "200" "$R2_STATUS" "第2轮 tools2 200"
 R2_BODY=$(echo "$R2_RESP" | sed '$d')

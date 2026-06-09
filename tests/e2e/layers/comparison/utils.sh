@@ -295,12 +295,12 @@ build_openai_plain_stream_request() {
 
 build_openai_tool_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":256,\"chat_template_kwargs\":{\"enable_thinking\":false}}"
+    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":512,\"chat_template_kwargs\":{\"enable_thinking\":false}}"
 }
 
 build_openai_tool_stream_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":256,\"chat_template_kwargs\":{\"enable_thinking\":false}}"
+    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":512,\"chat_template_kwargs\":{\"enable_thinking\":false}}"
 }
 
 build_openai_reasoning_request() {
@@ -315,12 +315,12 @@ build_openai_reasoning_stream_request() {
 
 build_openai_reasoning_tool_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":512,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}"
+    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":1024,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}"
 }
 
 build_openai_reasoning_tool_stream_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":512,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}"
+    echo "{\"model\":\"${model}\",\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_tokens\":1024,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}"
 }
 
 # ========================================
@@ -339,12 +339,12 @@ build_claude_plain_stream_request() {
 
 build_claude_tool_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"max_tokens\":256,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
+    echo "{\"model\":\"${model}\",\"max_tokens\":512,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
 }
 
 build_claude_tool_stream_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"max_tokens\":256,\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
+    echo "{\"model\":\"${model}\",\"max_tokens\":512,\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Beijing?\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
 }
 
 build_claude_reasoning_request() {
@@ -359,10 +359,10 @@ build_claude_reasoning_stream_request() {
 
 build_claude_reasoning_tool_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"max_tokens\":512,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
+    echo "{\"model\":\"${model}\",\"max_tokens\":1024,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
 }
 
 build_claude_reasoning_tool_stream_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"max_tokens\":512,\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
+    echo "{\"model\":\"${model}\",\"max_tokens\":1024,\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
 }
