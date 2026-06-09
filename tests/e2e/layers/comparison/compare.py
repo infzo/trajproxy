@@ -297,6 +297,12 @@ def compare_recursive(v, p, path: str, errors: list, infos: list,
     """递归对比两个值的每个字段"""
     skip_fields = skip_fields or set()
 
+    # content 字段宽松比较：None 和 "" 在 tool_calls 场景下语义等价
+    # OpenAI spec 中 tool_calls 时 content 可 null 或 ""，均表示"无文本内容"
+    if path.endswith(".content") and v in (None, "") and p in (None, ""):
+        infos.append(f"  {path}: 值等价 (空内容, vllm={repr(v)}, proxy={repr(p)}) ✓")
+        return
+
     if v is None and p is None:
         return
     if v is None:

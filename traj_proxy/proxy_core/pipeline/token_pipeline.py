@@ -119,6 +119,11 @@ class TokenPipeline(BasePipeline):
             # 更新统计信息（必须在 _build_response 之前，因为 builder 需要 usage 信息）
             self._update_stats(context)
 
+            # 更新 parser 状态（确保 thinking_enabled 反映当前请求的 enable_thinking 参数）
+            # 对齐 vllm DelegatingParser：reasoning parser 的 thinking_enabled
+            # 应根据请求的 chat_template_kwargs 动态设置，而非硬编码为 True
+            self.parser.update_for_request(context.raw_request)
+
             # 阶段 5: 构建响应
             context = self._build_response(context)
 
@@ -178,6 +183,9 @@ class TokenPipeline(BasePipeline):
             context = await self._encode_text(context)
             context.encode_duration_ms = (time.perf_counter() - t0) * 1000
             prompt_input = context.token_ids
+
+            # 更新 parser 状态（确保 thinking_enabled 反映当前请求参数）
+            self.parser.update_for_request(context.raw_request)
 
             # 流式状态
             first_chunk_received = False

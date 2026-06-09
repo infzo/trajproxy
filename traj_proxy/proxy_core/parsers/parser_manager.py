@@ -120,6 +120,75 @@ class Parser:
             tool_choice=request.get("tool_choice", "auto"),
         )
 
+    # ==================== 按请求更新 parser 状态 ====================
+
+    def update_for_request(self, request: Union[Dict[str, Any], ChatCompletionRequest]):
+        """根据请求参数更新 parser 内部状态
+
+        对齐 vllm DelegatingParser 的行为：reasoning parser 的
+        thinking_enabled 应反映请求的 enable_thinking 参数，
+        而不是在 Processor 创建时硬编码为 True。
+
+        Qwen3ReasoningParser 在 __init__ 中通过
+        chat_template_kwargs.get("enable_thinking", True) 设置
+        thinking_enabled，但 Parser 实例在 Processor 初始化时
+        一次性创建，创建时无 chat_template_kwargs，
+        导致 thinking_enabled 恸为 True。此方法在每次请求
+        处理前调用，修正该状态。
+
+        Args:
+            request: dict 格式的请求或 ChatCompletionRequest 对象
+        """
+        # 从请求中提取 chat_template_kwargs
+        chat_kwargs = {}
+        if isinstance(request, dict):
+            chat_kwargs = request.get("chat_template_kwargs", {}) or {}
+        elif hasattr(request, 'chat_template_kwargs') and request.chat_template_kwargs:
+            chat_kwargs = request.chat_template_kwargs
+
+        # 更新 reasoning parser 的 thinking_enabled
+        if (self._reasoning_parser is not None
+                and hasattr(self._reasoning_parser, 'thinking_enabled')):
+            self._reasoning_parser.thinking_enabled = chat_kwargs.get(
+                "enable_thinking", True
+            )
+
+        # 更新 tool parser 的 tools 列表（按请求的 tools 参数）
+        if self._tool_parser is not None and hasattr(self._tool_parser, 'tools'):
+            raw_tools = None
+            if isinstance(request, dict):
+                raw_tools = request.get("tools")
+            elif hasattr(request, 'tools') and request.tools:
+                raw_tools = request.tools
+            if raw_tools:
+                from vllm.tool_parsers.abstract_tool_parser import Tool
+                tools = []
+                for tool in raw_tools:
+                    func_dict = (tool.get("function", {})
+                                 if isinstance(tool, dict) else None)
+                    if func_dict is None and hasattr(tool, 'function'):
+                        func_dict = {
+                            "name": tool.function.name,
+                            "description": tool.function.description,
+                            "parameters": tool.function.parameters,
+                        }
+                    if func_dict:
+                        from vllm.entrypoints.openai.chat_completion.protocol import (
+                            ChatCompletionToolsParam,
+                            FunctionDefinition,
+                        )
+                        tools.append(ChatCompletionToolsParam(
+                            type=tool.get("type", "function")
+                            if isinstance(tool, dict) else "function",
+                            function=FunctionDefinition(
+                                name=func_dict.get("name", ""),
+                                description=func_dict.get("description"),
+                                parameters=func_dict.get("parameters"),
+                            )
+                        ))
+                if tools:
+                    self._tool_parser.tools = tools
+
     # ==================== 流式状态管理 ====================
 
     def reset_streaming_state(self):
@@ -358,7 +427,7 @@ class Parser:
             and req.tool_choice
             and hasattr(req.tool_choice, 'function')
         ):
-            from vllm.parser.utils import extract_named_tool_call_streaming
+            from vllm.tool_parsers.streaming import extract_named_tool_call_streaming
             delta_message, function_name_returned = extract_named_tool_call_streaming(
                 delta_text=delta_text,
                 function_name=self._get_function_name(req),
@@ -371,7 +440,7 @@ class Parser:
 
         # Required tool choice
         if supports_required_and_named and req.tool_choice == "required":
-            from vllm.parser.utils import extract_required_tool_call_streaming
+            from vllm.tool_parsers.streaming import extract_required_tool_call_streaming
             delta_message, function_name_returned = (
                 extract_required_tool_call_streaming(
                     previous_text=previous_text,

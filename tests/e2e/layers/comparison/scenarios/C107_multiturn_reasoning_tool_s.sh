@@ -1,7 +1,7 @@
 #!/bin/bash
 # C107: 多轮 T+R 流式一致性 - OpenAI 格式
-# Pipeline: TITO | Parser: T+R | 轮次: 3轮 | 格式: OpenAI (s)
-# 每轮流式重建后对比，同时验证流式缓存
+# Pipeline: TITO | Parser: T+R | 格式: OpenAI (s)
+# 每轮流式重建后对比，C 系列不验证 cache_hit
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
@@ -49,9 +49,6 @@ VLLM_R4=$(send_openai_stream "$VLLM_URL" "$R4_REQ")
 PROXY_R4=$(send_openai_stream "$NGINX_URL" "$R4_REQ" "$SESS_PATH")
 compare_openai_stream "$VLLM_R4" "$PROXY_R4" "C107-round4-named-stream" "true"
 rm -f "$VLLM_R4" "$PROXY_R4"
-
-# 验证流式缓存递增（4轮含子场景）
-verify_cache_incremental "$SESS_ID" 4 "incremental"
 
 delete_model "$COMPARISON_MODEL_NAME" "$RUN_ID"
 print_summary

@@ -365,7 +365,8 @@ class DirectPipeline(BasePipeline):
         # 构建最终响应
         message = {
             "role": context.stream_role or "assistant",
-            "content": context.response_text or None,
+            # 有 tool_calls 时 content 至少保留 ""，确保 LiteLLM 生成 Claude text block
+            "content": context.response_text or ("" if (context.stream_tool_calls or context.stream_function_call) else None),
             "annotations": None,
             "audio": None,
             "function_call": context.stream_function_call,
@@ -476,6 +477,10 @@ class DirectPipeline(BasePipeline):
             msg.setdefault("refusal", None)
             msg.setdefault("reasoning", None)
             msg.setdefault("reasoning_content", None)
+            # 有 tool_calls 时，确保 content 不为 None（至少 ""）
+            # 确保 LiteLLM 转换 Claude 格式时生成 text block
+            if msg.get("tool_calls") and msg.get("content") is None:
+                msg["content"] = ""
         for key in ("kv_transfer_params", "prompt_logprobs",
                     "prompt_token_ids", "service_tier", "system_fingerprint"):
             response.setdefault(key, None)
