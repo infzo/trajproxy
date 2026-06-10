@@ -237,6 +237,24 @@ class TokenPipeline(BasePipeline):
             # 流式结束后完成处理
             await self._finalize_stream(context)
 
+            # 追加 yield 一个独立的 usage chunk（对齐 vLLM stream_options.include_usage 行为）
+            # 确保下游（如 litellm）能获取到正确的 completion_tokens，
+            # 尤其是纯推理输出（无 content delta）场景下下游无法从 text 估算的情况。
+            if context.completion_tokens:
+                usage_chunk = {
+                    "id": f"chatcmpl-{context.request_id}",
+                    "object": "chat.completion.chunk",
+                    "created": int(context.start_time.timestamp()) if context.start_time else int(time.time()),
+                    "model": self.model,
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": context.prompt_tokens or 0,
+                        "completion_tokens": context.completion_tokens,
+                        "total_tokens": context.total_tokens or 0,
+                    },
+                }
+                yield usage_chunk
+
         except Exception as e:
             self._handle_error(context, e)
             raise
