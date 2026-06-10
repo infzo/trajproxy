@@ -203,8 +203,12 @@ class DirectPipeline(BasePipeline):
                     context.ttft_ms = (time.perf_counter() - infer_start_time) * 1000
                     first_chunk_received = True
 
-                # 累积流式响应中的所有字段
+                # 累积流式响应中的所有字段（供 DB 存储）
                 self._accumulate_stream_fields(context, chunk)
+
+                # 移除 proxy 强制注入但不应暴露给客户端的字段
+                self._strip_injected_fields(chunk)
+
                 context.stream_chunk_count += 1
                 yield chunk
 
@@ -321,6 +325,22 @@ class DirectPipeline(BasePipeline):
         if finish_reason:
             context.stream_finished = True
             context.stream_finish_reason = finish_reason
+
+    @staticmethod
+    def _strip_injected_fields(chunk: Dict[str, Any]) -> None:
+        """移除 proxy 强制注入但不应暴露给客户端的字段
+
+        proxy 会向推理服务强制注入 logprobs=1 和 return_token_ids=True 以获取
+        轨迹存储所需的数据，但原始 chunk 在转发给客户端前必须剥离这些内部字段，
+        避免客户端看到非预期的扩展数据。
+
+        Args:
+            chunk: 推理服务返回的原始 chunk（原地修改）
+        """
+        # 移除每个 choice 中的 logprobs 和 token_ids
+        for choice in chunk.get("choices", []):
+            choice.pop("logprobs", None)
+            choice.pop("token_ids", None)
 
     async def _finalize_stream(self, context: ProcessContext):
         """完成流式处理
