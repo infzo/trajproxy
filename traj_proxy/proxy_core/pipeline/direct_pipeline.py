@@ -464,12 +464,14 @@ class DirectPipeline(BasePipeline):
 
     @staticmethod
     def _ensure_response_defaults(response: Dict[str, Any]) -> None:
-        """确保响应中所有可选字段有默认值（原地修改）"""
+        """确保响应中所有可选字段有默认值（原地修改）
+
+        注意：不包含 logprobs 和 token_ids —— 这两个是 proxy 内部字段，
+        在 process_request 中已于 _store_trajectory 之后剥离，不应再补回。
+        """
         if not response or "choices" not in response:
             return
         for choice in response.get("choices", []):
-            choice.setdefault("logprobs", None)
-            choice.setdefault("token_ids", None)
             msg = choice.get("message", {}) or {}
             msg.setdefault("annotations", None)
             msg.setdefault("audio", None)
