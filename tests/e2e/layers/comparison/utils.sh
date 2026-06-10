@@ -222,13 +222,16 @@ compare_openai_nonstream() {
     local proxy_file="$2"
     local label="$3"
     local has_reasoning="${4:-false}"
+    local skip_paths="${5:-}"
     local reasoning_flag=""
+    local skip_paths_flag=""
     [[ "$has_reasoning" == "true" ]] && reasoning_flag="--with-reasoning"
+    [[ -n "$skip_paths" ]] && skip_paths_flag="--skip-paths $skip_paths"
     log_info "OpenAI 非流式对比 (${label})..."
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     local compare_output rc=0
     compare_output=$(python3 "${COMPARE_PY}" --mode nonstream --api openai \
-        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label" $reasoning_flag) || rc=$?
+        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label" $reasoning_flag $skip_paths_flag) || rc=$?
     echo "$compare_output"
     if [ $rc -ne 0 ]; then
         TESTS_FAILED=$((TESTS_FAILED + 1))

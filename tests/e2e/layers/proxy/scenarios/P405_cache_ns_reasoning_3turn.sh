@@ -26,7 +26,7 @@ log_step "第1轮 非流式 Reasoning"
 R1_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Think step by step: what is 5+3?\"}],\"max_tokens\":512,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Think step by step: what is 5+3?\"}],\"max_tokens\":2048,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R1_BODY=$(echo "$R1_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R1_RESP" | sed -n '$p')" "第1轮 200"
 
@@ -80,7 +80,7 @@ print(json.dumps(messages, ensure_ascii=False))
 R2_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"max_tokens\":512,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R2_MESSAGES},\"max_tokens\":2048,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R2_BODY=$(echo "$R2_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R2_RESP" | sed -n '$p')" "第2轮 200"
 
@@ -133,7 +133,7 @@ print(json.dumps(messages, ensure_ascii=False))
 R3_RESP=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"max_tokens\":512,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":${R3_MESSAGES},\"max_tokens\":2048,\"chat_template_kwargs\":{\"preserve_thinking\":true,\"enable_thinking\":true}}")
 R3_BODY=$(echo "$R3_RESP" | sed '$d')
 assert_http_status "200" "$(echo "$R3_RESP" | sed -n '$p')" "第3轮 200"
 sleep 1

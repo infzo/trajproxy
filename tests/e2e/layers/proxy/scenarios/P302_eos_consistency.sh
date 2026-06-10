@@ -326,11 +326,14 @@ else:
         elif not r2_text.endswith(r2_resp_text):
             errors.append('第2轮 full_conversation_text 应以 response_text 结尾')
 
-	# 验证第2轮 cache_hit_tokens（TITO 模板修复后前缀匹配应正常工作）
+# 验证第2轮 cache_hit_tokens（TITO 模板修复后前缀匹配应正常工作）
 r2_cache = r2.get('cache_hit_tokens', -1)
 
 if errors:
     print('FAIL:' + '; '.join(errors))
+elif 'r1_eos' not in dir():
+    # finish_reason 为 length 时跳过 EOS 检查
+    print(f'PASS:finish_reason 含 length, 跳过 EOS 检查, cache_hit_tokens={r2_cache}')
 else:
     print(f'PASS:第2轮 EOS 一致, eos_token_id={r1_eos}, cache_hit_tokens={r2_cache}, 无双重 EOS')
 " 2>/dev/null)

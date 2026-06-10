@@ -293,9 +293,20 @@ def apply_placeholders(data: dict, direction: str = "to_real") -> dict:
 # ========================================
 
 def compare_recursive(v, p, path: str, errors: list, infos: list,
-                      skip_fields: set = None, depth: int = 0) -> None:
-    """递归对比两个值的每个字段"""
+                      skip_fields: set = None, depth: int = 0,
+                      extra_skip_paths: set = None) -> None:
+    """递归对比两个值的每个字段
+
+    Args:
+        extra_skip_paths: 路径子串集合，若当前 path 包含其中任一子串则跳过对比
+    """
     skip_fields = skip_fields or set()
+    extra_skip_paths = extra_skip_paths or set()
+
+    # 路径级跳过：若当前路径包含 extra_skip_paths 中的任一子串，不做对比
+    if extra_skip_paths and any(sp in path for sp in extra_skip_paths):
+        infos.append(f"  {path}: 已配置跳过对比 ✓")
+        return
 
     # content 字段宽松比较：None 和 "" 在 tool_calls 场景下语义等价
     # OpenAI spec 中 tool_calls 时 content 可 null 或 ""，均表示"无文本内容"
@@ -323,14 +334,16 @@ def compare_recursive(v, p, path: str, errors: list, infos: list,
         for k in sorted(p_keys - v_keys):
             infos.append(f"  {path}.{k}: proxy 有此字段, vllm 缺失 (可能是新增)")
         for k in sorted(v_keys & p_keys):
-            compare_recursive(v[k], p[k], f"{path}.{k}", errors, infos, skip_fields, depth + 1)
+            compare_recursive(v[k], p[k], f"{path}.{k}", errors, infos, skip_fields, depth + 1,
+                              extra_skip_paths)
 
     elif isinstance(v, list) and isinstance(p, list):
         if len(v) != len(p):
             errors.append(f"{path}: 数组长度不一致 (vllm={len(v)}, proxy={len(p)})")
             # 仍然尝试对比前 min(len) 个元素
         for i in range(min(len(v), len(p))):
-            compare_recursive(v[i], p[i], f"{path}[{i}]", errors, infos, skip_fields, depth + 1)
+            compare_recursive(v[i], p[i], f"{path}[{i}]", errors, infos, skip_fields, depth + 1,
+                              extra_skip_paths)
 
     elif isinstance(v, float) and isinstance(p, float):
         if abs(v - p) > 1e-6:
@@ -400,8 +413,13 @@ def compare_usage(v_usage, p_usage, path: str, errors: list, infos: list,
 # ========================================
 
 def compare_openai_nonstream(vllm_data: dict, proxy_data: dict, label: str,
-                              with_reasoning: bool = False) -> Tuple[list, list]:
-    """对比 OpenAI chat/completions 非流式响应"""
+                              with_reasoning: bool = False,
+                              extra_skip_paths: set = None) -> Tuple[list, list]:
+    """对比 OpenAI chat/completions 非流式响应
+
+    Args:
+        extra_skip_paths: 路径子串集合，匹配的路径跳过值对比（如 {"finish_reason", "arguments"}）
+    """
     errors, infos = [], []
     infos.append(f"[{label}] OpenAI 非流式对比")
 
@@ -414,7 +432,8 @@ def compare_openai_nonstream(vllm_data: dict, proxy_data: dict, label: str,
     # 顶层结构（排除 usage，usage 由下方 compare_usage 单独处理，仅验证 >0）
     v_top = {k: v for k, v in vllm_data.items() if k != "usage"}
     p_top = {k: v for k, v in proxy_data.items() if k != "usage"}
-    compare_recursive(v_top, p_top, "", errors, infos, OPENAI_SKIP_FIELDS)
+    compare_recursive(v_top, p_top, "", errors, infos, OPENAI_SKIP_FIELDS,
+                      extra_skip_paths=extra_skip_paths)
 
     # Proxy 专属增强字段验证（仅在有 reasoning_parser 时校验）
     if with_reasoning:
@@ -877,6 +896,8 @@ def main():
     parser.add_argument("--label", required=True, help="场景标签")
     parser.add_argument("--with-reasoning", action="store_true",
                         help="启用 reasoning 相关字段校验 (仅用于有 reasoning_parser 的场景)")
+    parser.add_argument("--skip-paths", default="",
+                        help="逗号分隔的路径子串列表，匹配的字段跳过值对比 (如 finish_reason,arguments)")
 
     args = parser.parse_args()
 
@@ -897,8 +918,10 @@ def main():
             except json.JSONDecodeError as e:
                 print(f"FAIL:proxy 响应 JSON 解析失败: {e}")
                 sys.exit(1)
+            extra_skip = {s.strip() for s in args.skip_paths.split(",") if s.strip()} if args.skip_paths else None
             errors, infos = compare_openai_nonstream(vllm_data, proxy_data, args.label,
-                                                     with_reasoning=args.with_reasoning)
+                                                     with_reasoning=args.with_reasoning,
+                                                     extra_skip_paths=extra_skip)
         else:
             errors, infos = compare_openai_stream(vllm_raw, proxy_raw, args.label)
 

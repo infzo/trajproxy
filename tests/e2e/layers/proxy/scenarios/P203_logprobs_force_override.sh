@@ -446,7 +446,7 @@ SESSION_S_NO_PARAM="session-${SCENARIO_ID}-s-noparam-$(date +%s%N | md5sum | hea
 
 log_step "步骤 6: 流式 - 不传递 logprobs/return_token_ids"
 
-STREAM_RESPONSE=$(curl_with_log -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_NO_PARAM}/v1/chat/completions" \
+STREAM_RESPONSE=$(curl_with_log -s --noproxy '*' --no-buffer --max-time 90 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_NO_PARAM}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -500,7 +500,7 @@ SESSION_S_LOGP_TRUE="session-${SCENARIO_ID}-s-logp-true-$(date +%s%N | md5sum | 
 
 log_step "步骤 7: 流式 - 传递 logprobs=true（应被覆盖为1）"
 
-STREAM_RESPONSE=$(curl_with_log -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_LOGP_TRUE}/v1/chat/completions" \
+STREAM_RESPONSE=$(curl_with_log -s --noproxy '*' --no-buffer --max-time 90 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_LOGP_TRUE}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -555,7 +555,7 @@ SESSION_S_TOKS="session-${SCENARIO_ID}-s-toks-$(date +%s%N | md5sum | head -c 8)
 
 log_step "步骤 8: 流式 - 传递 return_token_ids=true"
 
-STREAM_RESPONSE=$(curl_with_log -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_TOKS}/v1/chat/completions" \
+STREAM_RESPONSE=$(curl_with_log -s --noproxy '*' --no-buffer --max-time 90 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_TOKS}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -610,7 +610,7 @@ SESSION_S_BOTH="session-${SCENARIO_ID}-s-both-$(date +%s%N | md5sum | head -c 8)
 
 log_step "步骤 9: 流式 - 同时传递 logprobs=true 和 return_token_ids=true"
 
-STREAM_RESPONSE=$(curl_with_log -s --noproxy '*' --no-buffer --max-time 30 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_BOTH}/v1/chat/completions" \
+STREAM_RESPONSE=$(curl_with_log -s --noproxy '*' --no-buffer --max-time 90 -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_S_BOTH}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

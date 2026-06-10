@@ -96,41 +96,107 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
             logger.warning(f"[{context.unique_id}] 推理解析失败: {e}\n{traceback.format_exc()}")
 
         # 3. 从 reasoning-free 的 content 中解析 tool_calls
-        # 对齐 vLLM _parse_tool_calls_from_content() 的分支逻辑：
-        # - tool_choice=named: 直接取 content 作为 arguments，保留原始格式，
-        #   函数名来自请求参数，finish_reason 保留 infer_response 原值
-        # - tool_choice=required: 解析 JSON 列表（暂未实现，走 ┐┌ parser）
-        # - tool_choice=auto/none: 走 ┐┌ parser，finish_reason 覆盖为 "tool_calls"
+        # 对齐 vLLM _parse_tool_calls_from_content()（/vllm/entrypoints/openai/engine/serving.py:455-570）的三分支逻辑：
+        # - 分支 A: named + supports_required_and_named=True → 标准 JSON 解析
+        #   vLLM 有 guided decoding 保证 content 是 JSON，但 proxy 没有，
+        #   因此先尝试 tool parser 解析，若成功（说明 content 是 XML 等非 JSON 格式）
+        #   则降级到分支 C 逻辑；若 parser 未解析出 tool calls（content 本身就是 JSON），
+        #   则走标准 JSON 解析。
+        # - 分支 B: required + supports_required_and_named=True → JSON 列表解析
+        # - 分支 C: auto / named(False) / required(False) → tool parser 的 extract_tool_calls()
+        # finish_reason 规则对齐 vLLM serving.py:1319-1346:
+        #   named → "stop", required/auto → "tool_calls"
         raw_request = context.raw_request or {}
         tool_choice = raw_request.get("tool_choice", "auto")
+        is_named_choice = isinstance(tool_choice, dict) and tool_choice.get("type") == "function"
+        supports_required_and_named = getattr(
+            self.parser._tool_parser, 'supports_required_and_named', True
+        )
 
         if not tool_calls:
-            # --- 分支 A: tool_choice=named（ChatCompletionNamedToolChoiceParam）---
-            # vLLM 对 named 模式不经过 ┐┌ parser，直接取 content 作为 arguments，
-            # 保留原始 JSON 格式（含换行/空格），函数名来自请求。
-            # finish_reason 不覆盖（保留 infer_response 的值，通常是 "stop"）。
-            is_named_choice = isinstance(tool_choice, dict) and tool_choice.get("type") == "function"
-            if is_named_choice:
+            # --- 分支 A: named + supports_required_and_named=True ---
+            # 对齐 vLLM _parse_tool_calls_from_content 分支 A:
+            # 直接取 content 作为 arguments（标准 JSON 解析）。
+            # vLLM 有 guided decoding 保证 content 是 JSON，但 proxy 没有，
+            # 因此先尝试 tool parser 解析作为 fallback。
+            if is_named_choice and supports_required_and_named:
                 func_spec = tool_choice.get("function", {})
                 func_name = func_spec.get("name")
                 if func_name and final_content:
-                    tool_calls = [{
-                        "id": f"call_{uuid.uuid4().hex[:24]}",
-                        "type": "function",
-                        "function": {
-                            "name": func_name,
-                            "arguments": final_content  # 保留原始格式
-                        }
-                    }]
-                    final_content = None  # 对齐 vLLM: content=None
-                    logger.debug(f"[{context.unique_id}] named tool_choice: {func_name}, arguments 保留原始格式")
+                    parser_result = None
+                    try:
+                        parser_result = self.parser.extract_tool_calls(
+                            final_content, context.raw_request
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{context.unique_id}] named 分支 parser fallback 失败: {e}")
 
-            # --- 分支 B: tool_choice=required ---
-            # vLLM 解析 content 为 JSON 函数列表。
-            # 当前 proxy 对 required 也走 ┐┌ parser，测试中结果一致，暂不做特殊处理。
-            # 若后续 required 模式出现 arguments 格式不一致，再补充此分支。
+                    if parser_result and parser_result.tools_called and parser_result.tool_calls:
+                        # parser 成功解析（content 是 XML 等非 JSON 格式）→ 降级到分支 C 逻辑
+                        matched_tc = next(
+                            (tc for tc in parser_result.tool_calls
+                             if tc.function.name == func_name), None
+                        )
+                        if matched_tc:
+                            tool_calls = [{
+                                "id": matched_tc.id or f"call_{uuid.uuid4().hex[:24]}",
+                                "type": "function",
+                                "function": {
+                                    "name": matched_tc.function.name,
+                                    "arguments": matched_tc.function.arguments
+                                }
+                            }]
+                            final_content = parser_result.content
+                            # 对齐 vLLM: named tool_choice 的 finish_reason 保留 "stop"
+                            logger.debug(f"[{context.unique_id}] named tool_choice parser fallback: {func_name}")
+                        else:
+                            # parser 解析出 tool calls 但无匹配函数名 → 标准 JSON 解析
+                            tool_calls = [{
+                                "id": f"call_{uuid.uuid4().hex[:24]}",
+                                "type": "function",
+                                "function": {
+                                    "name": func_name,
+                                    "arguments": final_content
+                                }
+                            }]
+                            final_content = None
+                            logger.debug(f"[{context.unique_id}] named tool_choice: parser 无匹配, 走标准 JSON 解析")
+                    else:
+                        # parser 未解析出 tool calls → content 本身是 JSON（如 Hermes）
+                        # 对齐 vLLM 分支 A: 直接取 content 作为 arguments
+                        tool_calls = [{
+                            "id": f"call_{uuid.uuid4().hex[:24]}",
+                            "type": "function",
+                            "function": {
+                                "name": func_name,
+                                "arguments": final_content
+                            }
+                        }]
+                        final_content = None
+                        logger.debug(f"[{context.unique_id}] named tool_choice: 走标准 JSON 解析")
 
-            # --- 分支 C: tool_choice=auto/none（默认）---
+            # --- 分支 B: required + supports_required_and_named=True ---
+            # 对齐 vLLM: 解析 content 为 JSON 函数列表。
+            elif tool_choice == "required" and supports_required_and_named:
+                try:
+                    parsed = json.loads(final_content or "[]")
+                    if isinstance(parsed, list):
+                        tool_calls = [{
+                            "id": f"call_{uuid.uuid4().hex[:24]}",
+                            "type": "function",
+                            "function": {
+                                "name": item.get("name", ""),
+                                "arguments": json.dumps(item.get("parameters", {}), ensure_ascii=False)
+                            }
+                        } for item in parsed]
+                        final_content = None
+                        finish_reason = "tool_calls"
+                        logger.debug(f"[{context.unique_id}] required tool_choice: 解析 JSON 列表")
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.debug(f"[{context.unique_id}] required JSON 列表解析失败: {e}, 降级到 parser")
+
+            # --- 分支 C: auto / named(False) / required(False) → tool parser ---
+            # 对齐 vLLM 分支 C: 自动工具调用解析（也作为 named/required 的降级分支）
             if not tool_calls:
                 try:
                     result = self.parser.extract_tool_calls(
@@ -149,9 +215,11 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                             for tc in result.tool_calls
                         ]
                         final_content = result.content
-                        # 仅 auto 模式覆盖 finish_reason
-                        # named/required 模式保留 infer_response 原值
-                        finish_reason = "tool_calls"
+                        # finish_reason 规则对齐 vLLM serving.py:1319-1346:
+                        # named → "stop"（保留 infer_response 原值，不覆盖）
+                        # required/auto → "tool_calls"
+                        if not is_named_choice:
+                            finish_reason = "tool_calls"
                         logger.debug(f"[{context.unique_id}] 从文本解析到 {len(tool_calls)} 个工具调用")
                 except Exception as e:
                     logger.warning(f"[{context.unique_id}] 工具调用解析失败: {e}\n{traceback.format_exc()}")
