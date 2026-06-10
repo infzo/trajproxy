@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/reasoning/qwen3_reasoning_parser.py
 
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
@@ -24,7 +23,7 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
     provides a strict switch to disable reasoning output via the
     'enable_thinking=False' parameter.
 
-    When thinking is disabled, the template places <think>\n\n</think>\n\n
+    When thinking is disabled, the template places <think>\\n\\n</think>\\n\\n
     in the prompt. The serving layer detects this via prompt_is_reasoning_end
     and routes deltas as content without calling the streaming parser.
 
@@ -33,8 +32,8 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
     This parser handles both styles: if <think> appears in the generated output
     it is stripped before extraction (non-streaming) or skipped (streaming).
 
-    NOTE: Qwen3.5 models may emit <|tool_call_begin|> inside the thinking block
-    without closing </think> first. <|tool_call_begin|> is treated as an implicit
+    NOTE: Qwen3.5 models may emit <tool_call> inside the thinking block
+    without closing </think> first. <tool_call> is treated as an implicit
     end of reasoning, matching the approach in KimiK2ReasoningParser.
     """
 
@@ -46,9 +45,9 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
         # pure content when the user explicitly disables it.
         self.thinking_enabled = chat_kwargs.get("enable_thinking", True)
 
-        self._tool_call_tag = "<|tool_call_begin|>"
+        self._tool_call_tag = "<tool_call>"
         self._tool_call_token_id = self.vocab.get(self._tool_call_tag)
-        self._tool_call_end_tag = "<|tool_call_end|>"
+        self._tool_call_end_tag = "</tool_call>"
         self._tool_call_end_token_id = self.vocab.get(self._tool_call_end_tag)
 
     @property
@@ -70,13 +69,13 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
         for i in range(len(input_ids) - 1, -1, -1):
             token_id = input_ids[i]
             if token_id == start_token_id:
-                # Found <think> before </think> or <|tool_call_begin|>
+                # Found <think> before </think> or <tool_call>
                 return False
             if token_id == end_token_id:
                 return True
             if tool_call_token_id is not None and token_id == tool_call_token_id:
-                # Only treat as implicit reasoning end if this <|tool_call_begin|>
-                # is NOT followed by <|tool_call_end|>.  Paired occurrences are
+                # Only treat as implicit reasoning end if this <tool_call>
+                # is NOT followed by </tool_call>.  Paired occurrences are
                 # template examples in the prompt, not model output.
                 if tool_call_end_token_id is not None and any(
                     input_ids[j] == tool_call_end_token_id
@@ -102,7 +101,7 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
         result = super().extract_content_ids(input_ids)
         if result:
             return result
-        # Fall back: content starts at <|tool_call_begin|> (implicit reasoning end).
+        # Fall back: content starts at <tool_call> (implicit reasoning end).
         if (
             self._tool_call_token_id is not None
             and self._tool_call_token_id in input_ids
@@ -148,7 +147,7 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
             # Thinking explicitly disabled — treat everything as content.
             return None, model_output
 
-        # No </think> — check for implicit reasoning end via <|tool_call_begin|>.
+        # No </think> — check for implicit reasoning end via <tool_call>.
         tool_call_index = model_output.find(self._tool_call_tag)
         if tool_call_index != -1:
             reasoning = model_output[:tool_call_index]
@@ -201,7 +200,7 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
             # end_token_id in IDs but not in text (already stripped)
             return None
 
-        # Implicit reasoning end via <|tool_call_begin|>.
+        # Implicit reasoning end via <tool_call>.
         if (
             self._tool_call_token_id is not None
             and self._tool_call_token_id in delta_token_ids

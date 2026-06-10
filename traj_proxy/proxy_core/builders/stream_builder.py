@@ -53,7 +53,8 @@ class StreamChunkBuilder(BaseResponseBuilder):
         # 流式场景下，build 方法构建最终汇总的响应
         message = {
             "role": "assistant",
-            "content": content or None,
+            # 有 tool_calls 时 content 至少保留 ""，确保 LiteLLM 生成 Claude text block
+            "content": content if content is not None else ("" if (context.stream_tool_calls or context.stream_function_call) else None),
             "annotations": None,
             "audio": None,
             "function_call": context.stream_function_call,

@@ -30,7 +30,7 @@ log_step "步骤 2: 发送 TITO Tool 请求（含 tools 定义）"
 CHAT=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in Beijing?\"}],\"tools\":${TOOLS},\"max_tokens\":256}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Weather in Beijing?\"}],\"tools\":${TOOLS},\"max_tokens\":512}")
 CHAT_BODY=$(echo "$CHAT" | sed '$d'); CHAT_STATUS=$(echo "$CHAT" | sed -n '$p')
 assert_http_status "200" "$CHAT_STATUS" "TITO Tool 请求 200"
 sleep 1

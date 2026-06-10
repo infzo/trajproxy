@@ -119,6 +119,11 @@ class TokenPipeline(BasePipeline):
             # 更新统计信息（必须在 _build_response 之前，因为 builder 需要 usage 信息）
             self._update_stats(context)
 
+            # 更新 parser 状态（确保 thinking_enabled 反映当前请求的 enable_thinking 参数）
+            # 对齐 vllm DelegatingParser：reasoning parser 的 thinking_enabled
+            # 应根据请求的 chat_template_kwargs 动态设置，而非硬编码为 True
+            self.parser.update_for_request(context.raw_request)
+
             # 阶段 5: 构建响应
             context = self._build_response(context)
 
@@ -179,6 +184,9 @@ class TokenPipeline(BasePipeline):
             context.encode_duration_ms = (time.perf_counter() - t0) * 1000
             prompt_input = context.token_ids
 
+            # 更新 parser 状态（确保 thinking_enabled 反映当前请求参数）
+            self.parser.update_for_request(context.raw_request)
+
             # 流式状态
             first_chunk_received = False
             infer_start_time = time.perf_counter()
@@ -228,6 +236,24 @@ class TokenPipeline(BasePipeline):
 
             # 流式结束后完成处理
             await self._finalize_stream(context)
+
+            # 追加 yield 一个独立的 usage chunk（对齐 vLLM stream_options.include_usage 行为）
+            # 确保下游（如 litellm）能获取到正确的 completion_tokens，
+            # 尤其是纯推理输出（无 content delta）场景下下游无法从 text 估算的情况。
+            if context.completion_tokens:
+                usage_chunk = {
+                    "id": f"chatcmpl-{context.request_id}",
+                    "object": "chat.completion.chunk",
+                    "created": int(context.start_time.timestamp()) if context.start_time else int(time.time()),
+                    "model": self.model,
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": context.prompt_tokens or 0,
+                        "completion_tokens": context.completion_tokens,
+                        "total_tokens": context.total_tokens or 0,
+                    },
+                }
+                yield usage_chunk
 
         except Exception as e:
             self._handle_error(context, e)

@@ -23,13 +23,13 @@ sleep 1
 R1=$(curl_with_log -s -w "
 %{http_code}" -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}-ns/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"tools\":${TOOLS},\"max_tokens\":128}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"tools\":${TOOLS},\"max_tokens\":512}")
 assert_http_status "200" "$(echo "$R1" | sed -n '$p')" "ns 冒烟通过"
 
 # 流式
 R2=$(curl_with_log -s --no-buffer -X POST "${BASE_URL}/s/${RUN_ID}/${SESS_ID}-s/v1/chat/completions" \
     -H "Content-Type: application/json" -H "Authorization: Bearer ${CHAT_API_KEY}" \
-    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],\"tools\":${TOOLS},\"max_tokens\":128,\"stream\":true}")
+    -d "{\"model\":\"${MODEL_NAME}\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],\"tools\":${TOOLS},\"max_tokens\":512,\"stream\":true}")
 assert_contains "$R2" "data:" "s 冒烟通过"
 
 curl_with_log -s -X DELETE "${BASE_URL}/models?model_name=${MODEL_NAME}&run_id=${RUN_ID}" > /dev/null

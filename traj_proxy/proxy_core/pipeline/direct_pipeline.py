@@ -124,6 +124,14 @@ class DirectPipeline(BasePipeline):
                 message = choice.get("message", {})
                 context.response_text = message.get("content", "")
 
+                # reasoning 双字段镜像：确保 reasoning 和 reasoning_content 同时存在
+                reasoning_content = message.get("reasoning_content")
+                reasoning = message.get("reasoning")
+                if reasoning_content and not reasoning:
+                    message["reasoning"] = reasoning_content
+                elif reasoning and not reasoning_content:
+                    message["reasoning_content"] = reasoning
+
                 # 提取 vLLM 扩展的 token_ids 字段，用于轨迹记录
                 # vLLM 在 return_token_ids=True 时会在 choices[0] 中返回 token_ids
                 if choice.get("token_ids") is not None:
@@ -155,8 +163,13 @@ class DirectPipeline(BasePipeline):
             # 存储到数据库（保留完整的 logprobs/token_ids）
             await self._store_trajectory(context, run_id=context.run_id)
 
-            # 剥离 proxy 强制注入但不应暴露给客户端的字段（轨迹已存储，此处安全移除）
-            self._strip_injected_fields(context.raw_response)
+            # 过滤内部字段，不返回给客户端
+            # （与 TITO 模式行为对齐，logprobs/token_ids 仅用于轨迹记录）
+            if "choices" in context.raw_response:
+                for choice in context.raw_response["choices"]:
+                    choice.pop("logprobs", None)
+                    choice.pop("token_ids", None)
+            context.raw_response.pop("prompt_token_ids", None)
 
             # 确保响应中所有可选字段有默认值
             self._ensure_response_defaults(context.raw_response)
@@ -213,6 +226,15 @@ class DirectPipeline(BasePipeline):
                 self._strip_injected_fields(chunk)
 
                 context.stream_chunk_count += 1
+
+                # 过滤内部字段，不返回给客户端
+                # （与 TITO 模式行为对齐，logprobs/token_ids 仅用于轨迹记录）
+                if "choices" in chunk and chunk["choices"]:
+                    choice = chunk["choices"][0]
+                    choice.pop("logprobs", None)
+                    choice.pop("token_ids", None)
+                chunk.pop("prompt_token_ids", None)
+
                 yield chunk
 
             # 记录推理总耗时
@@ -363,7 +385,8 @@ class DirectPipeline(BasePipeline):
         # 构建最终响应
         message = {
             "role": context.stream_role or "assistant",
-            "content": context.response_text or None,
+            # 有 tool_calls 时 content 至少保留 ""，确保 LiteLLM 生成 Claude text block
+            "content": context.response_text or ("" if (context.stream_tool_calls or context.stream_function_call) else None),
             "annotations": None,
             "audio": None,
             "function_call": context.stream_function_call,
@@ -461,17 +484,25 @@ class DirectPipeline(BasePipeline):
 
     @staticmethod
     def _ensure_response_defaults(response: Dict[str, Any]) -> None:
-        """确保响应中所有可选字段有默认值（原地修改）"""
+        """确保响应中所有可选字段有默认值（原地修改）
+
+        注意：不包含 logprobs 和 token_ids —— 这两个是 proxy 内部字段，
+        在 process_request 中已于 _store_trajectory 之后剥离，不应再补回。
+        """
         if not response or "choices" not in response:
             return
         for choice in response.get("choices", []):
-            choice.setdefault("logprobs", None)
-            choice.setdefault("token_ids", None)
             msg = choice.get("message", {}) or {}
             msg.setdefault("annotations", None)
             msg.setdefault("audio", None)
             msg.setdefault("function_call", None)
             msg.setdefault("refusal", None)
+            msg.setdefault("reasoning", None)
+            msg.setdefault("reasoning_content", None)
+            # 有 tool_calls 时，确保 content 不为 None（至少 ""）
+            # 确保 LiteLLM 转换 Claude 格式时生成 text block
+            if msg.get("tool_calls") and msg.get("content") is None:
+                msg["content"] = ""
         for key in ("kv_transfer_params", "prompt_logprobs",
                     "prompt_token_ids", "service_tier", "system_fingerprint"):
             response.setdefault(key, None)
