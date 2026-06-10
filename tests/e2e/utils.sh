@@ -288,9 +288,24 @@ curl_with_log() {
     >&2 echo -e "${YELLOW}[TIME]${NC} ${duration}ms"
     >&2 log_separator
 
+    # 完整响应写入日志（不截断，供离线分析使用）
+    # 当 FULL_RESPONSE_LOG 被设置时（由 _run_single_scenario 设置），把原始响应追加写入
+    if [ -n "${FULL_RESPONSE_LOG:-}" ]; then
+        {
+            echo ""
+            echo "────────── [$(_e2e_hms)] curl${curl_cmd} ──────────"
+            echo "$response"
+        } >> "$FULL_RESPONSE_LOG"
+    fi
+
     # 返回原始响应到stdout（与原始curl行为一致）
     echo "$response"
     return $curl_exit
+}
+
+# 时间戳：HH:MM:SS（用于完整响应日志标头，避免频繁调用 date 产生子进程开销）
+_e2e_hms() {
+    date +%H:%M:%S
 }
 
 # 提取 JSON 字段值（使用 grep 和 sed，不依赖 jq）
@@ -437,4 +452,284 @@ else:
         TESTS_FAILED=$((TESTS_FAILED + 1))
         log_failure "$result" ""
     fi
+}
+
+# ========================================
+# Layer 内并发执行场景
+# ========================================
+# 参数: $1 = layer_name（如 nginx, proxy）
+#        $2 = layer_dir（layer 根目录，scenarios 目录在其下）
+#        $3... = 场景 ID 列表（可为空，空则扫描目录下全部 .sh）
+#
+# 环境变量:
+#   E2E_JOBS    - 并发数，默认 1（串行，向后兼容）
+#   E2E_LOG_DIR - 日志落盘根目录（由 run_tests.sh 创建；单独调用 run_layer.sh 时按需创建）
+#   TIMING_LOG  - 计时日志临时文件（顶层 run_tests.sh 创建，子进程 >> 追加，POSIX 短行原子安全）
+#   FAILURE_LOG - 失败日志临时文件（同上）
+#
+# 行为:
+#   - 实时输出到终端（并发场景的输出会交错，这是预期行为，彩色保留）
+#   - 并发模式下同时 tee 到日志文件，文件名按场景编号排序
+#     目录: ${E2E_LOG_DIR}/${layer_name}/
+#     文件: ${seq_num:03d}_${scenario_name}.log
+#   - 完成后打印层 summary（通过/失败数）
+#   - 返回值: 0=全部通过，1=存在失败（供 run_layer.sh 用作退出码）
+#
+# 并发控制: FIFO 信号量（纯 Bash，兼容 macOS Bash 3.x）
+run_scenarios_parallel() {
+    local layer_name="$1"
+    local layer_dir="$2"
+    shift 2
+    local scenario_ids=("$@")
+    local scenarios_dir="${layer_dir}/scenarios"
+
+    # 并发度,默认 1（串行）
+    local jobs="${E2E_JOBS:-1}"
+    # 日志落盘目录
+    local log_dir="${E2E_LOG_DIR:-}"
+
+    # 如果没有指定场景 ID，扫描目录下所有 .sh，按文件名顺序提取 ID
+    if [ ${#scenario_ids[@]} -eq 0 ]; then
+        for f in "${scenarios_dir}"/*.sh; do
+            if [ -f "$f" ]; then
+                local name=$(basename "$f" .sh)
+                local id=$(echo "$name" | cut -d'_' -f1)
+                scenario_ids+=("$id")
+            fi
+        done
+    fi
+
+    local total=${#scenario_ids[@]}
+    if [ "$total" -eq 0 ]; then
+        echo -e "${YELLOW}[${layer_name}] 无匹配场景,跳过${NC}"
+        return 0
+    fi
+
+    # ========================================
+    # 串行模式（jobs<=1 或仅 1 个场景）
+    # 行为：原串行执行 + 若 E2E_LOG_DIR 存在则也落盘（统一日志行为）
+    # ========================================
+    if [ "$jobs" -le 1 ] || [ "$total" -le 1 ]; then
+        local passed=0
+        local failed=0
+        # 若 E2E_LOG_DIR 存在，串行模式也落盘到 layer 子目录
+        local serial_log_dir=""
+        if [ -z "$log_dir" ]; then
+            # 按需创建 E2E_LOG_DIR
+            if [ -n "${E2E_LOG_DIR:-}" ] && [ -d "${E2E_LOG_DIR}" ]; then
+                log_dir="${E2E_LOG_DIR}"
+            else
+                log_dir="$(cd "${SCRIPT_DIR}/../.." && pwd)/logs/tests/$(date +%Y%m%d_%H%M%S)"
+                mkdir -p "$log_dir"
+                export E2E_LOG_DIR="$log_dir"
+                echo -e "${BLUE}[${layer_name}] 日志目录: ${log_dir}${NC}"
+            fi
+        fi
+        serial_log_dir="${log_dir}/${layer_name}"
+        mkdir -p "$serial_log_dir"
+
+        local serial_idx=0
+        for scenario_id in "${scenario_ids[@]}"; do
+            serial_idx=$((serial_idx + 1))
+            local matched_files=("${scenarios_dir}/${scenario_id}_"*".sh")
+            if [ ! -f "${matched_files[0]}" ]; then
+                echo -e "${RED}[${layer_name}] 错误: 找不到场景 ${scenario_id}${NC}"
+                failed=$((failed + 1))
+                continue
+            fi
+            local sn=$(basename "${matched_files[0]}" .sh)
+            local log_file="${serial_log_dir}/$(printf '%03d' $serial_idx)_${sn}.log"
+            if _run_single_scenario "$layer_name" "${matched_files[0]}" "$log_file" 2>&1 | tee "$log_file"; then
+                passed=$((passed + 1))
+            else
+                failed=$((failed + 1))
+            fi
+        done
+        _print_layer_summary "$layer_name" $passed $failed $total
+        [ $failed -gt 0 ] && return 1
+        return 0
+    fi
+
+    # ========================================
+    # 并发模式（jobs > 1）
+    # ========================================
+    echo -e "${BLUE}[${layer_name}] 启动并发执行: ${total} 个场景, 并发度 ${jobs}${NC}"
+
+    # 若 run_layer.sh 被单独调用，E2E_LOG_DIR 可能不存在，按需创建
+    # 路径: <项目根>/logs/tests/YYYYMMDD_HHMMSS/（SCRIPT_DIR 在 utils.sh 中为 tests/e2e）
+    if [ -z "$log_dir" ]; then
+        log_dir="$(cd "${SCRIPT_DIR}/../.." && pwd)/logs/tests/$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$log_dir"
+        export E2E_LOG_DIR="$log_dir"
+        echo -e "${BLUE}[${layer_name}] 日志目录: ${log_dir}${NC}"
+    fi
+    local layer_log_dir="${log_dir}/${layer_name}"
+    mkdir -p "$layer_log_dir"
+
+    # 状态目录（用于跨子进程传递 PASS/FAIL 状态）
+    local state_dir=$(mktemp -d /tmp/e2e_state_XXXXXX)
+
+    # FIFO 信号量：控制同时运行不超过 jobs 个场景
+    local fifo="${state_dir}/.fifo"
+    mkfifo "$fifo"
+    exec 3<>"$fifo"
+    # 预填充 N 个令牌
+    local i
+    for ((i = 0; i < jobs; i++)); do
+        echo >&3
+    done
+
+    local pids=()
+    local scenario_idx=0
+
+    for scenario_id in "${scenario_ids[@]}"; do
+        scenario_idx=$((scenario_idx + 1))
+        local matched_files=("${scenarios_dir}/${scenario_id}_"*".sh")
+
+        if [ ! -f "${matched_files[0]}" ]; then
+            echo -e "${RED}[${layer_name}] 错误: 找不到场景 ${scenario_id}${NC}"
+            echo "FAIL" > "${state_dir}/${scenario_idx}_${scenario_id}.status"
+            continue
+        fi
+
+        local scenario_file="${matched_files[0]}"
+        local scenario_name=$(basename "$scenario_file" .sh)
+        local state_file="${state_dir}/${scenario_idx}_${scenario_id}.status"
+        local log_file="${layer_log_dir}/$(printf '%03d' $scenario_idx)_${scenario_name}.log"
+
+        # 获取一个令牌（无可用令牌时阻塞等待）
+        read -u 3 -r _token
+
+        (
+            # 子 shell 执行单个场景
+            local exit_code=0
+            _run_single_scenario "$layer_name" "$scenario_file" "$log_file" 2>&1 | tee "$log_file"
+            exit_code=${PIPESTATUS[0]}
+
+            if [ $exit_code -eq 0 ]; then
+                echo "PASS" > "$state_file"
+            else
+                echo "FAIL" > "$state_file"
+            fi
+
+            # 归还令牌
+            echo >&3
+        ) &
+        pids+=($!)
+    done
+
+    # 等待所有后台任务完成
+    local pid
+    for pid in "${pids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+
+    # 关闭 FIFO
+    exec 3>&-
+    rm -f "$fifo"
+
+    # 统计结果
+    local passed=0
+    local failed=0
+    for status_file in "${state_dir}"/*.status; do
+        if [ -f "$status_file" ]; then
+            local status=$(cat "$status_file")
+            if [ "$status" = "PASS" ]; then
+                passed=$((passed + 1))
+            else
+                failed=$((failed + 1))
+            fi
+        fi
+    done
+
+    rm -rf "$state_dir"
+
+    _print_layer_summary "$layer_name" $passed $failed $total
+    [ $failed -gt 0 ] && return 1
+    return 0
+}
+
+# 单个场景执行包装（供 run_scenarios_parallel 调用）
+# 参数: $1 = layer_name, $2 = scenario_file, $3 = log_file（可选，scenario 主日志路径）
+# 输出: 场景的全部 stdout/stderr（直通终端 + tee 落盘）
+# 副作用:
+#   - 写 TIMING_LOG（POSIX 短行 >> 追加原子安全,并发写入不会损坏）
+#   - 若提供 log_file,scenario 运行期间所有 curl_with_log 调用的完整响应
+#     会先写入 ${log_file}.full,执行结束后合并到 log_file 末尾（流式响应不省略）
+_run_single_scenario() {
+    local layer_name="$1"
+    local scenario_file="$2"
+    local log_file="${3:-}"
+    local scenario_name=$(basename "$scenario_file" .sh)
+
+    echo ""
+    echo "========================================"
+    echo -e "${BLUE}[${layer_name}] 运行场景: ${scenario_name}${NC}"
+    echo "========================================"
+
+    # 设置完整响应日志文件（scenario 运行期间，curl_with_log 会把原始完整响应
+    # 追加写入该文件；执行结束后会被合并到 scenario 主日志末尾）
+    local full_resp_log=""
+    if [ -n "$log_file" ]; then
+        full_resp_log="${log_file}.full"
+        : > "$full_resp_log"
+        export FULL_RESPONSE_LOG="$full_resp_log"
+    else
+        unset FULL_RESPONSE_LOG 2>/dev/null || true
+    fi
+
+    export FAILURE_CONTEXT="${scenario_name}"
+    local start_ts=$(date +%s)
+    local exit_code=0
+    if bash "$scenario_file"; then
+        exit_code=0
+        local end_ts=$(date +%s)
+        local duration=$((end_ts - start_ts))
+        echo -e "${GREEN}场景 ${scenario_name} 耗时: ${duration}s${NC}"
+        if [ -n "${TIMING_LOG:-}" ] && [ -w "${TIMING_LOG:-}" ]; then
+            echo "${scenario_name}|${duration}" >> "$TIMING_LOG"
+        fi
+    else
+        exit_code=1
+        local end_ts=$(date +%s)
+        local duration=$((end_ts - start_ts))
+        echo -e "${RED}场景 ${scenario_name} 耗时: ${duration}s (失败)${NC}"
+        if [ -n "${TIMING_LOG:-}" ] && [ -w "${TIMING_LOG:-}" ]; then
+            echo "${scenario_name}|${duration}" >> "$TIMING_LOG"
+        fi
+    fi
+
+    # 把完整响应日志追加到 scenario 主日志（流式返回不省略，供离线分析）
+    if [ -n "$full_resp_log" ] && [ -f "$full_resp_log" ] && [ -s "$full_resp_log" ]; then
+        {
+            echo ""
+            echo "========================================"
+            echo "[完整响应日志 - 流式返回未省略,供离线分析]"
+            echo "========================================"
+            cat "$full_resp_log"
+        } >> "$log_file"
+        rm -f "$full_resp_log"
+    elif [ -n "$full_resp_log" ] && [ -f "$full_resp_log" ]; then
+        rm -f "$full_resp_log"
+    fi
+
+    unset FULL_RESPONSE_LOG 2>/dev/null || true
+    return $exit_code
+}
+
+# 打印 Layer 执行摘要
+# 参数: $1 = layer_name, $2 = passed, $3 = failed, $4 = total
+_print_layer_summary() {
+    local layer_name="$1"
+    local passed=$2
+    local failed=$3
+    local total=$4
+    echo ""
+    echo "========================================"
+    echo "[${layer_name}] 测试总结"
+    echo "========================================"
+    echo -e "场景总计: ${total}"
+    echo -e "场景通过: ${GREEN}${passed}${NC}"
+    echo -e "场景失败: ${RED}${failed}${NC}"
+    echo "========================================"
 }

@@ -244,3 +244,7 @@ package-lock.json
 .claude/
 .husky/
 commitlint.config.js
+
+# OpenCode
+.opencode/instructions/
+opencode.json

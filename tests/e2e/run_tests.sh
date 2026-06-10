@@ -58,6 +58,11 @@ print_usage() {
     echo "  --skip, -s <前缀>           自定义跳过前缀，逗号分隔（如: -s C,A）"
     echo "  --only 与 --skip 互斥，不可同时使用"
     echo ""
+    echo "并发控制:"
+    echo "  --jobs, -j <N>              Layer 内并发执行场景数（默认 1，顺序执行）"
+    echo "  环境变量 E2E_JOBS=<N>       等价于 -j N，命令行 -j 优先"
+    echo "  并发模式下日志实时输出到终端，同时落盘到有序日志文件（按场景编号排序）"
+    echo ""
     echo "  环境变量: SKIP_PREFIXES=T,A  （兼容旧用法，等同 --skip T,A）"
     echo ""
     echo "可用层:"
@@ -224,6 +229,50 @@ print_failure_report() {
     echo "=========================================="
 }
 
+# 将最终报告（耗时统计 + 失败详情 + 总结）落盘到 summary.log
+# 去除 ANSI 颜色码，方便离线查阅
+save_summary_log() {
+    if [ -z "${E2E_LOG_DIR:-}" ] || [ ! -d "${E2E_LOG_DIR}" ]; then
+        return
+    fi
+    local summary_file="${E2E_LOG_DIR}/summary.log"
+
+    {
+        echo "=============================="
+        echo "E2E 测试最终报告"
+        echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "=============================="
+
+        echo ""
+        echo "=========================================="
+        echo "E2E 测试总结"
+        echo "=========================================="
+        echo "场景总计: ${TOTAL_SCENARIOS}"
+        echo "场景通过: ${PASSED_SCENARIOS}"
+        echo "场景失败: ${FAILED_SCENARIOS}"
+        echo "=========================================="
+
+        # 耗时统计
+        print_timing_report
+
+        # 失败详情
+        print_failure_report
+
+        if [ ${FAILED_SCENARIOS} -eq 0 ]; then
+            echo ""
+            echo "结果: 所有测试通过！"
+        else
+            echo ""
+            echo "结果: 存在失败的测试！"
+        fi
+
+        echo ""
+        echo "日志目录: ${E2E_LOG_DIR}"
+    } | sed $'s/\x1b\\[[0-9;]*[a-zA-Z]//g' > "$summary_file"
+
+    echo -e "${BLUE}报告已保存: ${summary_file}${NC}"
+}
+
 # 打印最终摘要
 print_final_summary() {
     echo ""
@@ -239,6 +288,14 @@ print_final_summary() {
     print_timing_report
     # 输出失败结果报告
     print_failure_report
+
+    # 将报告落盘到 summary.log
+    save_summary_log
+
+    # 打印日志落盘目录
+    if [ -n "${E2E_LOG_DIR:-}" ] && [ -d "${E2E_LOG_DIR}" ]; then
+        echo -e "${BLUE}日志目录: ${E2E_LOG_DIR}${NC}"
+    fi
 
     if [ $FAILED_SCENARIOS -eq 0 ]; then
         echo -e "${GREEN}所有测试通过！${NC}"
@@ -263,6 +320,16 @@ main() {
     export TIMING_LOG FAILURE_LOG
     trap "rm -f '$TIMING_LOG' '$FAILURE_LOG'" EXIT
 
+    # 并发度：默认 1（串行，向后兼容）；-j 覆盖环境变量
+    E2E_JOBS="${E2E_JOBS:-1}"
+    export E2E_JOBS
+
+    # 创建日志落盘目录（并发模式下各 layer 子目录会创建其下）
+    # 路径: <项目根>/logs/tests/YYYYMMDD_HHMMSS/，按测试启动时间命名
+    E2E_LOG_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)/logs/tests/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$E2E_LOG_DIR"
+    export E2E_LOG_DIR
+
     LAYER=""
     SCENARIO_IDS=()
 
@@ -283,6 +350,10 @@ main() {
                 ;;
             --only|-o)
                 ONLY_PREFIXES="${ONLY_PREFIXES:+$ONLY_PREFIXES,}$2"
+                shift 2
+                ;;
+            --jobs|-j)
+                E2E_JOBS="$2"
                 shift 2
                 ;;
             -h|--help)
@@ -374,6 +445,12 @@ main() {
         print_timing_report
         # 单层层模式也输出失败结果报告
         print_failure_report
+        # 将报告落盘到 summary.log
+        save_summary_log
+        # 打印日志落盘目录
+        if [ -n "${E2E_LOG_DIR:-}" ] && [ -d "${E2E_LOG_DIR}" ]; then
+            echo -e "${BLUE}日志目录: ${E2E_LOG_DIR}${NC}"
+        fi
     elif [ ${#SCENARIO_IDS[@]} -gt 0 ]; then
         # 未指定层，但有指定场景编号 -> 跨层搜索（显式指定，不过滤）
         for id in "${SCENARIO_IDS[@]}"; do
@@ -422,6 +499,12 @@ main() {
         echo -e "${GREEN}全部层测试执行完毕${NC}"
         print_timing_report
         print_failure_report
+        # 将报告落盘到 summary.log
+        save_summary_log
+        # 打印日志落盘目录
+        if [ -n "${E2E_LOG_DIR:-}" ] && [ -d "${E2E_LOG_DIR}" ]; then
+            echo -e "${BLUE}日志目录: ${E2E_LOG_DIR}${NC}"
+        fi
     fi
 }
 
