@@ -155,6 +155,9 @@ class DirectPipeline(BasePipeline):
             # 存储到数据库（保留完整的 logprobs/token_ids）
             await self._store_trajectory(context, run_id=context.run_id)
 
+            # 剥离 proxy 强制注入但不应暴露给客户端的字段（轨迹已存储，此处安全移除）
+            self._strip_injected_fields(context.raw_response)
+
             # 确保响应中所有可选字段有默认值
             self._ensure_response_defaults(context.raw_response)
 

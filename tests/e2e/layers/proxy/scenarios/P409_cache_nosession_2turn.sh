@@ -48,7 +48,7 @@ log_step "验证无session时cache_hit_tokens恒为0"
 TRAJ_LIST=$(curl_with_log -s "${BASE_URL}/trajectories?run_id=${RUN_ID}")
 
 ALL_CACHE_ZERO=true
-ERRORS=""
+FAILS=""
 
 # 提取所有session_id，逐个查询轨迹记录
 SESSION_IDS=$(echo "$TRAJ_LIST" | python3 -c "
@@ -87,12 +87,12 @@ try:
             sys.exit(1)
     print(f'OK: {len(records)}条记录cache_hit=0')
 except Exception as e:
-    print(f'ERROR:查询失败:{e}')
+    print(f'FAIL:查询失败:{e}')
     sys.exit(1)
 " 2>/dev/null)
 
     if ! echo "$HIT_RESULT" | grep -q "^OK:"; then
-        ERRORS="${ERRORS} ${sid}:${HIT_RESULT}"
+        FAILS="${FAILS} ${sid}:${HIT_RESULT}"
         ALL_CACHE_ZERO=false
     else
         log_success "${sid}: ${HIT_RESULT}"
@@ -103,7 +103,7 @@ if [ "$ALL_CACHE_ZERO" = true ]; then
     TESTS_TOTAL=$((TESTS_TOTAL + 1)); TESTS_PASSED=$((TESTS_PASSED + 1))
     log_success "所有轨迹记录cache_hit_tokens=0（无session确认）"
 else
-    assert_fail "cache_hit_tokens不为0" "${ERRORS}"
+    assert_fail "cache_hit_tokens不为0" "${FAILS}"
 fi
 
 # 清理

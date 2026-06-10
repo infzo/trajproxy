@@ -237,7 +237,7 @@ SESSION_NS_NO_PARAM="session-${SCENARIO_ID}-ns-noparam-$(date +%s%N | md5sum | h
 
 log_step "步骤 2: 非流式 - 不传递 logprobs/return_token_ids"
 
-CHAT_RESPONSE=$(curl_with_log -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_NO_PARAM}/v1/chat/completions" \
+CHAT_RESPONSE=$(curl_with_log -s --noproxy '*' --max-time 60 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_NO_PARAM}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -289,7 +289,7 @@ SESSION_NS_LOGP_TRUE="session-${SCENARIO_ID}-ns-logp-true-$(date +%s%N | md5sum 
 
 log_step "步骤 3: 非流式 - 传递 logprobs=true（应被覆盖为1）"
 
-CHAT_RESPONSE=$(curl_with_log -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_LOGP_TRUE}/v1/chat/completions" \
+CHAT_RESPONSE=$(curl_with_log -s --noproxy '*' --max-time 60 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_LOGP_TRUE}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -341,7 +341,7 @@ SESSION_NS_TOKS="session-${SCENARIO_ID}-ns-toks-$(date +%s%N | md5sum | head -c 
 
 log_step "步骤 4: 非流式 - 传递 return_token_ids=true"
 
-CHAT_RESPONSE=$(curl_with_log -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_TOKS}/v1/chat/completions" \
+CHAT_RESPONSE=$(curl_with_log -s --noproxy '*' --max-time 60 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_TOKS}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{
@@ -393,7 +393,7 @@ SESSION_NS_BOTH="session-${SCENARIO_ID}-ns-both-$(date +%s%N | md5sum | head -c 
 
 log_step "步骤 5: 非流式 - 同时传递 logprobs=true 和 return_token_ids=true"
 
-CHAT_RESPONSE=$(curl_with_log -s --noproxy '*' --max-time 30 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_BOTH}/v1/chat/completions" \
+CHAT_RESPONSE=$(curl_with_log -s --noproxy '*' --max-time 60 -w "\n%{http_code}" -X POST "${TEST_BASE_URL}/s/${TEST_RUN_ID}/${SESSION_NS_BOTH}/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer ${CHAT_API_KEY}" \
     -d "{

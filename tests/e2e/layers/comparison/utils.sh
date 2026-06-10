@@ -223,9 +223,16 @@ compare_openai_nonstream() {
     local label="$3"
     log_info "OpenAI 非流式对比 (${label})..."
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    if ! python3 "${COMPARE_PY}" --mode nonstream --api openai --vllm "$vllm_file" --proxy "$proxy_file" --label "$label"; then
+    local compare_output rc=0
+    compare_output=$(python3 "${COMPARE_PY}" --mode nonstream --api openai \
+        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label") || rc=$?
+    echo "$compare_output"
+    if [ $rc -ne 0 ]; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        log_failure "OpenAI 非流式对比失败 (${label})" "详见上方 ERROR 输出"
+        local fail_detail
+        fail_detail=$(echo "$compare_output" | grep -E '^FAIL:' | tr '\n' ';' | sed 's/;$//')
+        log_failure "OpenAI 非流式对比失败 (${label})" \
+            "${fail_detail:-未知错误，查看 compare.py 原始输出}"
         return 1
     fi
     TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -237,9 +244,16 @@ compare_openai_stream() {
     local label="$3"
     log_info "OpenAI 流式对比 (${label})..."
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    if ! python3 "${COMPARE_PY}" --mode stream --api openai --vllm "$vllm_file" --proxy "$proxy_file" --label "$label"; then
+    local compare_output rc=0
+    compare_output=$(python3 "${COMPARE_PY}" --mode stream --api openai \
+        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label") || rc=$?
+    echo "$compare_output"
+    if [ $rc -ne 0 ]; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        log_failure "OpenAI 流式对比失败 (${label})" "详见上方 ERROR 输出"
+        local fail_detail
+        fail_detail=$(echo "$compare_output" | grep -E '^FAIL:' | tr '\n' ';' | sed 's/;$//')
+        log_failure "OpenAI 流式对比失败 (${label})" \
+            "${fail_detail:-未知错误，查看 compare.py 原始输出}"
         return 1
     fi
     TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -251,9 +265,16 @@ compare_claude_nonstream() {
     local label="$3"
     log_info "Claude 非流式对比 (${label})..."
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    if ! python3 "${COMPARE_PY}" --mode nonstream --api claude --vllm "$vllm_file" --proxy "$proxy_file" --label "$label"; then
+    local compare_output rc=0
+    compare_output=$(python3 "${COMPARE_PY}" --mode nonstream --api claude \
+        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label") || rc=$?
+    echo "$compare_output"
+    if [ $rc -ne 0 ]; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        log_failure "Claude 非流式对比失败 (${label})" "详见上方 ERROR 输出"
+        local fail_detail
+        fail_detail=$(echo "$compare_output" | grep -E '^FAIL:' | tr '\n' ';' | sed 's/;$//')
+        log_failure "Claude 非流式对比失败 (${label})" \
+            "${fail_detail:-未知错误，查看 compare.py 原始输出}"
         return 1
     fi
     TESTS_PASSED=$((TESTS_PASSED + 1))
@@ -265,9 +286,16 @@ compare_claude_stream() {
     local label="$3"
     log_info "Claude 流式对比 (${label})..."
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    if ! python3 "${COMPARE_PY}" --mode stream --api claude --vllm "$vllm_file" --proxy "$proxy_file" --label "$label"; then
+    local compare_output rc=0
+    compare_output=$(python3 "${COMPARE_PY}" --mode stream --api claude \
+        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label") || rc=$?
+    echo "$compare_output"
+    if [ $rc -ne 0 ]; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        log_failure "Claude 流式对比失败 (${label})" "详见上方 ERROR 输出"
+        local fail_detail
+        fail_detail=$(echo "$compare_output" | grep -E '^FAIL:' | tr '\n' ';' | sed 's/;$//')
+        log_failure "Claude 流式对比失败 (${label})" \
+            "${fail_detail:-未知错误，查看 compare.py 原始输出}"
         return 1
     fi
     TESTS_PASSED=$((TESTS_PASSED + 1))

@@ -450,7 +450,7 @@ else:
         log_error "$result"
         TESTS_TOTAL=$((TESTS_TOTAL + 1))
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        log_failure "$result" ""
+        log_failure "${result#FAIL:}" ""
     fi
 }
 

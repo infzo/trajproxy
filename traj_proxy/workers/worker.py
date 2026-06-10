@@ -17,6 +17,7 @@ from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.proxy_core.processor_manager import ProcessorManager
 from traj_proxy.store.model_synchronizer import ModelSynchronizer
 from traj_proxy.proxy_core.provider import TrajectoryProvider
+from traj_proxy.proxy_core.infer_client import close_shared_client
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.config import get_database_pool_config, get_max_concurrent_requests
 from traj_proxy.utils.validators import normalize_run_id
@@ -317,6 +318,9 @@ class ProxyWorker:
             await self.processor_manager.stop_idle_eviction()
             # 清理 LRU 缓存
             await self.processor_manager.clear_cache()
+
+        # 关闭进程级共享 HTTP client（必须在 Processor 清理之后）
+        await close_shared_client()
 
         if self.model_synchronizer:
             try:

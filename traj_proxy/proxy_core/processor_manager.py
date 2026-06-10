@@ -30,7 +30,7 @@ from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.store.models import ModelConfig
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
-from traj_proxy.utils.config import get_models_dir, get_infer_client_config, get_processor_cache_max_size, get_processor_idle_timeout
+from traj_proxy.utils.config import get_models_dir, get_processor_cache_max_size, get_processor_idle_timeout
 
 # API 数据模型已移至 schemas 模块
 from traj_proxy.serve.schemas import (
@@ -146,16 +146,7 @@ class ProcessorManager:
         if token_in_token_out and tokenizer_path:
             shared_tokenizer = await self._tokenizer_cache.get_or_load(tokenizer_path)
 
-        # 获取 InferClient 超时配置
-        infer_config = get_infer_client_config()
-
-        infer_client = InferClient(
-            base_url=url,
-            api_key=api_key,
-            timeout=infer_config.get("read_timeout", 600),
-            connect_timeout=infer_config.get("connect_timeout", 60),
-            max_connections=infer_config.get("max_connections", 1000)
-        )
+        infer_client = InferClient(base_url=url, api_key=api_key)
 
         config = {
             "token_in_token_out": token_in_token_out
@@ -185,12 +176,11 @@ class ProcessorManager:
             self._last_access_time[key] = time.monotonic()
 
     async def _release_processor_async(self, processor: Processor) -> None:
-        """异步释放 Processor 持有的所有资源"""
-        if processor.infer_client:
-            try:
-                await processor.infer_client.close()
-            except Exception as e:
-                logger.debug(f"释放 InferClient 异常（可忽略）: {e}")
+        """异步释放 Processor 持有的资源
+
+        InferClient 使用进程级共享的 httpx.AsyncClient，不在此处关闭。
+        仅释放 tokenizer 等独占资源的引用。
+        """
         if processor.tokenizer_path and processor.token_in_token_out:
             self._tokenizer_cache.release(processor.tokenizer_path)
 

@@ -375,7 +375,7 @@ errors, info = check_field_consistency(ns_body, s_body)
 for line in info:
     print(f"INFO:{line}")
 for err in errors:
-    print(f"ERROR:{err}")
+    print(f"FAIL:{err}")
 ' "$DIRECT_NS_TMPFILE" "$DIRECT_S_TMPFILE"
 )
 
@@ -383,7 +383,7 @@ for err in errors:
 rm -f "$DIRECT_NS_TMPFILE" "$DIRECT_S_TMPFILE"
 
 # 解析比较结果
-DIRECT_ERRORS=$(echo "$DIRECT_CONSISTENCY_RESULT" | grep "^ERROR:" || true)
+DIRECT_FAILS=$(echo "$DIRECT_CONSISTENCY_RESULT" | grep "^FAIL:" || true)
 DIRECT_INFOS=$(echo "$DIRECT_CONSISTENCY_RESULT" | grep "^INFO:" || true)
 
 # 打印详细信息
@@ -391,13 +391,13 @@ log_info "一致性检查详情:"
 echo "$DIRECT_INFOS" | sed 's/^INFO:/  /'
 
 # 断言检查
-if [ -z "$DIRECT_ERRORS" ]; then
+if [ -z "$DIRECT_FAILS" ]; then
     log_success "直接转发模式下流式与非流式轨迹关键字段一致性检查通过"
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     assert_fail "直接转发模式下流式与非流式轨迹存在不一致"
-    echo "$DIRECT_ERRORS" | sed 's/^ERROR:/  /'
+    echo "$DIRECT_FAILS" | sed 's/^FAIL:/  /'
 fi
 
 echo ""

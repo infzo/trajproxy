@@ -39,7 +39,7 @@ if recs:
     ids = r.get('response_ids', [])
     print(f'response_ids长度={len(ids)}')
 else:
-    print('ERROR:无轨迹记录')
+    print('FAIL:无轨迹记录')
 " 2>/dev/null)
 log_info "$HAS_RESPONSE_IDS"
 

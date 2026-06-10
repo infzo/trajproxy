@@ -617,12 +617,12 @@ def main():
             try:
                 vllm_data = json.loads(vllm_raw.strip())
             except json.JSONDecodeError as e:
-                print(f"ERROR:vLLM 响应 JSON 解析失败: {e}")
+                print(f"FAIL:vLLM 响应 JSON 解析失败: {e}")
                 sys.exit(1)
             try:
                 proxy_data = json.loads(proxy_raw.strip())
             except json.JSONDecodeError as e:
-                print(f"ERROR:proxy 响应 JSON 解析失败: {e}")
+                print(f"FAIL:proxy 响应 JSON 解析失败: {e}")
                 sys.exit(1)
             errors, infos = compare_openai_nonstream(vllm_data, proxy_data, args.label)
         else:
@@ -633,12 +633,12 @@ def main():
             try:
                 vllm_data = json.loads(vllm_raw.strip())
             except json.JSONDecodeError as e:
-                print(f"ERROR:vLLM 响应 JSON 解析失败: {e}")
+                print(f"FAIL:vLLM 响应 JSON 解析失败: {e}")
                 sys.exit(1)
             try:
                 proxy_data = json.loads(proxy_raw.strip())
             except json.JSONDecodeError as e:
-                print(f"ERROR:proxy 响应 JSON 解析失败: {e}")
+                print(f"FAIL:proxy 响应 JSON 解析失败: {e}")
                 sys.exit(1)
             errors, infos = compare_claude_nonstream(vllm_data, proxy_data, args.label)
         else:
@@ -648,7 +648,7 @@ def main():
     for line in infos:
         print(f"INFO:{line}")
     for err in errors:
-        print(f"ERROR:{err}")
+        print(f"FAIL:{err}")
 
     if errors:
         sys.exit(1)

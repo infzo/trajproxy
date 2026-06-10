@@ -106,7 +106,7 @@ for req in reversed(data.get("requests", [])):
         break
 
 if infer_req is None:
-    print("ERROR:no_infer_request")
+    print("FAIL:no_infer_request")
     sys.exit(1)
 
 body = infer_req.get("body", {})
@@ -153,7 +153,7 @@ try:
         content = reasoning + content
     print(content)
 except Exception as e:
-    print(f'ERROR:提取assistant内容失败: {e}')
+    print(f'FAIL:提取assistant内容失败: {e}')
 " 2>/dev/null
 }
 

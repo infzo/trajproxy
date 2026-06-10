@@ -365,7 +365,7 @@ errors, info = check_field_consistency(ns_body, s_body)
 for line in info:
     print(f"INFO:{line}")
 for err in errors:
-    print(f"ERROR:{err}")
+    print(f"FAIL:{err}")
 ' "$CONSISTENCY_NS_TMPFILE" "$CONSISTENCY_S_TMPFILE"
 )
 
@@ -373,7 +373,7 @@ for err in errors:
 rm -f "$CONSISTENCY_NS_TMPFILE" "$CONSISTENCY_S_TMPFILE"
 
 # 解析比较结果
-CONSISTENCY_ERRORS=$(echo "$CONSISTENCY_RESULT" | grep "^ERROR:" || true)
+CONSISTENCY_FAILS=$(echo "$CONSISTENCY_RESULT" | grep "^FAIL:" || true)
 CONSISTENCY_INFOS=$(echo "$CONSISTENCY_RESULT" | grep "^INFO:" || true)
 
 # 打印详细信息
@@ -381,13 +381,13 @@ log_info "一致性检查详情:"
 echo "$CONSISTENCY_INFOS" | sed 's/^INFO:/  /'
 
 # 断言检查
-if [ -z "$CONSISTENCY_ERRORS" ]; then
+if [ -z "$CONSISTENCY_FAILS" ]; then
     log_success "流式与非流式轨迹关键字段一致性检查通过"
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     assert_fail "流式与非流式轨迹存在不一致"
-    echo "$CONSISTENCY_ERRORS" | sed 's/^ERROR:/  /'
+    echo "$CONSISTENCY_FAILS" | sed 's/^FAIL:/  /'
 fi
 
 echo ""

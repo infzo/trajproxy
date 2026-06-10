@@ -1,8 +1,19 @@
+"""
+Infer 服务客户端
+
+使用进程级共享的 httpx.AsyncClient 实现纯协程 HTTP 调用。
+所有 InferClient 实例共享同一个 httpx.AsyncClient（TCP 连接池），
+httpx 内部按 (scheme, host, port) 自动管理连接，天然支持多后端复用。
+
+模块级函数：
+  - get_shared_client(): 获取共享的 httpx.AsyncClient（懒初始化）
+  - close_shared_client(): 关闭共享 client（仅 Worker shutdown 时调用）
+"""
+
 import json
 import asyncio
 import traceback
 import httpx
-import logging
 from typing import Dict, Any, AsyncIterator, List, Union, Optional
 
 from traj_proxy.exceptions import InferServiceError, InferTimeoutError
@@ -17,12 +28,77 @@ PromptInput = Union[str, List[int]]
 # 需要重试的 HTTP 状态码
 _RETRY_STATUS_CODES = {502, 503, 504}
 
+# ========== 进程级共享 httpx.AsyncClient ==========
+
+_shared_client: Optional[httpx.AsyncClient] = None
+_shared_client_lock: Optional[asyncio.Lock] = None
+
+
+async def get_shared_client() -> httpx.AsyncClient:
+    """获取进程级共享的 httpx.AsyncClient（懒初始化，线程安全）
+
+    所有 InferClient 实例共享同一个 client，httpx 内部按
+    (scheme, host, port) 自动管理连接池，天然支持多后端复用。
+
+    Returns:
+        共享的 httpx.AsyncClient 实例
+    """
+    global _shared_client, _shared_client_lock
+
+    if _shared_client is not None:
+        return _shared_client
+
+    # 懒创建锁（asyncio.Lock 不能在事件循环外创建）
+    if _shared_client_lock is None:
+        _shared_client_lock = asyncio.Lock()
+
+    async with _shared_client_lock:
+        if _shared_client is None:
+            config = get_infer_client_config()
+            effective_max = config.get("max_connections", 1000)
+            effective_max = effective_max if effective_max > 0 else None
+
+            _shared_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(
+                    connect=config.get("connect_timeout", 60),
+                    read=config.get("read_timeout", 600),
+                    write=60.0,
+                    pool=60.0,
+                ),
+                limits=httpx.Limits(
+                    max_connections=effective_max,
+                    max_keepalive_connections=(
+                        max(effective_max // 2, 4) if effective_max else 16
+                    ),
+                ),
+            )
+            limits_str = f"max_connections={effective_max}" if effective_max else "unlimited"
+            logger.info(f"共享 httpx.AsyncClient 已初始化 ({limits_str})")
+
+    return _shared_client
+
+
+async def close_shared_client() -> None:
+    """关闭进程级共享 httpx.AsyncClient（仅 Worker shutdown 时调用）"""
+    global _shared_client, _shared_client_lock
+
+    if _shared_client is not None:
+        await _shared_client.aclose()
+        _shared_client = None
+        _shared_client_lock = None
+        logger.info("共享 httpx.AsyncClient 已关闭")
+
+
+# ========== InferClient ==========
+
 
 class InferClient:
-    """Infer 服务客户端 - 使用 httpx 异步 HTTP 实现
+    """Infer 服务客户端 - 轻量级适配器
 
-    通过 httpx.AsyncClient 实现纯协程 HTTP 调用，
-    无需线程池，直接在事件循环中处理 TCP I/O。
+    引用进程级共享的 httpx.AsyncClient，自身不持有也不管理 HTTP 连接。
+    close() 为 no-op，因此可被 ProcessorManager 安全淘汰而不影响
+    其他正在进行的请求。
+
     针对 502/503/504 错误实现手动重试。
     """
 
@@ -56,30 +132,22 @@ class InferClient:
         self,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        timeout: float = 600.0,
-        connect_timeout: float = 60.0,
-        max_connections: int = 32,
         max_retries: Optional[int] = None,
         **kwargs
     ):
+        """初始化 InferClient
+
+        Args:
+            base_url: 推理服务基地址
+            api_key: API 密钥
+            max_retries: 最大重试次数，默认从配置读取
+            **kwargs: 保留向后兼容（timeout/connect_timeout/max_connections 已移至共享 client）
+        """
         if base_url is None or api_key is None:
             raise ValueError("InferClient base_url 和 api_key 必须提供")
 
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-
-        self._timeout = httpx.Timeout(
-            connect=connect_timeout,
-            read=timeout,
-            write=60.0,
-            pool=60.0
-        )
-        # max_connections=0 时不限制连接数，由后端推理服务控制并发
-        effective_max = max_connections if max_connections > 0 else None
-        self._limits = httpx.Limits(
-            max_connections=effective_max,
-            max_keepalive_connections=max(effective_max // 2, 4) if effective_max else 16
-        )
 
         if max_retries is None:
             config = get_infer_client_config()
@@ -87,29 +155,15 @@ class InferClient:
         else:
             self._max_retries = max_retries
 
-        self._client: Optional[httpx.AsyncClient] = None
-        self._client_lock = asyncio.Lock()
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """懒初始化 httpx.AsyncClient"""
-        if self._client is not None:
-            return self._client
-
-        async with self._client_lock:
-            if self._client is None:
-                self._client = httpx.AsyncClient(
-                    timeout=self._timeout,
-                    limits=self._limits,
-                    headers=self._build_common_headers()
-                )
-                logger.debug(f"[{self.base_url}] InferClient: 已初始化 httpx.AsyncClient")
-        return self._client
-
-    def _build_common_headers(self) -> Dict[str, str]:
-        return {
+    def _build_headers(self, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """构建请求 header（每次请求携带 Authorization）"""
+        headers = {
             "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
+        if extra_headers:
+            headers.update(extra_headers)
+        return headers
 
     def _transform_chat_params_to_completion(self, kwargs: dict, request_id: str = None) -> dict:
         """将 Chat Completions 参数转换为 Completions 兼容格式
@@ -149,11 +203,9 @@ class InferClient:
 
         return result
 
-    async def close(self):
-        """释放资源"""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+    async def close(self) -> None:
+        """No-op: httpx.AsyncClient 由进程级共享 client 管理"""
+        pass
 
     async def __aenter__(self) -> "InferClient":
         return self
@@ -185,8 +237,8 @@ class InferClient:
         extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """非流式请求处理，带重试"""
-        client = await self._get_client()
-        headers = extra_headers or {}
+        client = await get_shared_client()
+        headers = self._build_headers(extra_headers)
 
         last_error = None
         for attempt in range(self._max_retries + 1):
@@ -238,8 +290,8 @@ class InferClient:
         extra_headers: Optional[Dict[str, str]] = None
     ) -> AsyncIterator[Dict[str, Any]]:
         """流式请求处理，返回异步生成器"""
-        client = await self._get_client()
-        headers = extra_headers or {}
+        client = await get_shared_client()
+        headers = self._build_headers(extra_headers)
 
         # 流式请求的重试：仅在建立连接阶段重试
         last_error = None
