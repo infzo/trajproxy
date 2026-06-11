@@ -2,7 +2,7 @@
 
 > 本文档记录 TrajProxy 项目的版本发布历史。
 > 本文件中引用的场景 ID 为当时使用的编号（F1xx/F2xx/F3xx/P100 等旧前缀）。
-> 2026-06-08 编号体系重构后（N=Nginx, P=Proxy, T=Performance），请参考 docs/TEST_CASE_CATALOG.md 获取当前编号。
+> 2026-06-08 编号体系重构后（N=Nginx, P=Proxy, T=Performance），请参考 docs/testing/test-case-catalog.md 获取当前编号。
 
 ---
 

@@ -22,14 +22,14 @@ log_step "非流式对比 (direct+tr)"
 NS_REQ=$(build_openai_reasoning_tool_request "$COMPARISON_MODEL_NAME")
 VLLM_NS=$(send_openai_nonstream "$VLLM_URL" "$NS_REQ")
 PROXY_NS=$(send_openai_nonstream "$NGINX_URL" "$NS_REQ" "$SESS_PATH")
-compare_openai_nonstream "$VLLM_NS" "$PROXY_NS" "C101-direct-reasoning-tool" "true"
+compare_openai_nonstream "$VLLM_NS" "$PROXY_NS" "C101-direct-reasoning-tool" "true" "content"
 rm -f "$VLLM_NS" "$PROXY_NS"
 
 log_step "流式对比 (direct+tr)"
 S_REQ=$(build_openai_reasoning_tool_stream_request "$COMPARISON_MODEL_NAME")
 VLLM_S=$(send_openai_stream "$VLLM_URL" "$S_REQ")
 PROXY_S=$(send_openai_stream "$NGINX_URL" "$S_REQ" "$SESS_PATH")
-compare_openai_stream "$VLLM_S" "$PROXY_S" "C101-direct-reasoning-tool-stream" "true"
+compare_openai_stream "$VLLM_S" "$PROXY_S" "C101-direct-reasoning-tool-stream" "true" "content"
 rm -f "$VLLM_S" "$PROXY_S"
 
 delete_model "$COMPARISON_MODEL_NAME" "$RUN_ID"

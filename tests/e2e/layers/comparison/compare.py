@@ -490,8 +490,14 @@ def parse_openai_sse(raw: str) -> list:
     return chunks
 
 
-def compare_openai_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[list, list]:
-    """对比 OpenAI chat/completions 流式响应"""
+def compare_openai_stream(vllm_raw: str, proxy_raw: str, label: str,
+                          extra_skip_paths: set = None) -> Tuple[list, list]:
+    """对比 OpenAI chat/completions 流式响应
+
+    Args:
+        extra_skip_paths: 路径子串集合，匹配的路径跳过值对比（如 {"content"}）
+    """
+    extra_skip_paths = extra_skip_paths or set()
     errors, infos = [], []
     infos.append(f"[{label}] OpenAI 流式对比")
 
@@ -544,7 +550,9 @@ def compare_openai_stream(vllm_raw: str, proxy_raw: str, label: str) -> Tuple[li
     
 
     # 去除空白后对比
-    if v_content.strip() != p_content.strip():
+    if "content" in extra_skip_paths:
+        infos.append(f"  合并后 content: 已配置跳过对比 ✓ (vllm_len={len(v_content)}, proxy_len={len(p_content)})")
+    elif v_content.strip() != p_content.strip():
         diff_stats = compute_diff_stats(v_content, p_content)
         errors.append(f"合并后 content 不一致 (vllm={diff_stats['vllm_len']}, proxy={diff_stats['proxy_len']}, "
                       f"word_similarity={diff_stats['word_similarity']:.2f})")
@@ -923,7 +931,9 @@ def main():
                                                      with_reasoning=args.with_reasoning,
                                                      extra_skip_paths=extra_skip)
         else:
-            errors, infos = compare_openai_stream(vllm_raw, proxy_raw, args.label)
+            extra_skip = {s.strip() for s in args.skip_paths.split(",") if s.strip()} if args.skip_paths else None
+            errors, infos = compare_openai_stream(vllm_raw, proxy_raw, args.label,
+                                                  extra_skip_paths=extra_skip)
 
     elif args.api == "claude":
         if args.mode == "nonstream":

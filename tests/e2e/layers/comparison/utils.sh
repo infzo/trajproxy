@@ -249,13 +249,16 @@ compare_openai_stream() {
     local proxy_file="$2"
     local label="$3"
     local has_reasoning="${4:-false}"
+    local skip_paths="${5:-}"
     local reasoning_flag=""
+    local skip_paths_flag=""
     [[ "$has_reasoning" == "true" ]] && reasoning_flag="--with-reasoning"
+    [[ -n "$skip_paths" ]] && skip_paths_flag="--skip-paths $skip_paths"
     log_info "OpenAI 流式对比 (${label})..."
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     local compare_output rc=0
     compare_output=$(python3 "${COMPARE_PY}" --mode stream --api openai \
-        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label" $reasoning_flag) || rc=$?
+        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label" $reasoning_flag $skip_paths_flag) || rc=$?
     echo "$compare_output"
     if [ $rc -ne 0 ]; then
         TESTS_FAILED=$((TESTS_FAILED + 1))
@@ -390,10 +393,12 @@ build_claude_reasoning_stream_request() {
 
 build_claude_reasoning_tool_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"max_tokens\":1024,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
+    # TITO 路径 chat template 无 enable_thinking，模型输出冗长，需更大预算
+    echo "{\"model\":\"${model}\",\"max_tokens\":2048,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
 }
 
 build_claude_reasoning_tool_stream_request() {
     local model="$1"
-    echo "{\"model\":\"${model}\",\"max_tokens\":1024,\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
+    # TITO 路径 chat template 无 enable_thinking，模型输出冗长，需更大预算
+    echo "{\"model\":\"${model}\",\"max_tokens\":2048,\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
 }
