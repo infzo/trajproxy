@@ -6,6 +6,69 @@
 
 ---
 
+## [0.3.1] - 2026-06-11
+
+**类型**: 重构 + 功能增强 + Bug 修复
+
+### 重构
+- **E2E 测试体系重构**: 按功能分层重编号全部测试场景（N=nginx, P=proxy, T=performance, A=archive, C=comparison），场景文件以层级前缀命名，内部 ID 同步更新
+- **新增 Comparison 对比层 C1xx/C2xx/C3xx**: C1xx（OpenAI Direct × 5 组合 + 多轮 2 场景）、C2xx（Claude 格式同构）、C3xx（Responses API 4 场景），共 18 个对比场景，覆盖非流式/流式/多轮全矩阵
+- **E2E 框架增强**: 提取并发执行框架到公共 `utils.sh`，支持 `--jobs N` 并行执行和日志落盘；新增 `--only/--skip` CLI 过滤标志和失败汇总报告
+- **共享 HTTP client 重构**: E2E 对比层提取共享 HTTP client 工具函数，减少重复代码
+- **解析器兼容层重构**: 对齐 vLLM 解析顺序和 `tool_choice` 分支逻辑，提升 Direct Pipeline 流式一致性
+
+### 新增功能
+- **Nginx Responses API 路由**: nginx 配置新增 `/v1/responses` 路由，支持 OpenAI Responses API 请求透传
+- **LiteLLM custom_openai provider**: 将 `openai/*` 改为 `custom_openai/*`，避免 LiteLLM 原生 Responses API 路由 404（`{api_base}/responses` 不存在）
+- **vLLM token_ids 轨迹提取**: 从 vLLM 响应中提取 `token_ids` 字段用于轨迹记录，提升轨迹数据完整性
+- **vLLM 响应字段补全**: 补全 vLLM 响应可选字段默认值（如 `prompt_tokens_details` 等），确保 C 系列对比测试字段对齐
+- **vLLM 扩展参数兼容**: E2E utils 新增 `_wrap_vllm_extensions_for_litellm`，LiteLLM proxy 路径自动将 `chat_template_kwargs`/`documents` 包装到 `extra_body`
+- **SSE 事件名推断**: `parse_claude_sse` 和 `parse_responses_sse` 支持无 `event:` 行的 SSE 流（如 LiteLLM 转换），自动从 data JSON 的 `type` 字段推断事件名
+- **上游截断检测**: Claude 流式对比检测 `message_start` 有无 `message_stop`，Responses 流式检测 `response.created` 有无 `response.completed`，截断时跳过对比
+- **Comparison proxy missing content 容错**: proxy 缺失 message content 时降级为 INFO（转换层差异，可接受），避免误报
+
+### 轨迹查看器增强
+- **下载按钮**: 支持选择本地文件夹，按 `run_id` 创建子目录，逐 session 下载 JSON（含进度条）
+- **差异对比**: 轨迹分析模态框新增差异对比标签页，分层显示（默认折叠差异消息，点击展开详细内容）
+- **DAG 树形布局**: 子节点优先与父同行、多子节点分行（行数=叶子数），连线改为右→左水平锚点，杜绝穿越节点
+
+### Bug 修复
+- **tool_call 解析逻辑**: 修复 Hermes 工具解析器在特定场景下的 `tool_calls` 字段缺失问题
+- **proxy 内部字段泄露**: 转发流式响应前自动剥离 proxy 内部注入字段（如内部追踪标识），避免污染客户端响应
+- **logprobs/token_ids 默认值**: 从 `_ensure_response_defaults` 中移除 `logprobs`/`token_ids` 默认值注入，防止非请求场景意外返回这些字段
+- **Claude 对比降级**: Claude 格式对比中转换层差异降级为 INFO 级别，流式追加独立 `usage` chunk 避免字段缺失
+- **reasoning/tool_calls 字段**: 对齐 vLLM 解析顺序和 `tool_choice` 分支，修复 Direct Pipeline 流式响应中 `reasoning_content` 和 `tool_calls` 字段缺失
+- **重复注册 409**: 修复模型重复注册时未正确返回 409 状态码的问题
+- **proxy 缓存场景**: 修复缓存场景测试参数不完整和 reasoning 回传缺失
+- **raw_request stream 字段**: 补充 `stream` 字段以完整记录原始请求
+
+### 测试
+- **C1xx**: OpenAI 格式 Direct/TITO × plain/tool/reasoning/reasoning+tool + 多轮推理工具（非流式/流式）
+- **C2xx**: Claude 格式同构（7 个场景）
+- **C3xx**: Responses API Direct/TITO × reasoning+tool + 多轮（4 个场景）
+- **E2E 文档拆分**: 测试文档拆分为子系列（e2e-framework / e2e-case-desc / e2e-proxy-p1xx-p2xx / e2e-proxy-p3xx / e2e-proxy-p4xx / e2e-comparison / e2e-performance / e2e-nginx / e2e-archive）
+
+### 文档更新
+- **可观测性设计文档**: 新增 `docs/design/observability.md`，分析当前可观测性能力与痛点，提出 Metrics/Tracing/健康检查增强方案
+- **E2E 测试文档迁移**: 测试文档从 `docs/` 迁移至 `docs/testing/` 子目录
+
+### 影响范围
+- `configs/nginx.conf.example`, `dockers/*/configs/nginx.conf` - Responses API 路由
+- `dockers/*/configs/litellm.yaml` - custom_openai provider
+- `traj_proxy/proxy_core/pipeline/direct_pipeline.py` - token_ids 提取 + 内部字段剥离
+- `traj_proxy/proxy_core/pipeline/token_pipeline.py` - vLLM 解析顺序对齐
+- `traj_proxy/proxy_core/parsers/parser_manager.py` - tool_choice 分支修复
+- `traj_proxy/proxy_core/builders/openai_builder.py` - 响应字段默认值补全
+- `traj_proxy/proxy_core/builders/stream_builder.py` - usage chunk 独立追加
+- `tests/e2e/` - E2E 测试体系全面重构
+- `tests/e2e/layers/comparison/compare.py` - SSE 解析增强 + 截断检测
+- `tests/e2e/layers/comparison/utils.sh` - vLLM 扩展参数兼容
+- `docs/design/observability.md` - 可观测性设计文档（新增）
+- `docs/testing/` - E2E 测试文档子系列（新增/迁移）
+- `scripts/replay_trajectory_viewer.html` - 下载按钮 + 差异对比 + DAG 布局
+
+---
+
 ## [0.3.0] - 2026-06-02
 
 **类型**: 重构 + Bug 修复 + 功能增强
