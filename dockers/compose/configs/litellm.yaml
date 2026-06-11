@@ -1,13 +1,21 @@
 model_list:
   # 通用匹配：所有模型请求都路由到 traj_proxy
+  # 使用 custom_openai（自定义 OpenAI-compatible API），语义清晰且满足路由需求：
+  # openai 等主流 provider 有原生 Responses API 支持，会将请求发到 {api_base}/responses
+  # （TrajProxy 仅有 /chat/completions 端点，导致 404）。
+  # custom_openai 满足 3 个条件：
+  #   1. get_provider_responses_api_config 返回 None（无原生 Responses 支持）
+  #   2. 未在 providers.json 中注册
+  #   3. 继承 OpenAIGPTConfig，URL 拼接为 {api_base}/chat/completions
+  # 最终走 litellm_completion_transformation_handler 转换路径 ✅
   - model_name: "*"
     litellm_params:
-      model: "openai/*"
+      model: "custom_openai/*"
       api_base: http://traj_proxy:12300/v1
       api_key: "sk-1234"
   - model_name: "*"
     litellm_params:
-      model: "openai/*"
+      model: "custom_openai/*"
       api_base: http://traj_proxy:12301/v1
       api_key: "sk-1234"
 

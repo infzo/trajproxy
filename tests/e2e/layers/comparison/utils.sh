@@ -108,6 +108,37 @@ delete_model() {
 }
 
 # ========================================
+# LiteLLM proxy 路径 vLLM 扩展参数包装
+# ========================================
+
+# 判断 URL 是否走 LiteLLM proxy 路径（12345 端口）
+# 此路径下 OpenAI SDK 不识别 vLLM 扩展参数（如 chat_template_kwargs），
+# 需将其包装到 extra_body 中，LiteLLM 在转发给下游时会自动解包 extra_body
+# 内容到 HTTP body 顶层，到 TrajProxy 时恢复为 top-level 参数正常处理。
+_is_litellm_proxy_path() {
+    [[ "$1" == *":12345"* ]]
+}
+
+# 将 vLLM 扩展参数包装到 extra_body（仅 LiteLLM proxy 路径使用）
+# 输入/输出均为 JSON 字符串
+_wrap_vllm_extensions_for_litellm() {
+    echo "$1" | python3 -c "
+import json, sys
+body = json.load(sys.stdin)
+vllm_extensions = ['chat_template_kwargs', 'documents']
+extra = {k: body.pop(k) for k in vllm_extensions if k in body}
+if extra:
+    existing = body.get('extra_body', {})
+    if isinstance(existing, dict):
+        existing.update(extra)
+    else:
+        existing = extra
+    body['extra_body'] = existing
+json.dump(body, sys.stdout)
+"
+}
+
+# ========================================
 # OpenAI 格式请求发送
 # ========================================
 
@@ -121,6 +152,11 @@ send_openai_nonstream() {
         full_url="${url}/${session_path}/v1/chat/completions"
     else
         full_url="${url}/v1/chat/completions"
+    fi
+
+    # LiteLLM proxy 路径：将 vLLM 扩展参数包装到 extra_body
+    if _is_litellm_proxy_path "$url"; then
+        body=$(_wrap_vllm_extensions_for_litellm "$body")
     fi
 
     local response=$(curl_with_log -s --noproxy '*' --max-time 120 -w "\n%{http_code}" \
@@ -146,6 +182,11 @@ send_openai_stream() {
         full_url="${url}/${session_path}/v1/chat/completions"
     else
         full_url="${url}/v1/chat/completions"
+    fi
+
+    # LiteLLM proxy 路径：将 vLLM 扩展参数包装到 extra_body
+    if _is_litellm_proxy_path "$url"; then
+        body=$(_wrap_vllm_extensions_for_litellm "$body")
     fi
 
     local tmpfile=$(mktemp)
