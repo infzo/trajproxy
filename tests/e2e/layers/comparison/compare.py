@@ -2,7 +2,7 @@
 """
 trajproxy vs vLLM 响应对比工具
 
-支持 OpenAI (chat/completions) 和 Claude (/v1/messages) 两种 API 格式。
+支持 OpenAI (chat/completions)、Claude (/v1/messages) 和 Responses (/v1/responses) 三种 API 格式。
 
 用法:
     # OpenAI 格式
@@ -12,6 +12,10 @@ trajproxy vs vLLM 响应对比工具
     # Claude 格式
     python3 compare.py --mode nonstream --api claude --vllm vllm.json --proxy proxy.json --label "C201"
     python3 compare.py --mode stream     --api claude --vllm vllm_sse.txt --proxy proxy_sse.txt --label "C201"
+
+    # Responses 格式
+    python3 compare.py --mode nonstream --api responses --vllm vllm.json --proxy proxy.json --label "C301"
+    python3 compare.py --mode stream     --api responses --vllm vllm_sse.txt --proxy proxy_sse.txt --label "C301"
 
 核心设计:
     - 非流式对比: 解析 JSON，逐字段/逐 content block 递归对比
@@ -55,6 +59,24 @@ CLAUDE_SKIP_FIELDS = {
     "provider_specific_fields",   # reasoning 相关 provider 字段
     "logprobs",                   # proxy 补充的 logprobs
     "prompt_token_ids",           # proxy 额外返回的 prompt token IDs
+}
+
+# Responses 格式需要跳过的运行时动态字段
+RESPONSES_SKIP_FIELDS = {
+    "id",                          # 每条 response/output item 的 id 都是运行时生成
+    "created_at",                  # 时间戳
+    "completed_at",                # 时间戳
+    "incomplete_details",          # 完成细节
+    "error",                       # 错误信息（单独处理）
+    "parallel_tool_calls",         # 并行工具调用标志
+    "truncation",                  # 截断策略
+    "background",                  # 后台执行标志
+    "metadata",                    # 用户自定义元数据
+    "temperature",                 # 采样参数（回显）
+    "top_p",                       # 采样参数（回显）
+    "max_output_tokens",           # 采样参数（回显）
+    "reasoning",                   # 推理配置（回显）
+    "tool_choice",                 # 工具选择策略（回显）
 }
 
 # ========================================
@@ -871,6 +893,371 @@ def _merge_claude_stream(events: dict) -> list:
 
 
 # ========================================
+# Responses 格式对比
+# ========================================
+
+# Responses output item 需要跳过的字段（每条 item 的 id 都是运行时生成）
+_RESPONSES_OUTPUT_SKIP = {"id"}
+
+
+def _get_responses_output_by_type(output_list: list) -> dict:
+    """将 Responses output[] 按 type 分类
+
+    Returns:
+        dict: {"reasoning": [...], "message": [...], "function_call": [...], "other": [...]}
+    """
+    result = {"reasoning": [], "message": [], "function_call": [], "other": []}
+    for item in (output_list or []):
+        t = item.get("type", "other")
+        result.get(t, result["other"]).append(item)
+    return result
+
+
+def _compare_responses_output(v_output: list, p_output: list, label: str,
+                               errors: list, infos: list,
+                               extra_skip_paths: set = None) -> None:
+    """对比 Responses output[] 数组（非流式和流式共享的核心逻辑）
+
+    策略: 与 Claude 对比类似——经转码层后文本/推理内容可能因 prompt 差异不完全一致，
+    但 function_call 是功能性核心，需严格比对。
+    """
+    extra_skip_paths = extra_skip_paths or set()
+    v_by_type = _get_responses_output_by_type(v_output)
+    p_by_type = _get_responses_output_by_type(p_output)
+
+    for btype in ["reasoning", "function_call", "message"]:
+        v_list = v_by_type[btype]
+        p_list = p_by_type[btype]
+
+        if not v_list and not p_list:
+            continue
+
+        # type 缺失：转换层差异，降级为 INFO
+        if not v_list:
+            infos.append(f"  output.{btype}: vllm 有此类型, proxy 缺失 (转换层差异，可接受)")
+            continue
+        if not p_list:
+            infos.append(f"  output.{btype}: proxy 有此类型, vllm 缺失 (转换层差异，可接受)")
+            continue
+
+        # 数量对比（转换层差异可导致数量不同，降级为 INFO）
+        if len(v_list) != len(p_list):
+            infos.append(f"  output.{btype}: 数量不同 (vllm={len(v_list)}, proxy={len(p_list)}, 转换层差异)")
+
+        for i in range(min(len(v_list), len(p_list))):
+            vi, pi = v_list[i], p_list[i]
+            prefix = f"output[{btype}][{i}]"
+
+            if btype == "reasoning":
+                # reasoning: 仅验证 summary 存在 + 无禁止 token
+                v_summaries = vi.get("summary", [])
+                p_summaries = pi.get("summary", [])
+                if p_summaries:
+                    p_text = "".join(s.get("text", "") for s in p_summaries)
+                    if p_text.strip():
+                        infos.append(f"  {prefix}.summary: 存在 ✓ (vllm_count={len(v_summaries)}, proxy_count={len(p_summaries)})")
+                    else:
+                        errors.append(f"{prefix}.summary: proxy reasoning 文本为空")
+                    check_forbidden_tokens(p_text, f"{prefix}.summary", errors, infos)
+                else:
+                    errors.append(f"{prefix}: proxy 缺失 reasoning summary")
+
+            elif btype == "function_call":
+                # function_call: 功能性核心，严格比对 name + arguments
+                compare_recursive(vi.get("name"), pi.get("name"),
+                                  f"{prefix}.name", errors, infos, _RESPONSES_OUTPUT_SKIP,
+                                  extra_skip_paths=extra_skip_paths)
+                # arguments 对比（都是 JSON 字符串）
+                v_args_str = vi.get("arguments", "")
+                p_args_str = pi.get("arguments", "")
+                if "arguments" not in extra_skip_paths:
+                    if v_args_str and p_args_str:
+                        # 尝试 JSON 解析后对比（忽略格式差异）
+                        try:
+                            v_args = json.loads(v_args_str)
+                            p_args = json.loads(p_args_str)
+                            compare_recursive(v_args, p_args, f"{prefix}.arguments",
+                                              errors, infos, set(),
+                                              extra_skip_paths=extra_skip_paths)
+                            infos.append(f"  {prefix}.arguments: 合法 JSON ✓")
+                        except json.JSONDecodeError:
+                            # JSON 解析失败，退化为字符串对比
+                            if v_args_str.strip() != p_args_str.strip():
+                                errors.append(f"{prefix}.arguments: 值不一致 (JSON 解析失败)")
+                    elif v_args_str or p_args_str:
+                        errors.append(f"{prefix}.arguments: 一方为空 (vllm_len={len(v_args_str)}, proxy_len={len(p_args_str)})")
+                check_forbidden_tokens(p_args_str, f"{prefix}.arguments", errors, infos)
+                # call_id 仅验证前缀格式
+                p_call_id = pi.get("call_id", "")
+                if p_call_id:
+                    infos.append(f"  {prefix}.call_id: 存在 ✓ ({p_call_id[:40]})")
+
+            elif btype == "message":
+                # message: content[].text 存在 + 非空 + 无禁止 token
+                v_contents = vi.get("content", [])
+                p_contents = pi.get("content", [])
+                if p_contents:
+                    p_text = "".join(c.get("text", "") for c in p_contents
+                                     if c.get("type") in ("output_text", "text"))
+                    v_text = "".join(c.get("text", "") for c in v_contents
+                                     if c.get("type") in ("output_text", "text"))
+                    if "content" in extra_skip_paths:
+                        infos.append(f"  {prefix}.content: 已配置跳过对比 ✓ (vllm_len={len(v_text)}, proxy_len={len(p_text)})")
+                    elif p_text.strip():
+                        infos.append(f"  {prefix}.content: 存在 ✓ (vllm_len={len(v_text)}, proxy_len={len(p_text)})")
+                    else:
+                        errors.append(f"{prefix}.content: proxy message 文本为空")
+                    check_forbidden_tokens(p_text, f"{prefix}.content", errors, infos)
+                else:
+                    errors.append(f"{prefix}: proxy 缺失 message content")
+
+
+def compare_responses_nonstream(vllm_data: dict, proxy_data: dict, label: str,
+                                 extra_skip_paths: set = None) -> Tuple[list, list]:
+    """对比 Responses /v1/responses 非流式响应"""
+    errors, infos = [], []
+    infos.append(f"[{label}] Responses 非流式对比")
+
+    # 检测 error
+    detect_nonstream_error(vllm_data, "vllm", errors)
+    detect_nonstream_error(proxy_data, "proxy", errors)
+    if errors:
+        infos.append("  非流式响应包含 error, 跳过后续对比")
+        return errors, infos
+
+    # status 一致性
+    v_status = vllm_data.get("status")
+    p_status = proxy_data.get("status")
+    compare_recursive(v_status, p_status, "status", errors, infos, RESPONSES_SKIP_FIELDS)
+
+    # output[] 对比
+    v_output = vllm_data.get("output", [])
+    p_output = proxy_data.get("output", [])
+    if not v_output:
+        errors.append("vLLM 响应缺少 output 数组")
+    if not p_output:
+        errors.append("proxy 响应缺少 output 数组")
+    if not v_output or not p_output:
+        return errors, infos
+
+    # output 数组长度对比（INFO 级别，转码层可导致差异）
+    if len(v_output) != len(p_output):
+        infos.append(f"  output: 数组长度不同 (vllm={len(v_output)}, proxy={len(p_output)}, 转换层差异)")
+
+    _compare_responses_output(v_output, p_output, label, errors, infos, extra_skip_paths)
+
+    # output_text 顶层字段（如果存在）
+    v_output_text = vllm_data.get("output_text")
+    p_output_text = proxy_data.get("output_text")
+    if v_output_text is not None and p_output_text is not None:
+        if v_output_text and p_output_text:
+            infos.append(f"  output_text: 存在 ✓ (vllm_len={len(v_output_text)}, proxy_len={len(p_output_text)})")
+        check_forbidden_tokens(p_output_text or "", "output_text", errors, infos)
+
+    # usage 对比：仅验证 > 0（转码层可导致 token 计数差异）
+    v_usage = vllm_data.get("usage")
+    p_usage = proxy_data.get("usage")
+    if v_usage and p_usage:
+        _validate_usage_positive(v_usage, p_usage, "usage", errors, infos)
+
+    return errors, infos
+
+
+def parse_responses_sse(raw: str) -> list:
+    """解析 Responses SSE 格式: event: xxx\\ndata: {...}\\n\\n
+
+    与 Claude SSE 格式相同（event/data 交替），但无 [DONE] 标记。
+
+    Returns:
+        list of (event_name, event_data) tuples
+    """
+    events = []
+    current_event = None
+    current_data = ""
+
+    for line in raw.strip().split("\n"):
+        line_stripped = line.strip()
+        if line_stripped.startswith("event: "):
+            if current_event and current_data:
+                try:
+                    events.append((current_event, json.loads(current_data)))
+                except json.JSONDecodeError:
+                    pass
+            current_event = line_stripped[7:].strip()
+            current_data = ""
+        elif line_stripped.startswith("data: "):
+            current_data = line_stripped[6:].strip()
+        elif line_stripped == "":
+            if current_event and current_data:
+                try:
+                    events.append((current_event, json.loads(current_data)))
+                except json.JSONDecodeError:
+                    pass
+                current_event = None
+                current_data = ""
+
+    # 末尾处理
+    if current_event and current_data:
+        try:
+            events.append((current_event, json.loads(current_data)))
+        except json.JSONDecodeError:
+            pass
+
+    return events
+
+
+def _merge_responses_stream(events: list) -> list:
+    """从 Responses SSE events 中合并出完整的 output[] 数组
+
+    处理的事件类型:
+    - response.output_item.added → 新增 output item
+    - response.reasoning_summary_text.delta → 拼接 reasoning summary
+    - response.output_text.delta → 拼接 message text
+    - response.function_call_arguments.delta → 拼接 function_call arguments
+
+    Returns:
+        list of output item dicts (与合并后的非流式结构一致)
+    """
+    output_items = []
+    current_item = None
+    # 当前活跃的 content_part（message 的 content[] 元素）
+    current_content_part = None
+
+    for evt_name, evt_data in events:
+        if evt_name == "response.output_item.added":
+            item = evt_data.get("item") or evt_data.get("output_item") or {}
+            if item:
+                current_item = dict(item)
+                # 确保必要字段存在
+                if "content" not in current_item and current_item.get("type") == "message":
+                    current_item["content"] = []
+                if "summary" not in current_item and current_item.get("type") == "reasoning":
+                    current_item["summary"] = []
+                output_items.append(current_item)
+            current_content_part = None
+
+        elif evt_name == "response.content_part.added":
+            # message 类型的 content_part 开始
+            part = evt_data.get("part") or evt_data.get("content_part") or {}
+            if current_item and current_item.get("type") == "message":
+                if "content" not in current_item:
+                    current_item["content"] = []
+                current_content_part = dict(part)
+                current_item["content"].append(current_content_part)
+
+        elif evt_name == "response.reasoning_summary_text.delta":
+            # reasoning summary 增量文本
+            delta_text = evt_data.get("delta", "")
+            if current_item and current_item.get("type") == "reasoning":
+                if "summary" not in current_item:
+                    current_item["summary"] = []
+                # 追加到最后一个 summary 条目
+                if not current_item["summary"]:
+                    current_item["summary"].append({"type": "summary_text", "text": ""})
+                last = current_item["summary"][-1]
+                last["text"] = last.get("text", "") + delta_text
+
+        elif evt_name == "response.reasoning_summary_part.done":
+            # reasoning summary 部分完成，开启新部分
+            part = evt_data.get("part") or {}
+            if current_item and current_item.get("type") == "reasoning":
+                if "summary" not in current_item:
+                    current_item["summary"] = []
+                current_item["summary"].append(dict(part))
+
+        elif evt_name == "response.output_text.delta":
+            # message text 增量
+            delta_text = evt_data.get("delta", "")
+            if current_content_part:
+                current_content_part["text"] = current_content_part.get("text", "") + delta_text
+
+        elif evt_name == "response.function_call_arguments.delta":
+            # function_call arguments 增量
+            delta = evt_data.get("delta", "")
+            if current_item and current_item.get("type") == "function_call":
+                current_item["arguments"] = current_item.get("arguments", "") + delta
+
+        elif evt_name == "response.output_item.done":
+            # item 完成，可能携带完整数据
+            done_item = evt_data.get("item") or evt_data.get("output_item") or {}
+            if done_item and current_item:
+                # 用 done item 中更完整的字段覆盖（如 function_call 的 arguments）
+                for key in ["arguments", "name", "call_id", "role"]:
+                    if key in done_item:
+                        current_item[key] = done_item[key]
+            current_item = None
+            current_content_part = None
+
+    return output_items
+
+
+def compare_responses_stream(vllm_raw: str, proxy_raw: str, label: str,
+                              extra_skip_paths: set = None) -> Tuple[list, list]:
+    """对比 Responses /v1/responses 流式响应"""
+    errors, infos = [], []
+    infos.append(f"[{label}] Responses 流式对比")
+
+    v_events = parse_responses_sse(vllm_raw)
+    p_events = parse_responses_sse(proxy_raw)
+
+    # 检测 error 事件
+    for source, events in [("vllm", v_events), ("proxy", p_events)]:
+        for evt_name, evt_data in events:
+            if evt_name == "error" or (isinstance(evt_data, dict) and "error" in evt_data
+                                        and evt_data.get("type") != "response.completed"):
+                err = evt_data.get("error", evt_data) if isinstance(evt_data, dict) else evt_data
+                msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                errors.append(f"{source} 流式 error: {msg}")
+
+    if errors:
+        infos.append("  流式响应包含 error, 跳过后续对比")
+        return errors, infos
+
+    # 验证必要事件
+    v_event_names = {e[0] for e in v_events}
+    p_event_names = {e[0] for e in p_events}
+
+    required_events = ["response.created", "response.completed"]
+    for evt in required_events:
+        if evt not in v_event_names:
+            errors.append(f"vLLM 流式缺少 {evt} 事件")
+        if evt not in p_event_names:
+            errors.append(f"proxy 流式缺少 {evt} 事件")
+
+    # 合并 delta 事件得到完整 output[]
+    v_output = _merge_responses_stream(v_events)
+    p_output = _merge_responses_stream(p_events)
+
+    if not v_output:
+        errors.append("vLLM 流式合并后无 output items")
+    if not p_output:
+        errors.append("proxy 流式合并后无 output items")
+    if not v_output or not p_output:
+        return errors, infos
+
+    # 复用非流式的 output 对比逻辑
+    _compare_responses_output(v_output, p_output, label, errors, infos, extra_skip_paths)
+
+    # usage 对比：从 response.completed 事件中提取
+    v_usage = {}
+    p_usage = {}
+    for evt_name, evt_data in v_events:
+        if evt_name == "response.completed":
+            resp = evt_data.get("response", {})
+            v_usage = resp.get("usage", {})
+            break
+    for evt_name, evt_data in p_events:
+        if evt_name == "response.completed":
+            resp = evt_data.get("response", {})
+            p_usage = resp.get("usage", {})
+            break
+    if v_usage and p_usage:
+        _validate_usage_positive(v_usage, p_usage, "usage (stream)", errors, infos)
+
+    return errors, infos
+
+
+# ========================================
 # 辅助函数
 # ========================================
 
@@ -897,7 +1284,7 @@ def main():
     parser = argparse.ArgumentParser(description="trajproxy vs vLLM 响应对比工具")
     parser.add_argument("--mode", required=True, choices=["nonstream", "stream"],
                         help="对比模式")
-    parser.add_argument("--api", default="openai", choices=["openai", "claude"],
+    parser.add_argument("--api", default="openai", choices=["openai", "claude", "responses"],
                         help="API 格式")
     parser.add_argument("--vllm", required=True, help="vLLM 响应文件路径")
     parser.add_argument("--proxy", required=True, help="trajproxy 响应文件路径")
@@ -950,6 +1337,25 @@ def main():
             errors, infos = compare_claude_nonstream(vllm_data, proxy_data, args.label)
         else:
             errors, infos = compare_claude_stream(vllm_raw, proxy_raw, args.label)
+
+    elif args.api == "responses":
+        extra_skip = {s.strip() for s in args.skip_paths.split(",") if s.strip()} if args.skip_paths else None
+        if args.mode == "nonstream":
+            try:
+                vllm_data = json.loads(vllm_raw.strip())
+            except json.JSONDecodeError as e:
+                print(f"FAIL:vLLM 响应 JSON 解析失败: {e}")
+                sys.exit(1)
+            try:
+                proxy_data = json.loads(proxy_raw.strip())
+            except json.JSONDecodeError as e:
+                print(f"FAIL:proxy 响应 JSON 解析失败: {e}")
+                sys.exit(1)
+            errors, infos = compare_responses_nonstream(vllm_data, proxy_data, args.label,
+                                                         extra_skip_paths=extra_skip)
+        else:
+            errors, infos = compare_responses_stream(vllm_raw, proxy_raw, args.label,
+                                                      extra_skip_paths=extra_skip)
 
     # 输出
     for line in infos:

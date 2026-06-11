@@ -32,7 +32,7 @@ echo ""
 # ========================================
 # 步骤 1: 注册模型（带 run_id）
 # ========================================
-log_step "步骤 1: 在${PANGU_TEST_PORT}端口注册模型（run_id: ${PANGU_TEST_RUN_ID}）"
+log_step "步骤 1: 注册模型（run_id: ${PANGU_TEST_RUN_ID}）"
 
 REGISTER_RESPONSE=$(curl_with_log -s -w "\n%{http_code}" -X POST "${PANGU_TEST_REGISTER_URL}/models/register" \
     -H "Content-Type: application/json" \

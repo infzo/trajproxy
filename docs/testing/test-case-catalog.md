@@ -259,8 +259,8 @@
 | **C103** | TITO Tool 一致性 | tool_calls 结构 + arguments 禁止 token | 原C302 | 保留 | `TITO×(ns+s)×Tool×单轮×OpenAI`（默认 auto） |
 | **C104** | TITO Reasoning 一致性 | reasoning 字段一致性 + content 剥离 `</think>` | 原C303 | 保留 | `TITO×(ns+s)×Reasoning×单轮×OpenAI`（默认 preserve=true） |
 | **C105** | TITO Reasoning+Tool 一致性 | 全字段：reasoning + tool_calls 逐项对比 | 原C304 | 保留 | `TITO×(ns+s)×T+R×单轮×OpenAI`（默认 preserve=true, auto） |
-| **C106** | 多轮 T+R 非流式一致性 | 每轮对比 vLLM；同时验证缓存递增。子场景：(a) tool_choice=required, (b) tool_choice=named, (c) enable_thinking=false | — | 新增 | `TITO×ns×T+R×3轮×OpenAI`（含 kwargs/tool_choice 变体子场景） |
-| **C107** | 多轮 T+R 流式一致性 | 每轮流式重建后对比；同时验证流式缓存递增。子场景同 C106 | — | 新增 | `TITO×s×T+R×3轮×OpenAI`（含 kwargs/tool_choice 变体子场景） |
+| **C106** | 多轮 T+R 非流式一致性 | 每轮对比 vLLM；同时验证缓存递增。子场景：(a) tool_choice=required, (b) tool_choice=named, (c) enable_thinking=false | — | 新增 | `TITO×ns×T+R×4轮×OpenAI`（含 kwargs/tool_choice 变体子场景） |
+| **C107** | 多轮 T+R 流式一致性 | 每轮流式重建后对比；同时验证流式缓存递增。子场景同 C106 | — | 新增 | `TITO×s×T+R×4轮×OpenAI`（含 kwargs/tool_choice 变体子场景） |
 
 ---
 
@@ -466,7 +466,7 @@ C101-C107、C201-C207、A100-A103 编号与内容均不变，无需迁移。
 | P409 | ns | Tool | 2轮 | **无** | — | — | 🆕 |
 | P410 | ns | T+R | 2轮 | 有 | **thinking=false 变** | — | 🆕 |
 | P411 | ns | Tool | 2轮 | 有 | — | **tools 不同** | 🆕 |
-| C106/7 | ns/s | T+R | 3轮 | 有 | **required/named/thinking=false** | 同tools | 🆕 |
+| C106/7 | ns/s | T+R | 4轮 | 有 | **required/named/thinking=false** | 同tools | 🆕 |
 
 **P4xx+C1xx 多轮覆盖率**: 11/11 = 100%
 

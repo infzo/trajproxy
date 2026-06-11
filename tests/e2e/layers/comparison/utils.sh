@@ -214,6 +214,58 @@ send_claude_stream() {
 }
 
 # ========================================
+# Responses 格式请求发送
+# ========================================
+
+send_responses_nonstream() {
+    local url="$1"
+    local body="$2"
+    local session_path="${3:-}"
+
+    local full_url
+    if [ -n "$session_path" ]; then
+        full_url="${url}/${session_path}/v1/responses"
+    else
+        full_url="${url}/v1/responses"
+    fi
+
+    local response=$(curl_with_log -s --noproxy '*' --max-time 120 -w "\n%{http_code}" \
+        -X POST "$full_url" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${COMPARISON_API_KEY}" \
+        -d "$body")
+
+    local body_part=$(echo "$response" | sed '$d')
+
+    local tmpfile=$(mktemp)
+    echo "$body_part" > "$tmpfile"
+    echo "$tmpfile"
+}
+
+send_responses_stream() {
+    local url="$1"
+    local body="$2"
+    local session_path="${3:-}"
+
+    local full_url
+    if [ -n "$session_path" ]; then
+        full_url="${url}/${session_path}/v1/responses"
+    else
+        full_url="${url}/v1/responses"
+    fi
+
+    local tmpfile=$(mktemp)
+
+    curl_with_log -s --no-buffer --noproxy '*' --max-time 120 \
+        -X POST "$full_url" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${COMPARISON_API_KEY}" \
+        -d "$body" > "$tmpfile"
+
+    echo "$tmpfile"
+}
+
+# ========================================
 # 对比函数
 # ========================================
 
@@ -313,6 +365,54 @@ compare_claude_stream() {
     TESTS_PASSED=$((TESTS_PASSED + 1))
 }
 
+compare_responses_nonstream() {
+    local vllm_file="$1"
+    local proxy_file="$2"
+    local label="$3"
+    local skip_paths="${4:-}"
+    local skip_paths_flag=""
+    [[ -n "$skip_paths" ]] && skip_paths_flag="--skip-paths $skip_paths"
+    log_info "Responses 非流式对比 (${label})..."
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    local compare_output rc=0
+    compare_output=$(python3 "${COMPARE_PY}" --mode nonstream --api responses \
+        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label" $skip_paths_flag) || rc=$?
+    echo "$compare_output"
+    if [ $rc -ne 0 ]; then
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        local fail_detail
+        fail_detail=$(echo "$compare_output" | grep -E '^FAIL:' | tr '\n' ';' | sed 's/;$//')
+        log_failure "Responses 非流式对比失败 (${label})" \
+            "${fail_detail:-未知错误，查看 compare.py 原始输出}"
+        return 1
+    fi
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+}
+
+compare_responses_stream() {
+    local vllm_file="$1"
+    local proxy_file="$2"
+    local label="$3"
+    local skip_paths="${4:-}"
+    local skip_paths_flag=""
+    [[ -n "$skip_paths" ]] && skip_paths_flag="--skip-paths $skip_paths"
+    log_info "Responses 流式对比 (${label})..."
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    local compare_output rc=0
+    compare_output=$(python3 "${COMPARE_PY}" --mode stream --api responses \
+        --vllm "$vllm_file" --proxy "$proxy_file" --label "$label" $skip_paths_flag) || rc=$?
+    echo "$compare_output"
+    if [ $rc -ne 0 ]; then
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        local fail_detail
+        fail_detail=$(echo "$compare_output" | grep -E '^FAIL:' | tr '\n' ';' | sed 's/;$//')
+        log_failure "Responses 流式对比失败 (${label})" \
+            "${fail_detail:-未知错误，查看 compare.py 原始输出}"
+        return 1
+    fi
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+}
+
 # ========================================
 # OpenAI 请求体构建
 # ========================================
@@ -401,4 +501,21 @@ build_claude_reasoning_tool_stream_request() {
     local model="$1"
     # TITO 路径 chat template 无 enable_thinking，模型输出冗长，需更大预算
     echo "{\"model\":\"${model}\",\"max_tokens\":2048,\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"messages\":[{\"role\":\"user\",\"content\":\"I need the weather in Shanghai. Think first, then call the tool.\"}],\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}]}"
+}
+
+# ========================================
+# Responses 请求体构建（/v1/responses 格式）
+# ========================================
+
+# Responses API 不支持 chat_template_kwargs，无法通过 enable_thinking 控制推理
+# 模型的推理行为由其自身决定（reasoning_parser 在 proxy 侧解析提取）
+
+build_responses_reasoning_tool_request() {
+    local model="$1"
+    echo "{\"model\":\"${model}\",\"input\":\"I need the weather in Shanghai. Think first, then call the tool.\",\"tools\":[{\"type\":\"function\",\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}],\"stream\":false,${COMPARISON_SAMPLING_PARAMS},\"max_output_tokens\":1024}"
+}
+
+build_responses_reasoning_tool_stream_request() {
+    local model="$1"
+    echo "{\"model\":\"${model}\",\"input\":\"I need the weather in Shanghai. Think first, then call the tool.\",\"tools\":[{\"type\":\"function\",\"name\":\"get_weather\",\"description\":\"Get weather\",\"parameters\":{\"type\":\"object\",\"properties\":{\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}],\"stream\":true,${COMPARISON_SAMPLING_PARAMS},\"max_output_tokens\":1024}"
 }
