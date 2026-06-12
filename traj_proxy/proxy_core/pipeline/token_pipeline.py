@@ -74,6 +74,16 @@ class TokenPipeline(BasePipeline):
         self.parser = parser
         self.tokenizer_path = tokenizer_path
 
+    def _create_context(
+        self,
+        *args,
+        **kwargs,
+    ) -> "ProcessContext":
+        """创建处理上下文，标记管道模式为 tito"""
+        ctx = super()._create_context(*args, **kwargs)
+        ctx.pipeline_mode = "tito"
+        return ctx
+
     async def process(
         self,
         messages: list,

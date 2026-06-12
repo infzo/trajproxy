@@ -1,0 +1,51 @@
+[
+  {
+    "id": 150,
+    "type": "timeseries",
+    "title": "TITO模式缓存命中率 - 按运行标识（累计）",
+    "description": "前缀缓存累计命中率 = 累计hits / 累计(hits + misses) × 100，按 run_id 分组。进程重启归零重算，不会因时间窗口导致 miss 丢失。仅 TITO 模式有数据。",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 20,
+      "y": 29
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\",result=\"hit\"}) / sum by (run_id) (trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\"}) * 100",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "percent",
+        "decimals": 1,
+        "custom": {
+          "fillOpacity": 20,
+          "drawStyle": "line",
+          "spanNulls": true
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "lastNotNull",
+          "mean",
+          "min"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  }
+]
+

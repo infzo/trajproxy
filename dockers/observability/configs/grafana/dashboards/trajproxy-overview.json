@@ -191,9 +191,9 @@
         "defaults": {
           "unit": "short",
           "custom": {
-            "fillOpacity": 25,
+            "fillOpacity": 10,
             "stacking": {
-              "mode": "normal"
+              "mode": "none"
             },
             "drawStyle": "line"
           }
@@ -239,9 +239,9 @@
         "defaults": {
           "unit": "short",
           "custom": {
-            "fillOpacity": 25,
+            "fillOpacity": 10,
             "stacking": {
-              "mode": "normal"
+              "mode": "none"
             },
             "drawStyle": "line"
           }
@@ -770,9 +770,9 @@
         "defaults": {
           "unit": "short",
           "custom": {
-            "fillOpacity": 25,
+            "fillOpacity": 10,
             "stacking": {
-              "mode": "normal"
+              "mode": "none"
             },
             "drawStyle": "line"
           }
@@ -935,7 +935,7 @@
       "description": "流式请求首 Token 耗时 q=$quantile 分位，按 run_id 分组",
       "gridPos": {
         "h": 8,
-        "w": 6,
+        "w": 4,
         "x": 12,
         "y": 29
       },
@@ -981,8 +981,8 @@
       "description": "每请求总序列长度 $quantile:text 分位（prompt + completion tokens），按 run_id 分组",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 18,
+        "w": 4,
+        "x": 16,
         "y": 29
       },
       "datasource": {
@@ -1027,7 +1027,7 @@
       "description": "识别瓶颈阶段",
       "gridPos": {
         "h": 8,
-        "w": 6,
+        "w": 4,
         "x": 12,
         "y": 21
       },
@@ -1069,12 +1069,12 @@
     {
       "id": 13,
       "type": "piechart",
-      "title": "推理流式与非流式占比",
-      "description": "流式请求占比（基于最近 1 小时的 increase 统计，不受面板时间选择器影响）",
+      "title": "推理流式与非流式占比(1h)",
+      "description": "流式请求占比",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 18,
+        "w": 4,
+        "x": 16,
         "y": 21
       },
       "datasource": {
@@ -1085,6 +1085,40 @@
         {
           "expr": "sum by (stream) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h]))",
           "legendFormat": "{{ stream }}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "options": {
+        "pieType": "donut",
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "right"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "piechart",
+      "title": "DIRECT vs TITO 模式占比(1h)",
+      "description": "直接转发模式（direct）与 Token 模式（tito）请求占比",
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "targets": [
+        {
+          "expr": "sum by (pipeline_mode) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h]))",
+          "legendFormat": "{{ pipeline_mode }}",
           "refId": "A",
           "instant": true
         }
@@ -1331,6 +1365,54 @@
           "calcs": [
             "sum",
             "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 150,
+      "type": "timeseries",
+      "title": "TITO模式缓存命中率 - 按运行标识（累计）",
+      "description": "前缀缓存累计命中率 = 累计hits / 累计(hits + misses) × 100，按 run_id 分组。进程重启归零重算，不会因时间窗口导致 miss 丢失。仅 TITO 模式有数据。",
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "targets": [
+        {
+          "expr": "sum by (run_id) (trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\",result=\"hit\"}) / sum by (run_id) (trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\"}) * 100",
+          "legendFormat": "{{ run_id }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "custom": {
+            "fillOpacity": 20,
+            "drawStyle": "line",
+            "spanNulls": true
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "min"
           ]
         },
         "tooltip": {

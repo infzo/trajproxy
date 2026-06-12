@@ -36,9 +36,9 @@
       "defaults": {
         "unit": "short",
         "custom": {
-          "fillOpacity": 25,
+          "fillOpacity": 10,
           "stacking": {
-            "mode": "normal"
+            "mode": "none"
           },
           "drawStyle": "line"
         }
@@ -201,7 +201,7 @@
     "description": "流式请求首 Token 耗时 q=$quantile 分位，按 run_id 分组",
     "gridPos": {
       "h": 8,
-      "w": 6,
+      "w": 4,
       "x": 12,
       "y": 29
     },
@@ -247,8 +247,8 @@
     "description": "每请求总序列长度 $quantile:text 分位（prompt + completion tokens），按 run_id 分组",
     "gridPos": {
       "h": 8,
-      "w": 6,
-      "x": 18,
+      "w": 4,
+      "x": 16,
       "y": 29
     },
     "datasource": {
@@ -293,7 +293,7 @@
     "description": "识别瓶颈阶段",
     "gridPos": {
       "h": 8,
-      "w": 6,
+      "w": 4,
       "x": 12,
       "y": 21
     },
@@ -335,12 +335,12 @@
   {
     "id": 13,
     "type": "piechart",
-    "title": "推理流式与非流式占比",
-    "description": "流式请求占比（基于最近 1 小时的 increase 统计，不受面板时间选择器影响）",
+    "title": "推理流式与非流式占比(1h)",
+    "description": "流式请求占比",
     "gridPos": {
       "h": 8,
-      "w": 6,
-      "x": 18,
+      "w": 4,
+      "x": 16,
       "y": 21
     },
     "datasource": {
@@ -351,6 +351,40 @@
       {
         "expr": "sum by (stream) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h]))",
         "legendFormat": "{{ stream }}",
+        "refId": "A",
+        "instant": true
+      }
+    ],
+    "options": {
+      "pieType": "donut",
+      "displayLabels": [
+        "percent"
+      ],
+      "legend": {
+        "displayMode": "list",
+        "placement": "right"
+      }
+    }
+  },
+  {
+    "id": 14,
+    "type": "piechart",
+    "title": "DIRECT vs TITO 模式占比(1h)",
+    "description": "直接转发模式（direct）与 Token 模式（tito）请求占比",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 20,
+      "y": 21
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (pipeline_mode) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h]))",
+        "legendFormat": "{{ pipeline_mode }}",
         "refId": "A",
         "instant": true
       }
@@ -468,45 +502,117 @@
       },
       "overrides": [
         {
-          "matcher": { "id": "byName", "options": "connect_timeout" },
+          "matcher": {
+            "id": "byName",
+            "options": "connect_timeout"
+          },
           "properties": [
-            { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
-            { "id": "displayName", "value": "推理服务连接超时 (Connect Timeout)" }
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "red"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理服务连接超时 (Connect Timeout)"
+            }
           ]
         },
         {
-          "matcher": { "id": "byName", "options": "read_timeout" },
+          "matcher": {
+            "id": "byName",
+            "options": "read_timeout"
+          },
           "properties": [
-            { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } },
-            { "id": "displayName", "value": "推理服务读取超时（模型处理慢）" }
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "orange"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理服务读取超时（模型处理慢）"
+            }
           ]
         },
         {
-          "matcher": { "id": "byName", "options": "connection" },
+          "matcher": {
+            "id": "byName",
+            "options": "connection"
+          },
           "properties": [
-            { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } },
-            { "id": "displayName", "value": "推理服务连接失败（DNS/拒绝/网络中断）" }
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "yellow"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理服务连接失败（DNS/拒绝/网络中断）"
+            }
           ]
         },
         {
-          "matcher": { "id": "byName", "options": "rate_limited" },
+          "matcher": {
+            "id": "byName",
+            "options": "rate_limited"
+          },
           "properties": [
-            { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } },
-            { "id": "displayName", "value": "推理服务被限流 (429 Too Many Requests)" }
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "purple"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理服务被限流 (429 Too Many Requests)"
+            }
           ]
         },
         {
-          "matcher": { "id": "byName", "options": "http_error" },
+          "matcher": {
+            "id": "byName",
+            "options": "http_error"
+          },
           "properties": [
-            { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } },
-            { "id": "displayName", "value": "推理服务 HTTP 错误（返回异常状态码）" }
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "blue"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理服务 HTTP 错误（返回异常状态码）"
+            }
           ]
         },
         {
-          "matcher": { "id": "byName", "options": "unknown" },
+          "matcher": {
+            "id": "byName",
+            "options": "unknown"
+          },
           "properties": [
-            { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } },
-            { "id": "displayName", "value": "推理服务未知错误" }
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "text"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理服务未知错误"
+            }
           ]
         }
       ]

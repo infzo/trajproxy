@@ -81,6 +81,9 @@ REQUEST_INFER_ERRORS: Optional[Counter] = None
 TRAJECTORY_RECORD_COUNT: Optional[Histogram] = None
 TRAJECTORY_RESPONSE_SIZE_BYTES: Optional[Histogram] = None
 
+# K. TITO 缓存监控 (1个)
+CACHE_LOOKUPS: Optional[Counter] = None
+
 # 幂等标志
 _registered = False
 
@@ -134,7 +137,8 @@ def _on_request_completed(context: Any, exception: Optional[Exception]) -> None:
     outcome = determine_outcome(context, exception)
     duration_s = (getattr(context, "processing_duration_ms", 0) or 0) / 1000
 
-    REQUEST_TOTAL.labels("POST", model, stream, outcome, run_id).inc()  # type: ignore[union-attr]
+    pipeline_mode = getattr(context, "pipeline_mode", "direct") or "direct"
+    REQUEST_TOTAL.labels("POST", model, stream, outcome, run_id, pipeline_mode).inc()  # type: ignore[union-attr]
     # 请求级推理错误细分打点（仅当 outcome 为推理服务错误或超时）
     if outcome in ("error_infer", "timeout") and exception is not None:
         err_type = classify_infer_error(exception)
@@ -170,6 +174,11 @@ def _on_request_completed(context: Any, exception: Optional[Exception]) -> None:
     if cache_tok:
         TOKENS_TOTAL.labels(model, run_id, "cached").inc(cache_tok)  # type: ignore[union-attr]
 
+    # TITO 缓存命中率打点（仅当实际执行了缓存查询时）
+    if pipeline_mode == "tito" and getattr(context, "cache_db_query_ms", None) is not None:
+        cache_result = "hit" if (getattr(context, "cache_hit_tokens", None) or 0) > 0 else "miss"
+        CACHE_LOOKUPS.labels(model, run_id, cache_result).inc()  # type: ignore[union-attr]
+
     # 序列长度（prompt + completion tokens 总和）
     total_seq_len = (prompt_tok or 0) + (completion_tok or 0)
     if total_seq_len > 0:
@@ -203,7 +212,7 @@ def _on_concurrency_rejected(
     safe_run_id = safe_run_id_label(run_id or "")
     SEMAPHORE_REJECTED.labels(safe_model).inc()  # type: ignore[union-attr]
     REQUEST_TOTAL.labels(  # type: ignore[union-attr]
-        "POST", safe_model, "false", "error_rate_limit", safe_run_id
+        "POST", safe_model, "false", "error_rate_limit", safe_run_id, "direct"
     ).inc()
 
 
@@ -268,12 +277,13 @@ def _create_metrics() -> None:
     global API_REQUESTS_TOTAL, API_REQUEST_DURATION, API_ERRORS
     global REQUEST_INFER_ERRORS
     global TRAJECTORY_RECORD_COUNT, TRAJECTORY_RESPONSE_SIZE_BYTES
+    global CACHE_LOOKUPS
 
     # A. 请求核心
     REQUEST_TOTAL = Counter(
         "trajproxy_requests_total",
         "Total request count",
-        ["method", "model", "stream", "outcome", "run_id"],
+        ["method", "model", "stream", "outcome", "run_id", "pipeline_mode"],
     )
     REQUEST_DURATION = Histogram(
         "trajproxy_request_duration_seconds",
@@ -421,6 +431,13 @@ def _create_metrics() -> None:
         "Serialized response body size in bytes per trajectory query",
         labelnames=["route", "run_id"],
         buckets=[1024, 10240, 102400, 1048576, 5242880, 10485760, 52428800, 104857600],
+    )
+
+    # K. TITO 缓存监控
+    CACHE_LOOKUPS = Counter(
+        "trajproxy_cache_lookups_total",
+        "TITO prefix cache lookup count (hit/miss)",
+        labelnames=["model", "run_id", "result"],
     )
 
 

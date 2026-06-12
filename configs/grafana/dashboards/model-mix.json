@@ -266,7 +266,7 @@
       },
       {
         "id": 13,
-        "title": "推理流式与非流式占比",
+        "title": "推理流式与非流式占比(1h)",
         "type": "timeseries",
         "datasource": "Prometheus",
         "gridPos": {"x": 15, "y": 5, "w": 5, "h": 5},

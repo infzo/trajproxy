@@ -70,9 +70,9 @@
       "defaults": {
         "unit": "short",
         "custom": {
-          "fillOpacity": 25,
+          "fillOpacity": 10,
           "stacking": {
-            "mode": "normal"
+            "mode": "none"
           },
           "drawStyle": "line"
         }
@@ -118,9 +118,9 @@
       "defaults": {
         "unit": "short",
         "custom": {
-          "fillOpacity": 25,
+          "fillOpacity": 10,
           "stacking": {
-            "mode": "normal"
+            "mode": "none"
           },
           "drawStyle": "line"
         }

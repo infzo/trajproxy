@@ -86,6 +86,16 @@ class DirectPipeline(BasePipeline):
         """
         super().__init__(model, infer_client, request_repository)
 
+    def _create_context(
+        self,
+        *args,
+        **kwargs,
+    ) -> "ProcessContext":
+        """创建处理上下文，标记管道模式为 direct"""
+        ctx = super()._create_context(*args, **kwargs)
+        ctx.pipeline_mode = "direct"
+        return ctx
+
     async def process(
         self,
         messages: list,
