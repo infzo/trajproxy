@@ -444,7 +444,7 @@
     "id": 141,
     "type": "timeseries",
     "title": "推理请求错误细分（请选择 Run ID）",
-    "description": "展示所选 run_id 的推理错误按错误子类型（connect_timeout / read_timeout / connection / rate_limited / http_error / unknown）拆分的时间分布。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
+    "description": "展示所选 run_id 的推理错误按错误子类型拆分的时间分布，含中文友好名称。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
     "gridPos": {
       "h": 10,
       "w": 12,
@@ -469,27 +469,45 @@
       "overrides": [
         {
           "matcher": { "id": "byName", "options": "connect_timeout" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+            { "id": "displayName", "value": "推理服务连接超时 (Connect Timeout)" }
+          ]
         },
         {
           "matcher": { "id": "byName", "options": "read_timeout" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } },
+            { "id": "displayName", "value": "推理服务读取超时（模型处理慢）" }
+          ]
         },
         {
           "matcher": { "id": "byName", "options": "connection" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } },
+            { "id": "displayName", "value": "推理服务连接失败（DNS/拒绝/网络中断）" }
+          ]
         },
         {
           "matcher": { "id": "byName", "options": "rate_limited" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } },
+            { "id": "displayName", "value": "推理服务被限流 (429 Too Many Requests)" }
+          ]
         },
         {
           "matcher": { "id": "byName", "options": "http_error" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } },
+            { "id": "displayName", "value": "推理服务 HTTP 错误（返回异常状态码）" }
+          ]
         },
         {
           "matcher": { "id": "byName", "options": "unknown" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } },
+            { "id": "displayName", "value": "推理服务未知错误" }
+          ]
         }
       ]
     },
