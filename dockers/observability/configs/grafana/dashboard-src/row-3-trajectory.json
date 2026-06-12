@@ -201,14 +201,88 @@
     }
   },
   {
+    "id": 129,
+    "type": "timeseries",
+    "title": "轨迹请求失败数量 - 按节点 (5min)",
+    "description": "轨迹请求失败按节点聚合统计：左轴为请求级失败总数（5xx），右轴为轨迹写入 DB 失败数",
+    "gridPos": {
+      "h": 10,
+      "w": 8,
+      "x": 0,
+      "y": 57
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line",
+          "lineWidth": 2,
+          "pointSize": 5,
+          "showPoints": "auto",
+          "spanNulls": false
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byRegexp",
+            "options": "^写入.*"
+          },
+          "properties": [
+            {
+              "id": "custom.axisPlacement",
+              "value": "right"
+            },
+            {
+              "id": "color",
+              "value": {
+                "mode": "palette-classic"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "targets": [
+      {
+        "expr": "sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[5m]))",
+        "legendFormat": "失败: {{ node }}",
+        "refId": "A"
+      },
+      {
+        "expr": "sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "写入: {{ node }}",
+        "refId": "B"
+      }
+    ],
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
     "id": 125,
     "type": "timeseries",
     "title": "轨迹请求失败数量 - 按运行标识 (5min)",
     "description": "轨迹请求失败按运行标识聚合统计：左轴为请求级失败总数（5xx），右轴为轨迹写入 DB 失败数",
     "gridPos": {
       "h": 10,
-      "w": 12,
-      "x": 0,
+      "w": 8,
+      "x": 8,
       "y": 57
     },
     "datasource": {
@@ -281,8 +355,8 @@
     "description": "展示所选 run_id 的轨迹请求错误按错误类别（database / timeout / serialize_timeout / other）拆分的时间分布。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
     "gridPos": {
       "h": 10,
-      "w": 12,
-      "x": 12,
+      "w": 8,
+      "x": 16,
       "y": 57
     },
     "datasource": {
@@ -303,19 +377,38 @@
       "overrides": [
         {
           "matcher": { "id": "byName", "options": "database" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+            { "id": "displayName", "value": "DB-数据库异常 (Database Error)" }
+          ]
         },
         {
           "matcher": { "id": "byName", "options": "timeout" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } },
+            { "id": "displayName", "value": "DB-查询超时 (Query Timeout)" }
+          ]
         },
         {
           "matcher": { "id": "byName", "options": "serialize_timeout" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } },
+            { "id": "displayName", "value": "内部-序列化超时 (Serialize Timeout)" }
+          ]
+        },
+        {
+          "matcher": { "id": "byName", "options": "rate_limit" },
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } },
+            { "id": "displayName", "value": "内部-请求被限流 (429 Too Many Requests)" }
+          ]
         },
         {
           "matcher": { "id": "byName", "options": "other" },
-          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }]
+          "properties": [
+            { "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } },
+            { "id": "displayName", "value": "内部-其他未知错误 (Other)" }
+          ]
         }
       ]
     },

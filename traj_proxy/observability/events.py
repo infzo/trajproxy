@@ -32,7 +32,7 @@ EVENT_TRAJECTORY_STORE_ERROR = "trajectory.store_error"
 
 # ── API 请求错误（轨迹/模型接口的分类异常上报）──
 # kwargs: route: str, run_id: str, error_category: str
-# error_category 枚举: database / timeout / serialize_timeout / other
+# error_category 枚举: database / timeout / serialize_timeout / rate_limit / other
 EVENT_API_ERROR = "api.error"
 
 # ── 流式客户端断连 ──

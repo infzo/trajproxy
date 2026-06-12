@@ -53,7 +53,7 @@ def _emit_api_error(route: str, run_id: str, error_category: str) -> None:
     Args:
         route: 路由分类标签（trajectory_list / trajectory_detail / trajectory_legacy）
         run_id: 运行标识
-        error_category: 错误分类（database / timeout / serialize_timeout / other）
+        error_category: 错误分类（database / timeout / serialize_timeout / rate_limit / other）
     """
     try:
         from traj_proxy.observability.event_bus import emit
@@ -598,6 +598,7 @@ async def get_trajectory(
             await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
             acquired = True
         except asyncio.TimeoutError:
+            _emit_api_error("trajectory_legacy", request.state.metric_run_id, "rate_limit")
             raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
 
     try:
@@ -756,6 +757,7 @@ async def get_trajectory_detail(
             await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
             acquired = True
         except asyncio.TimeoutError:
+            _emit_api_error("trajectory_detail", request.state.metric_run_id, "rate_limit")
             raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
 
     try:

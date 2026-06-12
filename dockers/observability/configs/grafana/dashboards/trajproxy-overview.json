@@ -820,7 +820,142 @@
             "fillOpacity": 20,
             "drawStyle": "line"
           }
-        }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "success"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "请求成功 (Success)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "stream_partial"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "light-green"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "流式传输部分完成 (Stream Partial)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_client"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "客户端-请求不合法 (4xx Client Error)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_server"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "内部-服务端错误 (5xx Server Error)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_rate_limit"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "推理-请求被限流 (429 Too Many Requests)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "error_infer"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "推理-服务异常（连接 / HTTP 错误）"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "timeout"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "推理-服务超时 (Timeout)"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1135,14 +1270,88 @@
       }
     },
     {
+      "id": 139,
+      "type": "timeseries",
+      "title": "推理请求失败数量 - 按节点 (5min)",
+      "description": "推理请求失败按节点聚合统计：左轴为请求级失败总数，右轴为轨迹写入 DB 失败数",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^写入.*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "palette-classic"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[5m]))",
+          "legendFormat": "失败: {{ node }}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+          "legendFormat": "写入: {{ node }}",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "id": 140,
       "type": "timeseries",
       "title": "推理请求失败数量 - 按运行标识 (5min)",
       "description": "推理请求失败按运行标识聚合统计：左轴为请求级失败总数，右轴为轨迹写入 DB 失败数",
       "gridPos": {
         "h": 10,
-        "w": 12,
-        "x": 0,
+        "w": 8,
+        "x": 8,
         "y": 37
       },
       "datasource": {
@@ -1212,11 +1421,11 @@
       "id": 141,
       "type": "timeseries",
       "title": "推理请求错误细分（请选择 Run ID）",
-      "description": "展示所选 run_id 的推理错误按错误子类型拆分的时间分布，含中文友好名称。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
+      "description": "展示所选 run_id 的推理请求所有错误（含客户端、内部、推理服务）按 outcome 拆分的时间分布，含中文友好名称。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
       "gridPos": {
         "h": 10,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 16,
         "y": 37
       },
       "datasource": {
@@ -1238,26 +1447,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "connect_timeout"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
-                }
-              },
-              {
-                "id": "displayName",
-                "value": "推理服务连接超时 (Connect Timeout)"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "read_timeout"
+              "options": "error_client"
             },
             "properties": [
               {
@@ -1269,33 +1459,33 @@
               },
               {
                 "id": "displayName",
-                "value": "推理服务读取超时（模型处理慢）"
+                "value": "客户端-请求不合法 (4xx Client Error)"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "connection"
+              "options": "error_server"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "yellow"
+                  "fixedColor": "dark-red"
                 }
               },
               {
                 "id": "displayName",
-                "value": "推理服务连接失败（DNS/拒绝/网络中断）"
+                "value": "内部-服务端错误 (5xx Server Error)"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "rate_limited"
+              "options": "error_rate_limit"
             },
             "properties": [
               {
@@ -1307,14 +1497,14 @@
               },
               {
                 "id": "displayName",
-                "value": "推理服务被限流 (429 Too Many Requests)"
+                "value": "推理-请求被限流 (429 Too Many Requests)"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "http_error"
+              "options": "error_infer"
             },
             "properties": [
               {
@@ -1326,26 +1516,26 @@
               },
               {
                 "id": "displayName",
-                "value": "推理服务 HTTP 错误（返回异常状态码）"
+                "value": "推理-服务异常（连接 / HTTP 错误）"
               }
             ]
           },
           {
             "matcher": {
               "id": "byName",
-              "options": "unknown"
+              "options": "timeout"
             },
             "properties": [
               {
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "text"
+                  "fixedColor": "red"
                 }
               },
               {
                 "id": "displayName",
-                "value": "推理服务未知错误"
+                "value": "推理-服务超时 (Timeout)"
               }
             ]
           }
@@ -1353,8 +1543,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (error_type) (increase(trajproxy_request_infer_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
-          "legendFormat": "{{ error_type }}",
+          "expr": "sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout\"}[5m]))",
+          "legendFormat": "{{ outcome }}",
           "refId": "A"
         }
       ],
@@ -1622,14 +1812,88 @@
       }
     },
     {
+      "id": 129,
+      "type": "timeseries",
+      "title": "轨迹请求失败数量 - 按节点 (5min)",
+      "description": "轨迹请求失败按节点聚合统计：左轴为请求级失败总数（5xx），右轴为轨迹写入 DB 失败数",
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 57
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^写入.*"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "palette-classic"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[5m]))",
+          "legendFormat": "失败: {{ node }}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+          "legendFormat": "写入: {{ node }}",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
       "id": 125,
       "type": "timeseries",
       "title": "轨迹请求失败数量 - 按运行标识 (5min)",
       "description": "轨迹请求失败按运行标识聚合统计：左轴为请求级失败总数（5xx），右轴为轨迹写入 DB 失败数",
       "gridPos": {
         "h": 10,
-        "w": 12,
-        "x": 0,
+        "w": 8,
+        "x": 8,
         "y": 57
       },
       "datasource": {
@@ -1702,8 +1966,8 @@
       "description": "展示所选 run_id 的轨迹请求错误按错误类别（database / timeout / serialize_timeout / other）拆分的时间分布。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
       "gridPos": {
         "h": 10,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 16,
         "y": 57
       },
       "datasource": {
@@ -1734,6 +1998,10 @@
                   "mode": "fixed",
                   "fixedColor": "red"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "DB-数据库异常 (Database Error)"
               }
             ]
           },
@@ -1749,6 +2017,10 @@
                   "mode": "fixed",
                   "fixedColor": "orange"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "DB-查询超时 (Query Timeout)"
               }
             ]
           },
@@ -1764,6 +2036,29 @@
                   "mode": "fixed",
                   "fixedColor": "yellow"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "内部-序列化超时 (Serialize Timeout)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rate_limit"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "内部-请求被限流 (429 Too Many Requests)"
               }
             ]
           },
@@ -1779,6 +2074,10 @@
                   "mode": "fixed",
                   "fixedColor": "text"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "内部-其他未知错误 (Other)"
               }
             ]
           }
