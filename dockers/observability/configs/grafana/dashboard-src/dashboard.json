@@ -1,0 +1,111 @@
+{
+  "uid": "trajproxy-overview",
+  "title": "TrajProxy Overview",
+  "description": "TrajProxy 可观测性 Dashboard (Level 2) — 概览 / 负载 / 性能 / 错误 / 系统",
+  "tags": [
+    "trajproxy",
+    "observability"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "数据源",
+        "refresh": 1
+      },
+      {
+        "name": "node",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(up{job=\"trajproxy\"}, node)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "节点",
+        "allValue": ".*",
+        "current": {}
+      },
+      {
+        "name": "model",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(trajproxy_requests_total, model)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "模型",
+        "allValue": ".*",
+        "current": {}
+      },
+      {
+        "name": "run_id",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(trajproxy_requests_total, run_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "Run ID",
+        "allValue": ".*",
+        "current": {}
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(up{job=\"trajproxy\"}, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "实例",
+        "allValue": ".*",
+        "current": {}
+      },
+      {
+        "name": "quantile",
+        "type": "custom",
+        "label": "分位数",
+        "query": "P50 : 0.5, P95 : 0.95, P99 : 0.99",
+        "current": {
+          "text": "P95",
+          "value": "0.95"
+        },
+        "options": [
+          { "text": "P50", "value": "0.5",  "selected": false },
+          { "text": "P95", "value": "0.95", "selected": true  },
+          { "text": "P99", "value": "0.99", "selected": false }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0,
+        "sort": 0
+      }
+    ]
+  },
+  "panels": []
+}

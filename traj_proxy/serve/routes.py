@@ -41,6 +41,7 @@ from traj_proxy.utils.validators import (
     validate_session_id,
 )
 from traj_proxy.serve.error_handler import build_error_response
+from traj_proxy.observability.label_guards import safe_run_id_label
 
 # 路由定义
 chat_router = APIRouter()
@@ -566,6 +567,12 @@ async def get_trajectory(
         t_db_end = time.perf_counter()
 
         records = result["records"][:limit]
+
+        # 从首条记录提取 run_id 写入 request.state，供中间件记录指标
+        first_record = records[0] if records else None
+        first_run_id = (first_record.get("run_id") if isinstance(first_record, dict) else None) or ""
+        request.state.metric_run_id = safe_run_id_label(first_run_id)
+
         result_data = {
             "session_id": session_id,
             "count": len(records),
@@ -699,6 +706,11 @@ async def get_trajectory_detail(
         record_count = len(result.get("records", []))
         if limit and record_count > limit:
             result["records"] = result["records"][:limit]
+
+        # 从首条记录提取 run_id 写入 request.state，供中间件记录指标
+        first_record = result["records"][0] if result.get("records") else None
+        first_run_id = (first_record.get("run_id") if isinstance(first_record, dict) else None) or ""
+        request.state.metric_run_id = safe_run_id_label(first_run_id)
 
         # 序列化（在线程池中执行，避免阻塞事件循环）
         t_ser_start = time.perf_counter()

@@ -4,22 +4,26 @@ Worker 实现
 集成了 ProxyCore 和 TranscriptProvider 的所有功能，整合了 FastAPI 基类逻辑
 """
 
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from typing import Optional
 import asyncio
 import time
+import threading
 import traceback
 import uuid
+from typing import Optional
 
-from traj_proxy.store.database_manager import DatabaseManager
-from traj_proxy.store.request_repository import RequestRepository
-from traj_proxy.proxy_core.processor_manager import ProcessorManager
-from traj_proxy.store.model_synchronizer import ModelSynchronizer
-from traj_proxy.proxy_core.provider import TrajectoryProvider
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+
+from traj_proxy.observability import metrics_collector
 from traj_proxy.proxy_core.infer_client import close_shared_client
-from traj_proxy.utils.logger import get_logger
+from traj_proxy.proxy_core.processor_manager import ProcessorManager
+from traj_proxy.proxy_core.provider import TrajectoryProvider
+from traj_proxy.store.database_manager import DatabaseManager
+from traj_proxy.store.model_synchronizer import ModelSynchronizer
+from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.utils.config import get_database_pool_config, get_max_concurrent_requests
+from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.validators import normalize_run_id
 
 logger = get_logger(__name__)
@@ -91,7 +95,6 @@ def get_transcript_provider(request: Optional[Request] = None) -> TrajectoryProv
 
 
 # 线程本地存储，用于存储当前 Worker 的 app 实例
-import threading
 _thread_local = threading.local()
 
 
@@ -103,6 +106,36 @@ def _get_current_app() -> Optional[FastAPI]:
 def _set_current_app(app: Optional[FastAPI]):
     """设置当前线程关联的 FastAPI app 实例"""
     _thread_local.app = app
+
+
+def classify_route(request: Request) -> str:
+    """路由分类器：将请求路径归一化为有限标签，避免高基数
+
+    Args:
+        request: FastAPI Request 对象
+
+    Returns:
+        归一化后的路由标签字符串
+    """
+    path = request.url.path
+    method = request.method
+    if "chat/completions" in path:
+        return "chat_completions"
+    if path.startswith("/trajectories"):
+        return "trajectory_list" if path == "/trajectories" else "trajectory_detail"
+    if path.startswith("/trajectory"):
+        return "trajectory_legacy"
+    if path.startswith("/models"):
+        if path == "/models/register" and method == "POST":
+            return "model_register"
+        if method == "DELETE":
+            return "model_delete"
+        return "model_list"
+    if path == "/health":
+        return "health"
+    if path == "/metrics":
+        return "metrics"
+    return "other"
 
 
 class ProxyWorker:
@@ -239,6 +272,48 @@ class ProxyWorker:
                     pass
 
             response = await call_next(request)
+            return response
+
+        @self.app.middleware("http")
+        async def api_metrics_middleware(request: Request, call_next) -> Response:
+            """HTTP API 层指标中间件：记录每条路由的请求数和耗时
+
+            run_id 提取策略：
+            - trajectory_list：从 query param `run_id` 提取（路由处理前）
+            - trajectory_detail / trajectory_legacy：由路由 handler 写入 `request.state.metric_run_id`，调用后读取
+            """
+            from traj_proxy.observability.label_guards import safe_run_id_label
+
+            route = classify_route(request)
+            method = request.method
+
+            # trajectory_list 路由可直接从 query param 提取 run_id
+            if route == "trajectory_list":
+                raw_run_id = request.query_params.get("run_id") or ""
+                request.state.metric_run_id = safe_run_id_label(normalize_run_id(raw_run_id or None))
+
+            t0 = time.perf_counter()
+            # 必须通过模块属性访问——register_all() 才创建真正指标，值导入会拿到初始 None
+            if metrics_collector.API_REQUEST_DURATION is None or metrics_collector.API_REQUESTS_TOTAL is None:
+                return await call_next(request)
+            try:
+                response = await call_next(request)
+            except Exception:
+                duration = time.perf_counter() - t0
+                # 异常路径：尝试读取 handler 写入的 metric_run_id，否则取空
+                run_id_label = getattr(request.state, "metric_run_id", "")
+                metrics_collector.API_REQUEST_DURATION.labels(route=route, run_id=run_id_label).observe(duration)
+                metrics_collector.API_REQUESTS_TOTAL.labels(
+                    route=route, method=method, status_code="500", run_id=run_id_label
+                ).inc()
+                raise
+            duration = time.perf_counter() - t0
+            code = str(response.status_code)
+            run_id_label = getattr(request.state, "metric_run_id", "")
+            metrics_collector.API_REQUEST_DURATION.labels(route=route, run_id=run_id_label).observe(duration)
+            metrics_collector.API_REQUESTS_TOTAL.labels(
+                route=route, method=method, status_code=code, run_id=run_id_label
+            ).inc()
             return response
 
     def _setup_routes(self):

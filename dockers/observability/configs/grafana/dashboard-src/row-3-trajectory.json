@@ -1,0 +1,191 @@
+[
+  {
+    "type": "row",
+    "title": "Row 3 — 轨迹请求",
+    "gridPos": {
+      "h": 1,
+      "w": 24,
+      "x": 0,
+      "y": 68
+    },
+    "collapsed": false
+  },
+  {
+    "id": 115,
+    "type": "timeseries",
+    "title": "轨迹列表请求数 (5min) - 按运行标识",
+    "description": "轨迹列表请求 (trajectory_list) 的 5 分钟增量数，按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 0,
+      "y": 69
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_list\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "bars"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 116,
+    "type": "timeseries",
+    "title": "轨迹详情请求数 (5min) - 按运行标识",
+    "description": "轨迹详情请求 (trajectory_detail) 的 5 分钟增量数，按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 6,
+      "y": 69
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "bars"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 117,
+    "type": "timeseries",
+    "title": "轨迹详情请求端到端耗时 - 按运行标识 (q=$quantile)",
+    "description": "轨迹详情请求的端到端耗时分位数，按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 12,
+      "y": 69
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile($quantile, sum by (le, run_id) (rate(trajproxy_api_request_duration_seconds_bucket{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[5m])))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "s",
+        "decimals": 3,
+        "custom": {
+          "fillOpacity": 5,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 118,
+    "type": "timeseries",
+    "title": "轨迹请求失败数量 - 按运行标识",
+    "description": "轨迹请求 (trajectory_list/trajectory_detail/trajectory_legacy) 中 HTTP 5xx 错误的 5 分钟增量数，按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 18,
+      "y": 69
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "bars"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  }
+]

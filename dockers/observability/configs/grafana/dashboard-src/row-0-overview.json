@@ -1,0 +1,183 @@
+[
+  {
+    "type": "row",
+    "title": "Row 0 — 全局总览",
+    "gridPos": {
+      "h": 1,
+      "w": 24,
+      "x": 0,
+      "y": 0
+    },
+    "collapsed": false
+  },
+  {
+    "id": 100,
+    "type": "piechart",
+    "title": "全站请求类型占比 (1h)",
+    "description": "各请求类型在过去 1 小时的请求占比",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 0,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[1h]))",
+        "legendFormat": "{{ route }}",
+        "refId": "A",
+        "instant": true
+      }
+    ],
+    "options": {
+      "pieType": "donut",
+      "displayLabels": [
+        "percent"
+      ],
+      "legend": {
+        "displayMode": "list",
+        "placement": "right"
+      }
+    }
+  },
+  {
+    "id": 101,
+    "type": "timeseries",
+    "title": "全站请求数 (5min) - 按请求类型",
+    "description": "各请求类型每 5 分钟请求数量趋势",
+    "gridPos": {
+      "h": 8,
+      "w": 8,
+      "x": 4,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m]))",
+        "legendFormat": "{{ route }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 25,
+          "stacking": {
+            "mode": "normal"
+          },
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 102,
+    "type": "timeseries",
+    "title": "全站 API 耗时 P95 - 按请求类型",
+    "description": "各请求类型 HTTP 耗时 P95",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 12,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile(0.95, sum by (le, route) (rate(trajproxy_api_request_duration_seconds_bucket{node=~\"$node\"}[5m])))",
+        "legendFormat": "{{ route }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "s",
+        "decimals": 3,
+        "custom": {
+          "fillOpacity": 5,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 36,
+    "type": "timeseries",
+    "title": "模型生命周期事件",
+    "description": "register / unregister / 轨迹存储错误",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 18,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[5m]))",
+        "legendFormat": "{{ action }}:{{ type }}",
+        "refId": "A"
+      },
+      {
+        "expr": "sum by (model) (rate(trajproxy_trajectory_store_errors_total{node=~\"$node\"}[5m]))",
+        "legendFormat": "store_err: {{ model }}",
+        "refId": "B"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "drawStyle": "bars"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom"
+      }
+    }
+  }
+]

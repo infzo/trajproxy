@@ -58,9 +58,14 @@ INFER_ERRORS: Optional[Counter] = None
 INFER_RETRIES: Optional[Counter] = None
 DB_POOL_USAGE: Optional[Gauge] = None
 TRAJECTORY_STORE_ERRORS: Optional[Counter] = None
+TRAJECTORY_STORE_DURATION: Optional[Histogram] = None
 
 # F. 可选（Phase 3+）
 MODEL_LIFECYCLE: Optional[Counter] = None
+
+# G. HTTP API 层 (2个)
+API_REQUESTS_TOTAL: Optional[Counter] = None
+API_REQUEST_DURATION: Optional[Histogram] = None
 
 # 幂等标志
 _registered = False
@@ -78,6 +83,7 @@ _OPTIONAL_CONTEXT_FIELDS = frozenset(
         "cache_prefix_match_ms",
         "inference_duration_ms",
         "decode_duration_ms",
+        "store_duration_ms",
         "prompt_tokens",
         "completion_tokens",
         "cache_hit_tokens",
@@ -128,7 +134,12 @@ def _on_request_completed(context: Any, exception: Optional[Exception]) -> None:
     ]:
         ms = getattr(context, attr, None)
         if ms is not None:
-            PHASE_DURATION.labels(model, phase).observe(ms / 1000)  # type: ignore[union-attr]
+            PHASE_DURATION.labels(model, phase, run_id).observe(ms / 1000)  # type: ignore[union-attr]
+
+    # 轨迹存储耗时
+    store_ms = getattr(context, "store_duration_ms", None)
+    if store_ms is not None:
+        TRAJECTORY_STORE_DURATION.labels(model=model, run_id=run_id).observe(store_ms / 1000)  # type: ignore[union-attr]
 
     # Tokens
     prompt_tok = getattr(context, "prompt_tokens", None)
@@ -215,8 +226,9 @@ def _create_metrics() -> None:
     global TTFT_SECONDS, STREAM_COMPLETION, STREAM_CLIENT_DISCONNECT
     global PHASE_DURATION, TOKENS_TOTAL
     global INFER_DURATION, INFER_ERRORS, INFER_RETRIES
-    global DB_POOL_USAGE, TRAJECTORY_STORE_ERRORS
+    global DB_POOL_USAGE, TRAJECTORY_STORE_ERRORS, TRAJECTORY_STORE_DURATION
     global MODEL_LIFECYCLE
+    global API_REQUESTS_TOTAL, API_REQUEST_DURATION
 
     # A. 请求核心
     REQUEST_TOTAL = Counter(
@@ -277,7 +289,7 @@ def _create_metrics() -> None:
     PHASE_DURATION = Histogram(
         "trajproxy_phase_duration_seconds",
         "Pipeline phase duration",
-        ["model", "phase"],
+        ["model", "phase", "run_id"],
         buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
     )
 
@@ -311,12 +323,31 @@ def _create_metrics() -> None:
         "Trajectory store error count",
         ["model", "error_type"],
     )
+    TRAJECTORY_STORE_DURATION = Histogram(
+        "trajproxy_trajectory_store_duration_seconds",
+        "Trajectory store duration",
+        labelnames=["model", "run_id"],
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+    )
 
     # F. 可选
     MODEL_LIFECYCLE = Counter(
         "trajproxy_model_lifecycle_total",
         "Model lifecycle events",
         ["action", "type"],
+    )
+
+    # G. HTTP API 层
+    API_REQUESTS_TOTAL = Counter(
+        "trajproxy_api_requests_total",
+        "HTTP API request count",
+        labelnames=["route", "method", "status_code", "run_id"],
+    )
+    API_REQUEST_DURATION = Histogram(
+        "trajproxy_api_request_duration_seconds",
+        "HTTP API request duration",
+        labelnames=["route", "run_id"],
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
     )
 
 

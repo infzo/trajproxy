@@ -5,7 +5,7 @@
 # 派生：configs/prometheus/targets.json（由脚本自动生成）
 # ============================================================
 
-.PHONY: help start up down logs sync targets add reload remove status
+.PHONY: help start up down logs sync targets add reload remove status dashboard
 
 # 默认目标：显示可用命令
 help:
@@ -17,6 +17,7 @@ help:
 	@echo "  make add    IP=<IP>              持久追加节点到 .env 的 MONITOR_NODES"
 	@echo "  make remove IP=<IP>              持久从 .env 移除节点"
 	@echo "  make targets                     查看当前监控节点"
+	@echo "  make dashboard                   从 fragment 重新组装 Grafana Dashboard"
 	@echo "  make up                          docker compose up（不自动生成 targets.json）"
 	@echo "  make down                        docker compose down"
 	@echo "  make logs                        查看日志"
@@ -90,3 +91,8 @@ reload:
 status:
 	@bash ../../scripts/start_docker_observability.sh sync
 	@docker compose ps
+
+# 从 fragment 重新组装 Grafana Dashboard JSON（修改 fragment 文件后执行）
+dashboard:
+	@echo "🔧 组装 Grafana Dashboard..."
+	@python3 configs/grafana/dashboard-src/build_dashboard.py

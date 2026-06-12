@@ -79,6 +79,7 @@ class ProcessContext:
     cache_prefix_match_ms: Optional[float] = None    # 前缀匹配耗时
     inference_duration_ms: Optional[float] = None    # 推理请求耗时
     decode_duration_ms: Optional[float] = None       # Token解码耗时
+    store_duration_ms: Optional[float] = None         # 轨迹存储耗时
 
     # 流式性能指标
     ttft_ms: Optional[float] = None                  # 首Token时间（Time To First Token）

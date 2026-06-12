@@ -4,10 +4,11 @@ BasePipeline - 处理管道抽象基类
 定义所有处理管道的通用接口和共享逻辑。
 """
 
+import time
+import traceback
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
-import traceback
 
 from traj_proxy.proxy_core.context import ProcessContext
 from traj_proxy.exceptions import DatabaseError
@@ -146,6 +147,7 @@ class BasePipeline(ABC):
         if not self.request_repository:
             return
 
+        t0 = time.perf_counter()
         try:
             await self.request_repository.insert(context, tokenizer_path, run_id)
             logger.info(f"[{context.unique_id}] 轨迹存储成功")
@@ -156,6 +158,8 @@ class BasePipeline(ABC):
             from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
             emit(EVENT_TRAJECTORY_STORE_ERROR, model=context.model,
                  error_type=type(e).__name__, error_message=str(e)[:200])
+        finally:
+            context.store_duration_ms = (time.perf_counter() - t0) * 1000
 
     def _update_timing(self, context: ProcessContext):
         """更新时间统计
