@@ -715,8 +715,6 @@ class ProcessContext:
 | Worker | `traj_proxy/workers/worker.py` |
 | Worker 管理 | `traj_proxy/workers/manager.py` |
 | 路由注册 | `traj_proxy/workers/route_registrar.py` |
-| 归档器 | `traj_proxy/archive/archiver.py` |
-| 归档调度 | `traj_proxy/archive/scheduler.py` |
 
 ---
 

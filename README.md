@@ -195,7 +195,6 @@ TrajProxy/
 │   ├── proxy_core/        # 推理核心（Processor、Pipeline、Converter、Parser、Cache、Builder）
 │   ├── serve/             # API 层（路由、数据模型、依赖注入、错误处理）
 │   ├── store/             # 存储层（数据库管理、模型仓库、请求仓库、同步器）
-│   ├── archive/           # 归档模块（过期数据归档、调度器）
 │   ├── workers/           # Worker 管理（ProxyWorker、WorkerManager、路由注册）
 │   └── utils/             # 工具模块（配置、日志、校验）
 ├── traj_archiver/         # 独立归档进程（与 traj_proxy 解耦，定时归档过期轨迹详情）

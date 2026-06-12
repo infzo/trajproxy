@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "targets": ["host.docker.internal:12300", "host.docker.internal:12301", "host.docker.internal:12302", "host.docker.internal:12303", "host.docker.internal:12304", "host.docker.internal:12305", "host.docker.internal:12306", "host.docker.internal:12307", "host.docker.internal:12308", "host.docker.internal:12309"],
+    "labels": {
+      "job": "trajproxy",
+      "node": "localhost"
+    }
+  }
+]

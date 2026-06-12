@@ -46,14 +46,9 @@
 ```
 核心业务容器 * N (traj-proxy)       归档容器 * 1 (traj-archiver)
   -- 仅处理推理请求                   -- 仅处理数据归档
-  -- 内嵌旧版归档代码(traj_proxy/archive/)  -- 独立配置、独立调度
-  -- 推荐使用 traj_archiver          -- 零依赖 traj_proxy 业务代码
+  -- 零依赖归档逻辑                  -- 独立配置、独立调度
+                                    -- 零依赖 traj_proxy 业务代码
 ```
-
-> **注意**: `traj_proxy/archive/` 目录下仍保留了旧版嵌入式归档代码（cron 调度模式），
-> 作为遗留兼容。推荐使用独立的 `traj_archiver/` 包，两种调度模式共存：
-> - **traj_proxy/archive/scheduler.py**: cron 表达式调度（依赖 croniter），嵌入主进程
-> - **traj_archiver/scheduler.py**: 轮询调度（poll_interval），独立进程
 
 ### 2.2 协调器-Worker 架构
 
@@ -227,25 +222,7 @@ archive:
 失败: 等 5 分钟重试
 状态查询: `get_status()` 返回运行状态、Worker 数量和统计
 
-### 6.2 嵌入式 cron 调度器（遗留）
 
-位于 `traj_proxy/archive/scheduler.py`，使用 croniter 实现定时调度:
-
-```yaml
-archive:
-  schedule: "0 2 * * *"  # cron 表达式（每天凌晨 2 点）
-  timezone: "Asia/Shanghai"
-  retention_days: 30
-  storage_path: "/data/archives"
-```
-
-特点:
-- 嵌入主进程运行，与业务共享进程
-- 支持 cron 表达式（更灵活的时间控制）
-- 支持心跳状态日志（每小时输出一次）
-- 手动触发: `trigger_now()`
-
-> **注意**: 建议使用独立进程轮询调度器（6.1），嵌入式 cron 调度器作为遗留方案保留。
 
 ---
 
@@ -339,8 +316,6 @@ archive:
 | `traj_archiver/s3_storage.py` | S3 存储实现 (boto3) |
 | `traj_archiver/csb_storage.py` | CSB 网关存储实现 (原生 REST API) |
 | `traj_archiver/config.py` | 独立配置加载 |
-| `traj_proxy/archive/archiver.py` | 嵌入式归档执行器（遗留，月分区粒度） |
-| `traj_proxy/archive/scheduler.py` | 嵌入式 cron 调度器（遗留，依赖 croniter） |
 | `configs/archiver.yaml` | 归档配置文件 |
 | `dockers/archiver/` | 独立 compose 部署 |
 | `scripts/start_docker_archiver.sh` | 启停脚本 |
@@ -360,5 +335,5 @@ archive:
 | 磁盘保护 | 无 (可能打爆磁盘) | 有界队列 | Worker 同一时刻只处理一个 session |
 | DB 连接 | 共享连接池 | 共享连接池 | 协调器用连接池，Worker 每次新建 |
 | 配置 | config.yaml archive 段 | 独立 archiver.yaml | 独立 archiver.yaml |
-| CLI | traj_proxy/archive/archiver.py (嵌入) | python -m traj_archiver | python -m traj_archiver |
+| CLI | 嵌入主进程 | python -m traj_archiver | python -m traj_archiver |
 | 留存期 | 30 天固定 | 7/10/30 天灵活配置 | 7/10/30 天灵活配置 |

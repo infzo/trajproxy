@@ -117,3 +117,9 @@ echo ""
 echo "=== 构建完成 ==="
 echo "生成的镜像文件:"
 ls -lh "${IMAGES_DIR}/${IMAGE_NAME}."*.${VERSION_NUM}.tar 2>/dev/null || echo "无镜像文件"
+
+# 自动打开访达并定位到镜像输出目录 (macOS)
+if command -v open >/dev/null 2>&1; then
+    echo "正在打开访达: $IMAGES_DIR"
+    open "$IMAGES_DIR"
+fi

@@ -268,15 +268,10 @@ start_service() {
     fi
     echo -e "${GREEN}✅ 数据目录就绪${NC}"
 
-    # 拉取镜像
-    echo ""
-    echo -e "${CYAN}📦 拉取镜像...${NC}"
-    docker compose --project-directory "$PROJECT_DIR" -f "$PROJECT_DIR/docker-compose.yml" pull
-
-    # 启动服务
+    # 启动服务（--pull=missing 仅在镜像不存在时拉取，已有则跳过）
     echo ""
     echo -e "${CYAN}🚀 启动服务...${NC}"
-    docker compose --project-directory "$PROJECT_DIR" -f "$PROJECT_DIR/docker-compose.yml" up -d
+    docker compose --project-directory "$PROJECT_DIR" -f "$PROJECT_DIR/docker-compose.yml" up -d --pull=missing
 
     # 等待健康检查
     echo ""
