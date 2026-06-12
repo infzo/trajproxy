@@ -139,6 +139,9 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+
+# TrajProxy observability - 派生文件（由 scripts/start_docker_observability.sh 自动生成）
+dockers/observability/configs/prometheus/targets.json
 .venv
 env/
 venv/

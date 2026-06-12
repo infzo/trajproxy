@@ -52,14 +52,38 @@ if [ -z "$VERSION" ]; then
     echo "错误: 必须指定版本号"
     echo "用法: $0 [--type compose|allinone] <version>"
     echo "示例:"
-    echo "  $0 0.0.9                  # 构建 compose 镜像（默认）"
-    echo "  $0 --type allinone 0.0.9  # 构建 allinone 镜像"
+    echo "  $0 0.0.9                       # 构建 compose 镜像（默认）"
+    echo "  $0 0.3.1.dev01                 # 构建开发版镜像"
+    echo "  $0 0.3.1-rc1                   # 构建预发布镜像"
+    echo "  $0 --type allinone 0.3.1.dev01 # 构建 allinone 开发版镜像"
     exit 1
 fi
 
-# 转换版本号为文件名格式 (0.0.9 -> 009)
-VERSION_NUM=$(echo "$VERSION" | tr -d '.' | sed 's/^0*//')
-VERSION_NUM=$(printf "%03d" "$VERSION_NUM")
+# 解析版本号，支持多种格式:
+#   标准:     0.3.1         -> 031
+#   开发版:   0.3.1.dev01   -> 031.dev01
+#   预发布:   0.3.1-rc1     -> 031.rc1
+#   字母后缀: 0.3.1a1       -> 031.a1
+#   大版本号: 1.2.3         -> 123
+if [[ "$VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(.*) ]]; then
+    MAJOR="${BASH_REMATCH[1]}"
+    MINOR="${BASH_REMATCH[2]}"
+    PATCH="${BASH_REMATCH[3]}"
+    SUFFIX="${BASH_REMATCH[4]}"
+else
+    echo "错误: 无法解析版本号 '$VERSION'"
+    echo "支持的格式: X.Y.Z, X.Y.Z.devNN, X.Y.Z-rcN, X.Y.Za1 等"
+    exit 1
+fi
+
+# 生成版本标识 (主版本号各段直接拼接，避免 printf 八进制陷阱)
+VERSION_NUM="${MAJOR}${MINOR}${PATCH}"
+
+# 处理后缀 (清理前导分隔符 '.' 或 '-')
+if [ -n "$SUFFIX" ]; then
+    CLEAN_SUFFIX=$(echo "$SUFFIX" | sed 's/^[.-]//')
+    VERSION_NUM="${VERSION_NUM}.${CLEAN_SUFFIX}"
+fi
 
 echo "=== 构建参数 ==="
 echo "构建类型: $BUILD_TYPE"

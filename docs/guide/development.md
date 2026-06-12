@@ -177,7 +177,6 @@ TrajProxy/
 ├── scripts/                        # 脚本目录（扁平结构）
 │   ├── download_tokenizer.py       # Tokenizer 下载
 │   ├── ensure_jinja_consistency.py # Jinja 模板一致性验证
-│   ├── export_database.py          # 数据库导出
 │   ├── replay_trajectory_viewer.html # 轨迹回放可视化
 │   ├── start_docker_allinone.sh    # 启动 All-in-One 容器
 │   ├── start_docker_archiver.sh    # 启动归档服务容器
