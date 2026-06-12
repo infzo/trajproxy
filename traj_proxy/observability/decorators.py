@@ -11,18 +11,40 @@ from traj_proxy.observability.events import (
     EVENT_INFERENCE_COMPLETED,
     EVENT_MODEL_LIFECYCLE,
 )
+import httpx
+
 from traj_proxy.exceptions import InferTimeoutError, InferServiceError
 
 
-def _classify_infer_error(exc: Exception) -> str:
-    """将推理异常分类为 error_type 枚举"""
+def classify_infer_error(exc: Exception) -> str:
+    """将推理异常分类为 error_type 枚举
+
+    通过回溯 exc.__cause__（原始 httpx 异常）精确分类，
+    不依赖错误消息字符串匹配。
+
+    error_type 枚举（6 种）：
+    - connect_timeout: 连接超时（默认 60s）
+    - read_timeout: 读取超时（默认 600s，模型处理太慢）
+    - connection: 连接失败（DNS 解析 / 拒绝连接 / 网络中断）
+    - rate_limited: 推理服务返回 429
+    - http_error: 推理服务返回其他 HTTP 错误
+    - unknown: 兜底
+    """
+    cause = exc.__cause__
+
     if isinstance(exc, InferTimeoutError):
-        return "timeout"
+        if isinstance(cause, httpx.ConnectTimeout):
+            return "connect_timeout"
+        return "read_timeout"
+
     if isinstance(exc, InferServiceError):
-        msg = str(exc).lower()
-        if "连接" in msg or "connection" in msg:
-            return "connection"
-        return "http_error"
+        if isinstance(cause, httpx.HTTPStatusError):
+            if cause.response.status_code == 429:
+                return "rate_limited"
+            return "http_error"
+        # RequestError / ConnectError 等网络层错误
+        return "connection"
+
     return "unknown"
 
 
@@ -56,7 +78,7 @@ def observe_inference(func: Callable) -> Callable:
                 duration_ms=duration_ms,
                 retry_count=retry_count,
                 error=error,
-                error_type=_classify_infer_error(error) if error else None,
+                error_type=classify_infer_error(error) if error else None,
             )
 
     return wrapper
@@ -84,7 +106,7 @@ def observe_inference_stream(func: Callable) -> Callable:
                 duration_ms=duration_ms,
                 retry_count=0,
                 error=error,
-                error_type=_classify_infer_error(error) if error else None,
+                error_type=classify_infer_error(error) if error else None,
             )
 
     return wrapper

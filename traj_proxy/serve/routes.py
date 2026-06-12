@@ -43,6 +43,52 @@ from traj_proxy.utils.validators import (
 from traj_proxy.serve.error_handler import build_error_response
 from traj_proxy.observability.label_guards import safe_run_id_label
 
+
+def _emit_api_error(route: str, run_id: str, error_category: str) -> None:
+    """向 EventBus 上报 API 分类错误，用于 trajproxy_api_errors_total 指标采集
+
+    此函数为 fire-and-forget：任何异常（如 EventBus 未就绪）均被静默忽略，
+    不影响主业务流的异常处理。
+
+    Args:
+        route: 路由分类标签（trajectory_list / trajectory_detail / trajectory_legacy）
+        run_id: 运行标识
+        error_category: 错误分类（database / timeout / serialize_timeout / other）
+    """
+    try:
+        from traj_proxy.observability.event_bus import emit
+        from traj_proxy.observability.events import EVENT_API_ERROR
+        emit(EVENT_API_ERROR, route=route, run_id=run_id or "", error_category=error_category)
+    except Exception:
+        pass
+
+
+def _emit_trajectory_query_completed(
+    route: str, run_id: str, record_count: int, response_size_bytes: int
+) -> None:
+    """向 EventBus 上报轨迹查询完成事件，供 Prometheus 采集 records 数量和响应体大小
+
+    fire-and-forget：异常隔离，不阻塞业务返回路径。
+
+    Args:
+        route: 路由分类标签（trajectory_legacy / trajectory_detail）
+        run_id: 运行标识
+        record_count: 返回的记录条数
+        response_size_bytes: 序列化后响应体字节数
+    """
+    try:
+        from traj_proxy.observability.event_bus import emit
+        from traj_proxy.observability.events import EVENT_TRAJECTORY_QUERY_COMPLETED
+        emit(
+            EVENT_TRAJECTORY_QUERY_COMPLETED,
+            route=route,
+            run_id=run_id or "",
+            record_count=record_count,
+            response_size_bytes=response_size_bytes,
+        )
+    except Exception:
+        pass
+
 # 路由定义
 chat_router = APIRouter()
 model_router = APIRouter()
@@ -541,6 +587,9 @@ async def get_trajectory(
 
     t_start = time.perf_counter()
 
+    # 初始化 metric_run_id 为默认值（DB 成功后会覆盖，确保异常路径安全引用）
+    request.state.metric_run_id = ""
+
     # 并发限流
     semaphore = getattr(request.app.state, "request_semaphore", None)
     acquired = False
@@ -563,6 +612,7 @@ async def get_trajectory(
         except asyncio.TimeoutError:
             t_db_elapsed = (time.perf_counter() - t_db_start) * 1000
             logger.warning(f"[{session_id}] DB查询超时 ({TRAJECTORY_DB_TIMEOUT}s), 已耗时={t_db_elapsed:.1f}ms")
+            _emit_api_error("trajectory_legacy", request.state.metric_run_id, "timeout")
             raise
         t_db_end = time.perf_counter()
 
@@ -589,6 +639,7 @@ async def get_trajectory(
         except asyncio.TimeoutError:
             t_ser_elapsed = (time.perf_counter() - t_ser_start) * 1000
             logger.warning(f"[{session_id}] 序列化超时 ({TRAJECTORY_SERIALIZE_TIMEOUT}s), 已耗时={t_ser_elapsed:.1f}ms")
+            _emit_api_error("trajectory_legacy", request.state.metric_run_id, "serialize_timeout")
             raise
         t_end = time.perf_counter()
 
@@ -602,10 +653,20 @@ async def get_trajectory(
             f"{response_size_kb:.1f}KB, fields={fields or '全部'}, "
             f"DB查询={t_db_elapsed:.1f}ms, 序列化={t_ser_elapsed:.1f}ms, 总耗时={t_total:.1f}ms"
         )
+        _emit_trajectory_query_completed(
+            "trajectory_legacy", request.state.metric_run_id,
+            len(records), len(json_bytes),
+        )
         return Response(content=json_bytes, media_type="application/json")
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="轨迹查询超时")
+    except DatabaseError as e:
+        _emit_api_error("trajectory_legacy", request.state.metric_run_id, "database")
+        logger.exception(f"轨迹查询数据库错误: {str(e)}")
+        error_detail, status_code = build_error_response("trajectory_query", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
+        _emit_api_error("trajectory_legacy", request.state.metric_run_id, "other")
         logger.exception(f"轨迹查询失败: {str(e)}")
         error_detail, status_code = build_error_response("trajectory_query", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
@@ -636,6 +697,7 @@ async def list_trajectories(
     """
     from traj_proxy.workers.worker import get_transcript_provider as get_provider
 
+    safe_rid = safe_run_id_label(run_id or "")
     try:
         provider = get_provider(request)
         return await asyncio.wait_for(
@@ -643,8 +705,15 @@ async def list_trajectories(
             timeout=TRAJECTORY_DB_TIMEOUT
         )
     except asyncio.TimeoutError:
+        _emit_api_error("trajectory_list", safe_rid, "timeout")
         raise HTTPException(status_code=504, detail="轨迹列表查询超时")
+    except DatabaseError as e:
+        _emit_api_error("trajectory_list", safe_rid, "database")
+        logger.exception(f"查询轨迹列表数据库错误: {str(e)}")
+        error_detail, status_code = build_error_response("list_trajectories", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
+        _emit_api_error("trajectory_list", safe_rid, "other")
         logger.exception(f"查询轨迹列表失败: {str(e)}")
         error_detail, status_code = build_error_response("list_trajectories", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
@@ -675,6 +744,8 @@ async def get_trajectory_detail(
     """
     from traj_proxy.workers.worker import get_transcript_provider as get_provider
 
+    # 初始化 metric_run_id 为默认值（DB 成功后会覆盖，确保异常路径安全引用）
+    request.state.metric_run_id = ""
     t_start = time.perf_counter()
 
     # 并发限流
@@ -699,6 +770,7 @@ async def get_trajectory_detail(
         except asyncio.TimeoutError:
             t_db_elapsed = (time.perf_counter() - t_db_start) * 1000
             logger.warning(f"[{session_id}] DB查询超时 ({TRAJECTORY_DB_TIMEOUT}s), 已耗时={t_db_elapsed:.1f}ms")
+            _emit_api_error("trajectory_detail", request.state.metric_run_id, "timeout")
             raise
         t_db_end = time.perf_counter()
 
@@ -722,6 +794,7 @@ async def get_trajectory_detail(
         except asyncio.TimeoutError:
             t_ser_elapsed = (time.perf_counter() - t_ser_start) * 1000
             logger.warning(f"[{session_id}] 序列化超时 ({TRAJECTORY_SERIALIZE_TIMEOUT}s), 已耗时={t_ser_elapsed:.1f}ms")
+            _emit_api_error("trajectory_detail", request.state.metric_run_id, "serialize_timeout")
             raise
         t_end = time.perf_counter()
 
@@ -730,15 +803,26 @@ async def get_trajectory_detail(
         t_ser_elapsed = (t_end - t_db_end) * 1000
         t_total = (t_end - t_start) * 1000
         response_size_kb = len(json_bytes) / 1024
+        returned_count = min(record_count, limit) if limit else record_count
         logger.info(
-            f"[{session_id}] 轨迹详情查询完成: {min(record_count, limit) if limit else record_count}条记录, "
+            f"[{session_id}] 轨迹详情查询完成: {returned_count}条记录, "
             f"{response_size_kb:.1f}KB, fields={fields or '全部'}, "
             f"DB查询={t_db_elapsed:.1f}ms, 序列化={t_ser_elapsed:.1f}ms, 总耗时={t_total:.1f}ms"
+        )
+        _emit_trajectory_query_completed(
+            "trajectory_detail", request.state.metric_run_id,
+            returned_count, len(json_bytes),
         )
         return Response(content=json_bytes, media_type="application/json")
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="轨迹查询超时")
+    except DatabaseError as e:
+        _emit_api_error("trajectory_detail", request.state.metric_run_id, "database")
+        logger.exception(f"查询轨迹详情数据库错误: {str(e)}")
+        error_detail, status_code = build_error_response("get_trajectory_detail", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
+        _emit_api_error("trajectory_detail", request.state.metric_run_id, "other")
         logger.exception(f"查询轨迹详情失败: {str(e)}")
         error_detail, status_code = build_error_response("get_trajectory_detail", e)
         raise HTTPException(status_code=status_code, detail=error_detail)

@@ -27,9 +27,18 @@ EVENT_CONCURRENCY_REJECTED = "concurrency.rejected"
 EVENT_SEMAPHORE_ACQUIRED = "semaphore.acquired"
 
 # ── 轨迹存储失败（静默失败显式化）──
-# kwargs: model: str, error_type: str, error_message: str
+# kwargs: model: str, error_type: str, error_message: str, run_id: str
 EVENT_TRAJECTORY_STORE_ERROR = "trajectory.store_error"
+
+# ── API 请求错误（轨迹/模型接口的分类异常上报）──
+# kwargs: route: str, run_id: str, error_category: str
+# error_category 枚举: database / timeout / serialize_timeout / other
+EVENT_API_ERROR = "api.error"
 
 # ── 流式客户端断连 ──
 # kwargs: model: str, chunk_count: int, duration_ms: float
 EVENT_STREAM_CLIENT_DISCONNECT = "stream.client_disconnect"
+
+# ── 轨迹查询完成 ──
+# kwargs: route: str, run_id: str, record_count: int, response_size_bytes: int
+EVENT_TRAJECTORY_QUERY_COMPLETED = "trajectory.query_completed"

@@ -51,7 +51,7 @@
     "description": "各请求类型每 5 分钟请求数量趋势",
     "gridPos": {
       "h": 8,
-      "w": 8,
+      "w": 5,
       "x": 4,
       "y": 1
     },
@@ -93,14 +93,14 @@
     }
   },
   {
-    "id": 102,
+    "id": 103,
     "type": "timeseries",
-    "title": "全站 API 耗时 P95 - 按请求类型",
-    "description": "各请求类型 HTTP 耗时 P95",
+    "title": "全站请求数 (5min) - 按节点",
+    "description": "各节点每 5 分钟请求数量趋势",
     "gridPos": {
       "h": 8,
       "w": 6,
-      "x": 12,
+      "x": 9,
       "y": 1
     },
     "datasource": {
@@ -109,7 +109,55 @@
     },
     "targets": [
       {
-        "expr": "histogram_quantile(0.95, sum by (le, route) (rate(trajproxy_api_request_duration_seconds_bucket{node=~\"$node\"}[5m])))",
+        "expr": "sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m]))",
+        "legendFormat": "{{ node }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 25,
+          "stacking": {
+            "mode": "normal"
+          },
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 102,
+    "type": "timeseries",
+    "title": "全站请求耗时 - 按请求类型",
+    "description": "各请求类型 HTTP 耗时 ${quantile:text} 分位",
+    "gridPos": {
+      "h": 8,
+      "w": 5,
+      "x": 15,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile($quantile, sum by (le, route) (rate(trajproxy_api_request_duration_seconds_bucket{node=~\"$node\"}[5m])))",
         "legendFormat": "{{ route }}",
         "refId": "A"
       }
@@ -145,8 +193,8 @@
     "description": "register / unregister / 轨迹存储错误",
     "gridPos": {
       "h": 8,
-      "w": 6,
-      "x": 18,
+      "w": 4,
+      "x": 20,
       "y": 1
     },
     "datasource": {

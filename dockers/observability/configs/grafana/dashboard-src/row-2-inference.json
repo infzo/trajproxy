@@ -6,57 +6,9 @@
       "h": 1,
       "w": 24,
       "x": 0,
-      "y": 28
+      "y": 20
     },
     "collapsed": false
-  },
-  {
-    "id": 10,
-    "type": "timeseries",
-    "title": "推理请求数 (5min) - 按模型",
-    "description": "各模型每 5 分钟请求数量趋势",
-    "gridPos": {
-      "h": 8,
-      "w": 6,
-      "x": 0,
-      "y": 29
-    },
-    "datasource": {
-      "type": "prometheus",
-      "uid": "$datasource"
-    },
-    "targets": [
-      {
-        "expr": "sum by (model) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[5m]))",
-        "legendFormat": "{{ model }}",
-        "refId": "A"
-      }
-    ],
-    "fieldConfig": {
-      "defaults": {
-        "unit": "short",
-        "custom": {
-          "fillOpacity": 25,
-          "stacking": {
-            "mode": "normal"
-          },
-          "drawStyle": "line"
-        }
-      }
-    },
-    "options": {
-      "legend": {
-        "displayMode": "table",
-        "placement": "bottom",
-        "calcs": [
-          "mean",
-          "max"
-        ]
-      },
-      "tooltip": {
-        "mode": "multi"
-      }
-    }
   },
   {
     "id": 11,
@@ -66,8 +18,8 @@
     "gridPos": {
       "h": 8,
       "w": 6,
-      "x": 6,
-      "y": 29
+      "x": 0,
+      "y": 21
     },
     "datasource": {
       "type": "prometheus",
@@ -113,8 +65,8 @@
     "gridPos": {
       "h": 8,
       "w": 6,
-      "x": 12,
-      "y": 29
+      "x": 6,
+      "y": 21
     },
     "datasource": {
       "type": "prometheus",
@@ -150,49 +102,6 @@
     }
   },
   {
-    "id": 35,
-    "type": "timeseries",
-    "title": "推理并发限流 (429)",
-    "description": "Semaphore 超时拒绝速率",
-    "gridPos": {
-      "h": 8,
-      "w": 6,
-      "x": 18,
-      "y": 29
-    },
-    "datasource": {
-      "type": "prometheus",
-      "uid": "$datasource"
-    },
-    "targets": [
-      {
-        "expr": "sum by (model) (rate(trajproxy_semaphore_rejected_total{node=~\"$node\"}[5m]))",
-        "legendFormat": "rejected: {{ model }}",
-        "refId": "A"
-      },
-      {
-        "expr": "histogram_quantile(0.95, sum by (le) (rate(trajproxy_semaphore_wait_seconds_bucket{node=~\"$node\"}[5m])))",
-        "legendFormat": "wait P95",
-        "refId": "B"
-      }
-    ],
-    "fieldConfig": {
-      "defaults": {
-        "unit": "short"
-      }
-    },
-    "options": {
-      "legend": {
-        "displayMode": "table",
-        "placement": "bottom",
-        "calcs": [
-          "mean",
-          "max"
-        ]
-      }
-    }
-  },
-  {
     "id": 50,
     "type": "timeseries",
     "title": "推理请求端到端耗时 - 按运行标识 (q=$quantile)",
@@ -201,7 +110,7 @@
       "h": 8,
       "w": 6,
       "x": 0,
-      "y": 37
+      "y": 29
     },
     "datasource": {
       "type": "prometheus",
@@ -248,7 +157,7 @@
       "h": 8,
       "w": 6,
       "x": 6,
-      "y": 37
+      "y": 29
     },
     "datasource": {
       "type": "prometheus",
@@ -294,7 +203,7 @@
       "h": 8,
       "w": 6,
       "x": 12,
-      "y": 37
+      "y": 29
     },
     "datasource": {
       "type": "prometheus",
@@ -340,7 +249,7 @@
       "h": 8,
       "w": 6,
       "x": 18,
-      "y": 37
+      "y": 29
     },
     "datasource": {
       "type": "prometheus",
@@ -386,7 +295,7 @@
       "h": 8,
       "w": 6,
       "x": 12,
-      "y": 45
+      "y": 21
     },
     "datasource": {
       "type": "prometheus",
@@ -424,191 +333,6 @@
     }
   },
   {
-    "id": 34,
-    "type": "timeseries",
-    "title": "推理重试趋势",
-    "description": "推理重试次数 per 模型",
-    "gridPos": {
-      "h": 8,
-      "w": 6,
-      "x": 0,
-      "y": 53
-    },
-    "datasource": {
-      "type": "prometheus",
-      "uid": "$datasource"
-    },
-    "targets": [
-      {
-        "expr": "sum by (model) (rate(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[5m]))",
-        "legendFormat": "{{ model }}",
-        "refId": "A"
-      }
-    ],
-    "fieldConfig": {
-      "defaults": {
-        "unit": "reqps",
-        "custom": {
-          "fillOpacity": 20,
-          "drawStyle": "line"
-        }
-      }
-    },
-    "options": {
-      "legend": {
-        "displayMode": "table",
-        "placement": "bottom",
-        "calcs": [
-          "mean",
-          "max"
-        ]
-      },
-      "tooltip": {
-        "mode": "multi"
-      }
-    }
-  },
-  {
-    "id": 32,
-    "type": "timeseries",
-    "title": "推理流式完整率",
-    "description": "full / partial / empty 流式结束占比",
-    "gridPos": {
-      "h": 8,
-      "w": 6,
-      "x": 12,
-      "y": 53
-    },
-    "datasource": {
-      "type": "prometheus",
-      "uid": "$datasource"
-    },
-    "targets": [
-      {
-        "expr": "sum by (result) (rate(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\"}[5m]))",
-        "legendFormat": "{{ result }}",
-        "refId": "A"
-      }
-    ],
-    "fieldConfig": {
-      "defaults": {
-        "unit": "reqps",
-        "custom": {
-          "fillOpacity": 25,
-          "stacking": {
-            "mode": "normal"
-          },
-          "drawStyle": "line"
-        }
-      }
-    },
-    "options": {
-      "legend": {
-        "displayMode": "table",
-        "placement": "bottom",
-        "calcs": [
-          "sum"
-        ]
-      },
-      "tooltip": {
-        "mode": "multi"
-      }
-    }
-  },
-  {
-    "id": 30,
-    "type": "timeseries",
-    "title": "推理错误率 - 按结果",
-    "description": "按结果分类的错误趋势",
-    "gridPos": {
-      "h": 8,
-      "w": 6,
-      "x": 18,
-      "y": 53
-    },
-    "datasource": {
-      "type": "prometheus",
-      "uid": "$datasource"
-    },
-    "targets": [
-      {
-        "expr": "sum by (outcome) (rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\",outcome=~\"error_.+|timeout|stream_partial\"}[5m]))",
-        "legendFormat": "{{ outcome }}",
-        "refId": "A"
-      }
-    ],
-    "fieldConfig": {
-      "defaults": {
-        "unit": "reqps",
-        "custom": {
-          "fillOpacity": 30,
-          "stacking": {
-            "mode": "normal"
-          },
-          "drawStyle": "line"
-        }
-      }
-    },
-    "options": {
-      "legend": {
-        "displayMode": "table",
-        "placement": "bottom",
-        "calcs": [
-          "mean",
-          "max"
-        ]
-      },
-      "tooltip": {
-        "mode": "multi"
-      }
-    }
-  },
-  {
-    "id": 31,
-    "type": "timeseries",
-    "title": "推理错误率 - 按运行标识",
-    "description": "各作业错误趋势",
-    "gridPos": {
-      "h": 8,
-      "w": 6,
-      "x": 0,
-      "y": 61
-    },
-    "datasource": {
-      "type": "prometheus",
-      "uid": "$datasource"
-    },
-    "targets": [
-      {
-        "expr": "sum by (run_id) (rate(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_.+|timeout|stream_partial\"}[5m])) / sum by (run_id) (rate(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\"}[5m])) * 100",
-        "legendFormat": "{{ run_id }}",
-        "refId": "A"
-      }
-    ],
-    "fieldConfig": {
-      "defaults": {
-        "unit": "percent",
-        "custom": {
-          "fillOpacity": 5,
-          "drawStyle": "line"
-        }
-      }
-    },
-    "options": {
-      "legend": {
-        "displayMode": "table",
-        "placement": "bottom",
-        "calcs": [
-          "mean",
-          "max"
-        ]
-      },
-      "tooltip": {
-        "mode": "multi"
-      }
-    }
-  },
-  {
     "id": 13,
     "type": "piechart",
     "title": "推理流式与非流式占比",
@@ -616,8 +340,8 @@
     "gridPos": {
       "h": 8,
       "w": 6,
-      "x": 6,
-      "y": 61
+      "x": 18,
+      "y": 21
     },
     "datasource": {
       "type": "prometheus",
@@ -639,6 +363,154 @@
       "legend": {
         "displayMode": "list",
         "placement": "right"
+      }
+    }
+  },
+  {
+    "id": 140,
+    "type": "timeseries",
+    "title": "推理请求失败数量 - 按运行标识 (5min)",
+    "description": "推理请求失败按运行标识聚合统计：左轴为请求级失败总数，右轴为轨迹写入 DB 失败数",
+    "gridPos": {
+      "h": 10,
+      "w": 12,
+      "x": 0,
+      "y": 37
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line",
+          "lineWidth": 2,
+          "pointSize": 5,
+          "showPoints": "auto",
+          "spanNulls": false
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byRegexp",
+            "options": "^写入.*"
+          },
+          "properties": [
+            {
+              "id": "custom.axisPlacement",
+              "value": "right"
+            },
+            {
+              "id": "color",
+              "value": {
+                "mode": "palette-classic"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[5m]))",
+        "legendFormat": "失败: {{ run_id }}",
+        "refId": "A"
+      },
+      {
+        "expr": "sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "写入: {{ run_id }}",
+        "refId": "B"
+      }
+    ],
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 141,
+    "type": "timeseries",
+    "title": "推理请求错误细分（请选择 Run ID）",
+    "description": "展示所选 run_id 的推理错误按错误子类型（connect_timeout / read_timeout / connection / rate_limited / http_error / unknown）拆分的时间分布。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
+    "gridPos": {
+      "h": 10,
+      "w": 12,
+      "x": 12,
+      "y": 37
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 50,
+          "stacking": {
+            "mode": "normal"
+          },
+          "drawStyle": "bars"
+        }
+      },
+      "overrides": [
+        {
+          "matcher": { "id": "byName", "options": "connect_timeout" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+        },
+        {
+          "matcher": { "id": "byName", "options": "read_timeout" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+        },
+        {
+          "matcher": { "id": "byName", "options": "connection" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }]
+        },
+        {
+          "matcher": { "id": "byName", "options": "rate_limited" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }]
+        },
+        {
+          "matcher": { "id": "byName", "options": "http_error" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+        },
+        {
+          "matcher": { "id": "byName", "options": "unknown" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }]
+        }
+      ]
+    },
+    "targets": [
+      {
+        "expr": "sum by (error_type) (increase(trajproxy_request_infer_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "{{ error_type }}",
+        "refId": "A"
+      }
+    ],
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
       }
     }
   }

@@ -19,8 +19,11 @@ from traj_proxy.observability.events import (
     EVENT_CONCURRENCY_REJECTED,
     EVENT_SEMAPHORE_ACQUIRED,
     EVENT_TRAJECTORY_STORE_ERROR,
+    EVENT_API_ERROR,
     EVENT_STREAM_CLIENT_DISCONNECT,
+    EVENT_TRAJECTORY_QUERY_COMPLETED,
 )
+from traj_proxy.observability.decorators import classify_infer_error
 from traj_proxy.observability.outcome import determine_outcome
 from traj_proxy.observability.label_guards import (
     safe_model_label,
@@ -49,8 +52,9 @@ STREAM_CLIENT_DISCONNECT: Optional[Counter] = None
 # C. 阶段 (1个)
 PHASE_DURATION: Optional[Histogram] = None
 
-# D. Token (1个)
+# D. Token (2个)
 TOKENS_TOTAL: Optional[Counter] = None
+SEQUENCE_LENGTH_TOKENS: Optional[Histogram] = None
 
 # E. 下游依赖 (5个)
 INFER_DURATION: Optional[Histogram] = None
@@ -66,6 +70,16 @@ MODEL_LIFECYCLE: Optional[Counter] = None
 # G. HTTP API 层 (2个)
 API_REQUESTS_TOTAL: Optional[Counter] = None
 API_REQUEST_DURATION: Optional[Histogram] = None
+
+# H. API 错误归因 (1个)
+API_ERRORS: Optional[Counter] = None
+
+# I. 请求级推理错误细分 (1个)
+REQUEST_INFER_ERRORS: Optional[Counter] = None
+
+# J. 轨迹查询指标 (2个)
+TRAJECTORY_RECORD_COUNT: Optional[Histogram] = None
+TRAJECTORY_RESPONSE_SIZE_BYTES: Optional[Histogram] = None
 
 # 幂等标志
 _registered = False
@@ -121,6 +135,10 @@ def _on_request_completed(context: Any, exception: Optional[Exception]) -> None:
     duration_s = (getattr(context, "processing_duration_ms", 0) or 0) / 1000
 
     REQUEST_TOTAL.labels("POST", model, stream, outcome, run_id).inc()  # type: ignore[union-attr]
+    # 请求级推理错误细分打点（仅当 outcome 为推理服务错误或超时）
+    if outcome in ("error_infer", "timeout") and exception is not None:
+        err_type = classify_infer_error(exception)
+        REQUEST_INFER_ERRORS.labels(model, err_type, run_id).inc()  # type: ignore[union-attr]
     REQUEST_DURATION.labels(model, stream, run_id).observe(duration_s)  # type: ignore[union-attr]
 
     # 分阶段耗时
@@ -151,6 +169,11 @@ def _on_request_completed(context: Any, exception: Optional[Exception]) -> None:
         TOKENS_TOTAL.labels(model, run_id, "completion").inc(completion_tok)  # type: ignore[union-attr]
     if cache_tok:
         TOKENS_TOTAL.labels(model, run_id, "cached").inc(cache_tok)  # type: ignore[union-attr]
+
+    # 序列长度（prompt + completion tokens 总和）
+    total_seq_len = (prompt_tok or 0) + (completion_tok or 0)
+    if total_seq_len > 0:
+        SEQUENCE_LENGTH_TOKENS.labels(model, run_id).observe(total_seq_len)  # type: ignore[union-attr]
 
     # Stream
     if stream == "true":
@@ -185,9 +208,15 @@ def _on_concurrency_rejected(
 
 
 def _on_trajectory_store_error(
-    model: str, error_type: str, error_message: str
+    model: str, error_type: str, error_message: str, run_id: str = ""
 ) -> None:
-    TRAJECTORY_STORE_ERRORS.labels(safe_model_label(model), error_type).inc()  # type: ignore[union-attr]
+    safe_run_id = safe_run_id_label(run_id or "")
+    TRAJECTORY_STORE_ERRORS.labels(safe_model_label(model), error_type, safe_run_id).inc()  # type: ignore[union-attr]
+
+
+def _on_api_error(route: str, run_id: str, error_category: str) -> None:
+    safe_run_id = safe_run_id_label(run_id or "")
+    API_ERRORS.labels(route, safe_run_id, error_category).inc()  # type: ignore[union-attr]
 
 
 def _on_stream_client_disconnect(
@@ -212,6 +241,14 @@ def _on_inference_completed(
         INFER_RETRIES.labels(safe_model, outcome_label).inc(retry_count)  # type: ignore[union-attr]
 
 
+def _on_trajectory_query_completed(
+    route: str, run_id: str, record_count: int, response_size_bytes: int
+) -> None:
+    safe_run_id = safe_run_id_label(run_id or "")
+    TRAJECTORY_RECORD_COUNT.labels(route, safe_run_id).observe(record_count)  # type: ignore[union-attr]
+    TRAJECTORY_RESPONSE_SIZE_BYTES.labels(route, safe_run_id).observe(response_size_bytes)  # type: ignore[union-attr]
+
+
 def _on_model_lifecycle(
     action: str, model: str, run_id: str, model_type: str
 ) -> None:
@@ -224,11 +261,13 @@ def _create_metrics() -> None:
     global CONCURRENCY_UTILIZATION, MAX_CONCURRENT
     global SEMAPHORE_WAIT_DURATION, SEMAPHORE_REJECTED
     global TTFT_SECONDS, STREAM_COMPLETION, STREAM_CLIENT_DISCONNECT
-    global PHASE_DURATION, TOKENS_TOTAL
+    global PHASE_DURATION, TOKENS_TOTAL, SEQUENCE_LENGTH_TOKENS
     global INFER_DURATION, INFER_ERRORS, INFER_RETRIES
     global DB_POOL_USAGE, TRAJECTORY_STORE_ERRORS, TRAJECTORY_STORE_DURATION
     global MODEL_LIFECYCLE
-    global API_REQUESTS_TOTAL, API_REQUEST_DURATION
+    global API_REQUESTS_TOTAL, API_REQUEST_DURATION, API_ERRORS
+    global REQUEST_INFER_ERRORS
+    global TRAJECTORY_RECORD_COUNT, TRAJECTORY_RESPONSE_SIZE_BYTES
 
     # A. 请求核心
     REQUEST_TOTAL = Counter(
@@ -297,6 +336,12 @@ def _create_metrics() -> None:
     TOKENS_TOTAL = Counter(
         "trajproxy_tokens_total", "Token usage", ["model", "run_id", "type"]
     )
+    SEQUENCE_LENGTH_TOKENS = Histogram(
+        "trajproxy_sequence_length_tokens",
+        "Total sequence length (prompt + completion tokens) per request",
+        ["model", "run_id"],
+        buckets=[128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072],
+    )
 
     # E. 下游依赖
     INFER_DURATION = Histogram(
@@ -321,7 +366,7 @@ def _create_metrics() -> None:
     TRAJECTORY_STORE_ERRORS = Counter(
         "trajproxy_trajectory_store_errors_total",
         "Trajectory store error count",
-        ["model", "error_type"],
+        ["model", "error_type", "run_id"],
     )
     TRAJECTORY_STORE_DURATION = Histogram(
         "trajproxy_trajectory_store_duration_seconds",
@@ -348,6 +393,34 @@ def _create_metrics() -> None:
         "HTTP API request duration",
         labelnames=["route", "run_id"],
         buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+    )
+
+    # H. API 错误归因
+    API_ERRORS = Counter(
+        "trajproxy_api_errors_total",
+        "HTTP API categorized error count",
+        labelnames=["route", "run_id", "error_category"],
+    )
+
+    # I. 请求级推理错误细分
+    REQUEST_INFER_ERRORS = Counter(
+        "trajproxy_request_infer_errors_total",
+        "Request-level inference errors with run_id and error_type (for per-run drill-down)",
+        ["model", "error_type", "run_id"],
+    )
+
+    # J. 轨迹查询
+    TRAJECTORY_RECORD_COUNT = Histogram(
+        "trajproxy_trajectory_record_count",
+        "Number of records returned per trajectory query",
+        labelnames=["route", "run_id"],
+        buckets=[1, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000],
+    )
+    TRAJECTORY_RESPONSE_SIZE_BYTES = Histogram(
+        "trajproxy_trajectory_response_size_bytes",
+        "Serialized response body size in bytes per trajectory query",
+        labelnames=["route", "run_id"],
+        buckets=[1024, 10240, 102400, 1048576, 5242880, 10485760, 52428800, 104857600],
     )
 
 
@@ -379,4 +452,6 @@ def register_all() -> None:
     subscribe(EVENT_CONCURRENCY_REJECTED, _on_concurrency_rejected)
     subscribe(EVENT_SEMAPHORE_ACQUIRED, _on_semaphore_acquired)
     subscribe(EVENT_TRAJECTORY_STORE_ERROR, _on_trajectory_store_error)
+    subscribe(EVENT_API_ERROR, _on_api_error)
     subscribe(EVENT_STREAM_CLIENT_DISCONNECT, _on_stream_client_disconnect)
+    subscribe(EVENT_TRAJECTORY_QUERY_COMPLETED, _on_trajectory_query_completed)

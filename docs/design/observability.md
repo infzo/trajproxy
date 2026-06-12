@@ -1497,7 +1497,7 @@ groups:
 - **Row 2 负载**：QPS by model/run_id/outcome/stream、Token by run_id
 - **Row 3 性能**：延迟 P50/P95/P99、TTFT、阶段耗时趋势、推理延迟
 - **Row 4 错误**（扩展）：错误率 run_id、流式完整率、429 限流、生命周期事件
-- **Row 5 系统**：DB 连接池、Worker up/down、QPS by 实例、Worker 内存 RSS
+- **Row 5 系统**：DB 连接池（按节点标识）、Worker up/down、QPS by 实例、Worker 内存 RSS
 
 ### 13.4 面板布局示意
 

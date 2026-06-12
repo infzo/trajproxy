@@ -6,64 +6,20 @@
       "h": 1,
       "w": 24,
       "x": 0,
-      "y": 68
+      "y": 48
     },
     "collapsed": false
   },
   {
-    "id": 115,
-    "type": "timeseries",
-    "title": "轨迹列表请求数 (5min) - 按运行标识",
-    "description": "轨迹列表请求 (trajectory_list) 的 5 分钟增量数，按 run_id 分组",
-    "gridPos": {
-      "h": 8,
-      "w": 6,
-      "x": 0,
-      "y": 69
-    },
-    "datasource": {
-      "type": "prometheus",
-      "uid": "$datasource"
-    },
-    "targets": [
-      {
-        "expr": "sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_list\",run_id=~\"$run_id\"}[5m]))",
-        "legendFormat": "{{ run_id }}",
-        "refId": "A"
-      }
-    ],
-    "fieldConfig": {
-      "defaults": {
-        "unit": "short",
-        "custom": {
-          "fillOpacity": 10,
-          "drawStyle": "bars"
-        }
-      }
-    },
-    "options": {
-      "legend": {
-        "displayMode": "table",
-        "placement": "bottom",
-        "calcs": [
-          "sum"
-        ]
-      },
-      "tooltip": {
-        "mode": "multi"
-      }
-    }
-  },
-  {
-    "id": 116,
+    "id": 121,
     "type": "timeseries",
     "title": "轨迹详情请求数 (5min) - 按运行标识",
     "description": "轨迹详情请求 (trajectory_detail) 的 5 分钟增量数，按 run_id 分组",
     "gridPos": {
       "h": 8,
       "w": 6,
-      "x": 6,
-      "y": 69
+      "x": 0,
+      "y": 49
     },
     "datasource": {
       "type": "prometheus",
@@ -99,15 +55,15 @@
     }
   },
   {
-    "id": 117,
+    "id": 122,
     "type": "timeseries",
     "title": "轨迹详情请求端到端耗时 - 按运行标识 (q=$quantile)",
     "description": "轨迹详情请求的端到端耗时分位数，按 run_id 分组",
     "gridPos": {
       "h": 8,
       "w": 6,
-      "x": 12,
-      "y": 69
+      "x": 6,
+      "y": 49
     },
     "datasource": {
       "type": "prometheus",
@@ -145,15 +101,15 @@
     }
   },
   {
-    "id": 118,
+    "id": 127,
     "type": "timeseries",
-    "title": "轨迹请求失败数量 - 按运行标识",
-    "description": "轨迹请求 (trajectory_list/trajectory_detail/trajectory_legacy) 中 HTTP 5xx 错误的 5 分钟增量数，按 run_id 分组",
+    "title": "轨迹平均对话数量 - 按运行标识",
+    "description": "每次轨迹查询返回的 records 条数平均值，按 run_id 分组（基于 trajproxy_trajectory_record_count histogram）",
     "gridPos": {
       "h": 8,
       "w": 6,
-      "x": 18,
-      "y": 69
+      "x": 12,
+      "y": 49
     },
     "datasource": {
       "type": "prometheus",
@@ -161,7 +117,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\",run_id=~\"$run_id\"}[5m]))",
+        "expr": "sum by (run_id) (rate(trajproxy_trajectory_record_count_sum{node=~\"$node\",run_id=~\"$run_id\"}[5m]))\n/\nsum by (run_id) (rate(trajproxy_trajectory_record_count_count{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
         "legendFormat": "{{ run_id }}",
         "refId": "A"
       }
@@ -169,9 +125,14 @@
     "fieldConfig": {
       "defaults": {
         "unit": "short",
+        "decimals": 1,
         "custom": {
-          "fillOpacity": 10,
-          "drawStyle": "bars"
+          "fillOpacity": 5,
+          "drawStyle": "line",
+          "lineWidth": 2,
+          "pointSize": 5,
+          "showPoints": "auto",
+          "spanNulls": false
         }
       }
     },
@@ -180,7 +141,198 @@
         "displayMode": "table",
         "placement": "bottom",
         "calcs": [
-          "sum"
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 128,
+    "type": "timeseries",
+    "title": "轨迹请求平均大小 - 按运行标识",
+    "description": "每次轨迹查询返回的响应体平均字节数，按 run_id 分组（基于 trajproxy_trajectory_response_size_bytes histogram）。Grafana bytes 单位自动转换 KB/MB/GB。",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 18,
+      "y": 49
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (rate(trajproxy_trajectory_response_size_bytes_sum{node=~\"$node\",run_id=~\"$run_id\"}[5m]))\n/\nsum by (run_id) (rate(trajproxy_trajectory_response_size_bytes_count{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "bytes",
+        "decimals": 2,
+        "custom": {
+          "fillOpacity": 5,
+          "drawStyle": "line",
+          "lineWidth": 2,
+          "pointSize": 5,
+          "showPoints": "auto",
+          "spanNulls": false
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 125,
+    "type": "timeseries",
+    "title": "轨迹请求失败数量 - 按运行标识 (5min)",
+    "description": "轨迹请求失败按运行标识聚合统计：左轴为请求级失败总数（5xx），右轴为轨迹写入 DB 失败数",
+    "gridPos": {
+      "h": 10,
+      "w": 12,
+      "x": 0,
+      "y": 57
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line",
+          "lineWidth": 2,
+          "pointSize": 5,
+          "showPoints": "auto",
+          "spanNulls": false
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byRegexp",
+            "options": "^写入.*"
+          },
+          "properties": [
+            {
+              "id": "custom.axisPlacement",
+              "value": "right"
+            },
+            {
+              "id": "color",
+              "value": {
+                "mode": "palette-classic"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[5m]))",
+        "legendFormat": "失败: {{ run_id }}",
+        "refId": "A"
+      },
+      {
+        "expr": "sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "写入: {{ run_id }}",
+        "refId": "B"
+      }
+    ],
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 126,
+    "type": "timeseries",
+    "title": "轨迹请求错误细分（请选择 Run ID）",
+    "description": "展示所选 run_id 的轨迹请求错误按错误类别（database / timeout / serialize_timeout / other）拆分的时间分布。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
+    "gridPos": {
+      "h": 10,
+      "w": 12,
+      "x": 12,
+      "y": 57
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 50,
+          "stacking": {
+            "mode": "normal"
+          },
+          "drawStyle": "bars"
+        }
+      },
+      "overrides": [
+        {
+          "matcher": { "id": "byName", "options": "database" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+        },
+        {
+          "matcher": { "id": "byName", "options": "timeout" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+        },
+        {
+          "matcher": { "id": "byName", "options": "serialize_timeout" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }]
+        },
+        {
+          "matcher": { "id": "byName", "options": "other" },
+          "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "text" } }]
+        }
+      ]
+    },
+    "targets": [
+      {
+        "expr": "sum by (error_category) (increase(trajproxy_api_errors_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",run_id=~\"$run_id\"}[5m]))",
+        "legendFormat": "{{ error_category }}",
+        "refId": "A"
+      }
+    ],
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
         ]
       },
       "tooltip": {

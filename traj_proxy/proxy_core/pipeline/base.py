@@ -156,8 +156,13 @@ class BasePipeline(ABC):
             logger.error(f"[{context.unique_id}] 存储轨迹失败: {str(e)}")
             from traj_proxy.observability.event_bus import emit
             from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
-            emit(EVENT_TRAJECTORY_STORE_ERROR, model=context.model,
-                 error_type=type(e).__name__, error_message=str(e)[:200])
+            emit(
+                EVENT_TRAJECTORY_STORE_ERROR,
+                model=context.model,
+                error_type=type(e).__name__,
+                error_message=str(e)[:200],
+                run_id=run_id or getattr(context, "run_id", "") or "",
+            )
         finally:
             context.store_duration_ms = (time.perf_counter() - t0) * 1000
 

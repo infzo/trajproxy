@@ -184,8 +184,13 @@ class DirectPipeline(BasePipeline):
             except Exception as store_err:
                 from traj_proxy.observability.event_bus import emit
                 from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
-                emit(EVENT_TRAJECTORY_STORE_ERROR, model=context.model,
-                     error_type=type(store_err).__name__, error_message=str(store_err)[:200])
+                emit(
+                    EVENT_TRAJECTORY_STORE_ERROR,
+                    model=context.model,
+                    error_type=type(store_err).__name__,
+                    error_message=str(store_err)[:200],
+                    run_id=context.run_id or "",
+                )
             raise
 
     async def process_stream(
