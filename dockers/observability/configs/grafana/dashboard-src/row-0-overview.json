@@ -190,7 +190,7 @@
     "id": 36,
     "type": "timeseries",
     "title": "模型生命周期事件",
-    "description": "register / unregister / 轨迹存储错误",
+    "description": "register / unregister",
     "gridPos": {
       "h": 8,
       "w": 4,
@@ -206,11 +206,6 @@
         "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[5m]))",
         "legendFormat": "{{ action }}:{{ type }}",
         "refId": "A"
-      },
-      {
-        "expr": "sum by (model) (rate(trajproxy_trajectory_store_errors_total{node=~\"$node\"}[5m]))",
-        "legendFormat": "store_err: {{ model }}",
-        "refId": "B"
       }
     ],
     "fieldConfig": {
