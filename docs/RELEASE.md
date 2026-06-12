@@ -6,6 +6,72 @@
 
 ---
 
+## [0.3.2] - 2026-06-12
+
+**类型**: 功能增强 + 重构
+
+### 新增功能
+- **可观测性系统 (V3)**: 全新 `traj_proxy/observability/` 模块，基于 EventBus 事件总线架构，实现端到端可观测性
+  - **Prometheus 指标**: 25+ 自定义指标 + 6 进程级指标，涵盖请求核心（总量/耗时/活跃数/并发利用率）、流式（TTFT/完成度）、分阶段耗时、Token 统计、下游依赖（推理/DB/存储）、HTTP API 层等维度
+  - **EventBus 事件驱动**: 请求生命周期、并发拒绝、信号量获取、推理完成/错误、流式断连、模型生命周期、轨迹存储异常等关键事件统一发布/订阅
+  - **7 状态 Outcome 推导**: success / stream_partial / error_client / error_server / error_infer / error_store / timeout，自动从 ProcessContext 推导请求结果
+  - **推理错误 6 类细分**: `classify_infer_error` 基于 `__cause__` 精确分类（connect_timeout / read_timeout / connection / rate_limited / http_error / unknown）
+  - **HTTP API 层监控**: `api_metrics_middleware` 中间件记录路由级请求数与耗时，`classify_route` 自动识别 API 端点类型
+  - **轨迹查询指标**: 新增记录数、响应体积、查询耗时等轨迹查询维度指标
+  - **`/metrics` 端点**: Prometheus 拉取端点，自动暴露全部指标
+  - **结构化日志**: 支持 `LOG_FORMAT=json` 环境变量切换 JSON 格式输出
+  - **健康检查**: `health_checker` 模块提供应用级健康状态检测
+
+### Grafana 可视化
+- **Dashboard 分片构建系统**: `dashboard-src/` 目录按 row 碎片化维护（`row-0-overview.json` ~ `row-4-system.json`），`build_dashboard.py` 组装最终 dashboard，`make dashboard` 一键构建
+- **5 行 30+ 面板 Dashboard**: Overview（请求总览/错误率/并发度）、Traffic（流量分布/趋势）、Inference（推理耗时/错误归因/模型混合）、Trajectory（存储耗时/记录量）、System（CPU/内存/进程 RSS）
+- **Model-Mix Dashboard**: 独立的模型使用分布面板
+- **推理错误中文标签**: 6 种 error_type 添加中文友好 displayName，图例展示描述性标签替代技术标识符
+- **进程内存监控**: System 面板补充 `process_resident_memory_bytes` 查询，各实例内存占用可观测
+
+### AlertManager 告警
+- **告警规则**: 新增 `alert_rules.yml`，覆盖请求错误率、推理错误率、并发利用率、DB 连接池使用率、轨迹存储错误等关键告警
+- **告警通知**: `alertmanager.yml` 配置告警路由与接收端
+
+### 重构
+- **可观测性配置统一**: 将 `docker/observability` 和 `dockers/compose/configs` 下的分散配置统一迁移至 `dockers/observability/configs/`，消除重复配置
+- **独立部署解耦**: 从 `dockers/compose/docker-compose.yml` 移除 observability 服务定义，改为 `dockers/observability/docker-compose.yml` 独立部署
+- **管理脚本合并**: 合并 `add_node_observability.sh` / `remove_node_observability.sh` 为统一的 `start_docker_observability.sh`，支持 start / stop / restart / add-node / remove-node / sync 子命令
+- **遗留归档清理**: 移除 `traj_proxy/archive/` 遗留归档代码，统一使用独立的 `traj_archiver` 包；删除废弃的 `export_database.py` 脚本
+- **Dashboard 碎片化构建**: 从单体 JSON 改为分 row 维护 + `build_dashboard.py` 组装，降低大 JSON 维护成本
+
+### 配置更新
+- `configs/config.yaml`: 新增 `observability.metrics_enabled` 等可观测性配置项
+- `dockers/observability/.env.example`: 环境变量模板（Prometheus/Grafana/AlertManager 参数）
+- `dockers/observability/configs/prometheus/prometheus.yml`: Prometheus 采集配置
+- `dockers/observability/configs/prometheus/alert_rules.yml`: 告警规则定义
+- `dockers/observability/configs/alertmanager/alertmanager.yml`: 告警路由配置
+- `dockers/observability/configs/grafana/`: Grafana provisioning 配置（datasource + dashboard）
+
+### 依赖变更
+- 新增 `prometheus-client>=0.20.0`（Prometheus 指标暴露）
+
+### 影响范围
+- `traj_proxy/observability/` - 全新可观测性模块（EventBus / decorators / metrics_collector / health_checker / json_formatter / label_guards / outcome / request_context / request_summary）
+- `traj_proxy/serve/routes.py` - API 层指标中间件 + 轨迹查询事件发射
+- `traj_proxy/workers/worker.py` - classify_route + api_metrics_middleware 集成
+- `traj_proxy/workers/route_registrar.py` - 路由注册增强
+- `traj_proxy/proxy_core/pipeline/base.py` - ProcessContext 新增 store_duration_ms
+- `traj_proxy/proxy_core/pipeline/direct_pipeline.py` - 阶段耗时 + 推理错误事件
+- `traj_proxy/proxy_core/pipeline/token_pipeline.py` - 阶段耗时 + 推理错误事件
+- `traj_proxy/proxy_core/processor.py` - 可观测性集成点
+- `traj_proxy/proxy_core/processor_manager.py` - 模型生命周期事件
+- `traj_proxy/proxy_core/infer_client.py` - 推理错误分类事件
+- `traj_proxy/proxy_core/context.py` - ProcessContext 字段扩展
+- `traj_proxy/store/database_manager.py` - DB 连接池 Prometheus 指标上报
+- `traj_proxy/utils/logger.py` - JSON 格式化器支持
+- `dockers/observability/` - 全新独立可观测性部署目录（docker-compose + configs + data）
+- `configs/config.yaml` - 可观测性配置项
+- `scripts/start_docker_observability.sh` - 统一管理脚本
+- `docs/design/observability.md` - 可观测性设计文档升级至 V3
+
+---
+
 ## [0.3.1] - 2026-06-11
 
 **类型**: 重构 + 功能增强 + Bug 修复
