@@ -166,7 +166,12 @@ class ProxyWorker:
         async def request_logging_middleware(request: Request, call_next):
             """请求日志中间件：记录请求详情和响应耗时"""
             start_time = time.time()
-            request_id = str(uuid.uuid4())[:8]
+            request_id = str(uuid.uuid4())
+            request.state.request_id = request_id
+            request.state.request_start_time = start_time
+            # 同时设置 ContextVar 供日志 Filter 使用
+            from traj_proxy.observability.request_context import set_request_id
+            set_request_id(request_id)
 
             # 记录请求详情
             url = str(request.url)
@@ -214,7 +219,7 @@ class ProxyWorker:
             )
 
             # 添加请求ID到响应头
-            response.headers["X-Request-ID"] = request_id
+            response.headers["X-Request-ID"] = request_id[:8]
 
             return response
 
@@ -246,6 +251,10 @@ class ProxyWorker:
         """
         初始化数据库连接池、ProcessorManager、TranscriptProvider 和默认模型
         """
+        # 初始化可观测性系统
+        from traj_proxy.observability import setup as setup_observability
+        setup_observability(self.app)
+
         # 加载配置
         from traj_proxy.utils.config import get_proxy_workers_config, load_config
 

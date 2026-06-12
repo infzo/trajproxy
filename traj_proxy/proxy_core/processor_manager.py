@@ -31,6 +31,9 @@ from traj_proxy.store.models import ModelConfig
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.config import get_models_dir, get_processor_cache_max_size, get_processor_idle_timeout
+from traj_proxy.observability.event_bus import emit
+from traj_proxy.observability.events import EVENT_MODEL_LIFECYCLE
+from traj_proxy.observability.decorators import observe_model_lifecycle
 
 # API 数据模型已移至 schemas 模块
 from traj_proxy.serve.schemas import (
@@ -266,6 +269,7 @@ class ProcessorManager:
 
     # ========== ModelSynchronizer 回调接口 ==========
 
+    @observe_model_lifecycle("register", "dynamic")
     async def register_from_config(self, config: ModelConfig):
         """从配置注册模型（供 ModelSynchronizer 调用）
 
@@ -278,6 +282,7 @@ class ProcessorManager:
         self._dynamic_configs[key] = config
         logger.debug(f"配置已存储（同步回调）: {key}")
 
+    @observe_model_lifecycle("unregister", "dynamic")
     async def unregister_by_key(self, key: Tuple[str, str]):
         """根据 key 删除模型（供 ModelSynchronizer 调用）
 
@@ -396,6 +401,8 @@ class ProcessorManager:
         )
         self._config_configs[key] = config
         logger.info(f"[{model_name}] 注册预置模型成功: run_id={run_id}")
+        emit(EVENT_MODEL_LIFECYCLE, action="register",
+             model=model_name, run_id=run_id, model_type="static")
 
     async def register_dynamic_processor(
         self,
@@ -462,6 +469,8 @@ class ProcessorManager:
         # 存储配置
         self._dynamic_configs[key] = config
         logger.info(f"[{model_name}] 注册动态模型成功: run_id={run_id}, url={url}")
+        emit(EVENT_MODEL_LIFECYCLE, action="register",
+             model=model_name, run_id=run_id, model_type="dynamic")
 
         # 持久化到数据库（同步，快速失败）
         if persist_to_db:
@@ -508,6 +517,8 @@ class ProcessorManager:
             if removed:
                 await self._release_processor_async(removed)
             logger.info(f"[{model_name}] 删除动态模型成功: run_id={run_id}")
+            emit(EVENT_MODEL_LIFECYCLE, action="unregister",
+                 model=model_name, run_id=run_id, model_type="dynamic")
             deleted = True
         elif key in self._config_configs:
             # 预置模型不允许通过 API 删除

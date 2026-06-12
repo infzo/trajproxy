@@ -152,6 +152,10 @@ class BasePipeline(ABC):
         except DatabaseError as e:
             context.error = f"存储轨迹失败: {str(e)}"
             logger.error(f"[{context.unique_id}] 存储轨迹失败: {str(e)}")
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
+            emit(EVENT_TRAJECTORY_STORE_ERROR, model=context.model,
+                 error_type=type(e).__name__, error_message=str(e)[:200])
 
     def _update_timing(self, context: ProcessContext):
         """更新时间统计

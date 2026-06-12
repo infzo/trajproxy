@@ -1,0 +1,42 @@
+# ============================================================
+# Prometheus 主配置（compose 部署版）
+# ============================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+# 告警规则
+rule_files:
+  - "alert_rules.yml"
+
+# AlertManager 地址（compose 网络内通过服务名通信）
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+# 抓取配置 — 使用 file_sd_configs 动态加载节点
+scrape_configs:
+  # TrajProxy 业务指标
+  - job_name: "trajproxy"
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: "/metrics"
+    file_sd_configs:
+      - files:
+          - "targets.json"
+        refresh_interval: 30s
+
+  # LiteLLM 指标（带鉴权占位，未配置 bearer_token_file 前会 401）
+  - job_name: "litellm"
+    scrape_interval: 15s
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["litellm:4000"]
+
+  # Prometheus 自身监控
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

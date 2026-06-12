@@ -1,6 +1,7 @@
 #!/bin/bash
 # Docker Compose 启动脚本
-# 使用 docker-compose 拉起所有服务容器（litellm、postgresdb、traj_proxy、prometheus）
+# 使用 docker-compose 拉起所有服务容器（litellm、postgresdb、traj_proxy）
+# 可观测性组件（Prometheus + Grafana + AlertManager）请使用: scripts/start_docker_observability.sh
 # 支持参数: start, stop, restart
 
 set -e
@@ -35,7 +36,6 @@ show_help() {
     echo "    - nginx: 反向代理服务"
     echo "    - litellm: LLM 代理服务"
     echo "    - db: PostgreSQL 数据库"
-    echo "    - prometheus: 监控服务"
     echo "    - traj_proxy: 核心代理服务"
 }
 

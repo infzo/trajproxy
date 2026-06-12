@@ -161,16 +161,18 @@ async def chat_completions(
     返回:
         处理后的响应（JSON 或 SSE 流）
     """
-    request_id = str(uuid.uuid4())
+    request_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
 
     # 并发限流：获取信号量，超时 5s 返回 429
     semaphore = getattr(request.app.state, "request_semaphore", None)
     acquired = False
     if semaphore:
+        t_wait = time.perf_counter()
         try:
             await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
             acquired = True
         except asyncio.TimeoutError:
+            # 注意：actual_model 尚未提取，此处 emit 在下方 actual_model 提取后执行
             max_conc = getattr(request.app.state, "max_concurrent_requests", "?")
             logger.warning(
                 f"[{request_id}] 并发限流拒绝: max_concurrent={max_conc} 已达上限"
@@ -214,6 +216,20 @@ async def chat_completions(
 
         # 提取实际 model_name
         actual_model = _extract_actual_model(model)
+
+        # 可观测性：信号量等待结果 emit
+        if semaphore and acquired:
+            wait_ms = (time.perf_counter() - t_wait) * 1000
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_SEMAPHORE_ACQUIRED
+            emit(EVENT_SEMAPHORE_ACQUIRED, wait_duration_ms=wait_ms, model=actual_model)
+        elif semaphore and not acquired:
+            wait_ms = (time.perf_counter() - t_wait) * 1000
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_CONCURRENCY_REJECTED
+            emit(EVENT_CONCURRENCY_REJECTED, model=actual_model,
+                 run_id=_extract_run_id(model, request.headers.get("x-run-id"), run_id) or "",
+                 wait_duration_ms=wait_ms)
 
         # 提取需要转发到推理服务的 header（黑名单模式）
         forward_headers = _extract_forward_headers(request)

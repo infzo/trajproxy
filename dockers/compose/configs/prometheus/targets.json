@@ -1,0 +1,12 @@
+[
+  {
+    "targets": [
+      "traj-proxy:12300",
+      "traj-proxy:12301"
+    ],
+    "labels": {
+      "job": "trajproxy",
+      "node": "compose"
+    }
+  }
+]

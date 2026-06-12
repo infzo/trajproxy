@@ -19,6 +19,7 @@ from typing import Dict, Any, AsyncIterator, List, Union, Optional
 from traj_proxy.exceptions import InferServiceError, InferTimeoutError
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.config import get_infer_client_config
+from traj_proxy.observability.decorators import observe_inference, observe_inference_stream
 
 logger = get_logger(__name__)
 
@@ -155,6 +156,8 @@ class InferClient:
         else:
             self._max_retries = max_retries
 
+        self._last_retry_count = 0
+
     def _build_headers(self, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """构建请求 header（每次请求携带 Authorization）"""
         headers = {
@@ -256,6 +259,7 @@ class InferClient:
                     continue
 
                 response.raise_for_status()
+                self._last_retry_count = attempt
                 return response.json()
 
             except httpx.HTTPStatusError as e:
@@ -268,6 +272,7 @@ class InferClient:
                     )
                     await asyncio.sleep(wait)
                     continue
+                self._last_retry_count = attempt
                 raise self._wrap_request_error(e)
             except httpx.RequestError as e:
                 last_error = e
@@ -279,6 +284,7 @@ class InferClient:
                     )
                     await asyncio.sleep(wait)
                     continue
+                self._last_retry_count = attempt
                 raise self._wrap_request_error(e)
 
         # 不应到达此处，但保险起见
@@ -328,6 +334,7 @@ class InferClient:
 
             except httpx.HTTPStatusError as e:
                 # 非重试状态码（400/500 等）：不重试，直接抛出业务异常
+                self._last_retry_count = attempt
                 raise self._wrap_request_error(e)
             except httpx.RequestError as e:
                 last_error = e
@@ -339,6 +346,7 @@ class InferClient:
                     )
                     await asyncio.sleep(wait)
                     continue
+                self._last_retry_count = attempt
                 raise self._wrap_request_error(e)
 
         if last_error:
@@ -346,11 +354,13 @@ class InferClient:
 
     # --- OpenAI Completions 接口 ---
 
+    @observe_inference
     async def send_completion(self, prompt: PromptInput, model: str, extra_headers: Optional[Dict[str, str]] = None, request_id: str = None, **kwargs) -> Dict[str, Any]:
         url = f"{self.base_url}/completions"
         request_body = self._build_completion_body(prompt, model, stream=False, request_id=request_id, **kwargs)
         return await self._handle_request(url, request_body, extra_headers)
 
+    @observe_inference_stream
     async def send_completion_stream(self, prompt: PromptInput, model: str, extra_headers: Optional[Dict[str, str]] = None, request_id: str = None, **kwargs) -> AsyncIterator[Dict[str, Any]]:
         url = f"{self.base_url}/completions"
         request_body = self._build_completion_body(prompt, model, stream=True, request_id=request_id, **kwargs)
@@ -385,11 +395,13 @@ class InferClient:
 
     # --- OpenAI Chat Completions 接口 ---
 
+    @observe_inference
     async def send_chat_completion(self, messages: List[Dict[str, Any]], model: str, extra_headers: Optional[Dict[str, str]] = None, **kwargs) -> Dict[str, Any]:
         url = f"{self.base_url}/chat/completions"
         request_body = self._build_chat_body(messages, model, stream=False, **kwargs)
         return await self._handle_request(url, request_body, extra_headers)
 
+    @observe_inference_stream
     async def send_chat_completion_stream(self, messages: List[Dict[str, Any]], model: str, extra_headers: Optional[Dict[str, str]] = None, **kwargs) -> AsyncIterator[Dict[str, Any]]:
         url = f"{self.base_url}/chat/completions"
         request_body = self._build_chat_body(messages, model, stream=True, **kwargs)

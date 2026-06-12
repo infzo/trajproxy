@@ -1,8 +1,10 @@
 # TrajProxy 可观测性方案
 
-> **状态**: 待审核
+> **状态**: 待审核（V3 - P0/P1/P2 修复版）
 > **作者**: AI Assistant
 > **日期**: 2026-06-11
+> **变更**: V2 → V3 修复 429 outcome 不可达(P0)、新增信号量/轨迹存储/断连指标(P1)、字段守卫/缓存优化/多进程约束(P2)；V1 → V2 新增解耦架构设计、outcome 判定规则、EventBus 模式；修正告警规则 BUG、
+> ContextVar 传播边界、健康检查覆盖范围；删除冗余指标；精简 Dashboard
 
 ---
 
@@ -13,16 +15,29 @@
 | 能力 | 现状 | 评级 |
 |------|------|------|
 | 请求日志 | 纯文本 f-string，~100+ 处散落，两套 request_id | ⭐⭐⭐ |
-| 分阶段耗时 | ProcessContext 记录各阶段 ms | ⭐⭐⭐⭐ |
+| 分阶段耗时 | ProcessContext 记录各阶段 ms（~20 处手动 `time.perf_counter()`） | ⭐⭐⭐⭐ |
 | 健康检查 | `{"status": "ok"}`，无依赖检查 | ⭐ |
 | Metrics | **完全没有** | ❌ |
 | Tracing | **完全没有** | ❌ |
 | 请求聚合/统计 | **完全没有**（只能查 DB） | ❌ |
 
-### 1.2 核心痛点
+### 1.2 当前代码中的观测耦合现状
+
+当前观测逻辑**散布在 6 个核心模块、14 处异常处理层**中：
+
+| 耦合类型 | 数量 | 位置 |
+|----------|------|------|
+| 散落日志 `logger.info/error` | **100+ 处** | processor.py, pipeline/*.py, infer_client.py, routes.py, worker.py |
+| 手动计时 `time.perf_counter()` | **20+ 处** | token_pipeline.py(5阶段), direct_pipeline.py, base.py, worker.py, routes.py |
+| 异常处理 `try/except + log + raise` | **14 层嵌套** | processor → pipeline → infer_client → routes，重复 except 模式 |
+
+**核心问题**：观测逻辑与业务逻辑高度耦合，新增观测维度需修改多个业务文件。
+
+### 1.3 核心痛点
 
 | 痛点 | 影响 |
 |------|------|
+| **观测与业务耦合** | 新增指标/日志需改 pipeline/processor，违反开闭原则 |
 | **无法量化负载** | 不知道 QPS、P95 延迟、错误率，全靠"感觉" |
 | **无法快速定位问题** | 纯文本日志 grep 效率低，请求生命周期散落在多处日志行 |
 | **两套 request_id** | 中间件生成 8 位短 ID，路由层生成完整 UUID，跨层关联困难 |
@@ -37,40 +52,484 @@
 2. **增量演进** — 每项改进可独立上线，不做"大爆炸"式改造
 3. **利用已有** — ProcessContext 已有丰富的分阶段耗时数据，充分利用
 4. **标准兼容** — 遵循 Prometheus / JSON 日志等业界标准，便于接入 Grafana 等工具
-5. **零侵入** — 观测逻辑通过中间件/装饰器注入，不改变业务代码路径
+5. **解耦优先** — 观测逻辑通过 EventBus + 装饰器 + 中间件注入，业务代码**不感知**观测模块的存在
+6. **可独立禁用** — `observability.disable()` 一行关闭全部观测，业务功能完全不受影响
 
 ---
 
-## 三、方案总览
+## 三、解耦架构设计
+
+### 3.1 核心理念
+
+```
+业务代码只负责产出数据（ProcessContext），观测代码只负责消费数据。
+两者通过 EventBus + 装饰器 + 中间件 连接，互不感知。
+```
+
+### 3.2 方案选型
+
+| 方案 | 评估 | 结论 |
+|------|------|------|
+| **纯 EventBus** | 业务代码需处处 `emit()`，侵入性反而更大 | ❌ |
+| **纯 Middleware** | 拿不到 ProcessContext（在路由内部创建），无 Pipeline 细节 | ❌ |
+| **纯装饰器** | 无法捕获请求级全局视图（outcome 需综合 error + stream 状态） | ❌ |
+| **ProcessContext 观察者** | 需大幅重构 ProcessContext，风险高 | ❌ |
+| **三层拦截 + EventBus（混合）** | 各取所长，分层截获，业务改动最小 | ✅ |
+
+### 3.3 三层拦截架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Obs 方案五大模块                          │
+│  Layer 1: Middleware（已存在）     HTTP 级：request_id, 耗时，状态码 │
+│                    ↓ 通过 request.state 传递                      │
+│  Layer 1.5: Routes 拦截（+3行）  429限流/信号量等待：不经过Processor │
+│                    ↓ 通过 EventBus.emit() 发射事件                 │
+│  Layer 2: Processor 拦截（+3行）   请求级：ProcessContext 全状态     │
+│                    ↓ 通过 EventBus.emit() 发射事件                 │
+│  Layer 3: InferClient 装饰器（+4行）推理级：调用耗时, 错误, 重试      │
+│                    ↓ 通过 EventBus.emit() 发射事件                 │
+│  Layer 4: ProcessorManager 装饰器  生命周期：模型注册/注销/缓存     │
+│  Layer 5: Pipeline 装饰器（+2行） 轨迹存储失败/流式断连检测          │
+├─────────────────────────────────────────────────────────────────┤
+│  EventBus (进程内同步, <50行)                                       │
+│                    ↓                                               │
+│  订阅者:                                                            │
+│    metrics_collector.register_all()  → Prometheus 指标更新         │
+│    request_summary.register()       → 摘要日志输出                  │
+│    run_id_tracker.register()        → 基数白名单维护               │
+├─────────────────────────────────────────────────────────────────┤
+│  observability/                                                     │
+│  ├── event_bus.py              轻量事件总线（<50行）                │
+│  ├── events.py                 事件类型定义（含新增4类事件）         │
+│  ├── outcome.py                outcome 判定（纯函数）               │
+│  ├── label_guards.py           基数防护（含 known model 缓存）     │
+│  ├── decorators.py             @observe_inference 等装饰器          │
+│  ├── metrics_collector.py      Prometheus 指标（订阅者）            │
+│  ├── request_summary.py        请求摘要日志（订阅者）               │
+│  ├── request_context.py        ContextVar 传播                     │
+│  ├── json_formatter.py         JSON 日志格式器                     │
+│  ├── health_checker.py         分层健康检查（可配置路径）           │
+│  └── __init__.py               setup() / disable()                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 3.4 EventBus 实现
+
+```python
+# observability/event_bus.py
+"""
+进程内同步事件总线
+
+设计约束：
+- 同步执行（无 async overhead），subscriber 必须轻量（仅打点/写日志）
+- 失败隔离：单个 subscriber 异常不影响其他 subscriber 和业务代码
+- 可全局禁用：observability.disable() 一行关闭全部观测
+- 无外部依赖，纯 Python 实现
+"""
+
+import logging
+from collections import defaultdict
+from typing import Any, Callable, Dict, List
+
+logger = logging.getLogger(__name__)
+
+_subscribers: Dict[str, List[Callable[..., None]]] = defaultdict(list)
+_enabled: bool = True
+
+
+def subscribe(event_name: str, handler: Callable[..., None]) -> None:
+    """注册事件订阅者"""
+    _subscribers[event_name].append(handler)
+
+
+def emit(event_name: str, **kwargs: Any) -> None:
+    """触发事件，依次调用所有订阅者（失败隔离）"""
+    if not _enabled:
+        return
+    for handler in _subscribers.get(event_name, []):
+        try:
+            handler(**kwargs)
+        except Exception as e:
+            logger.error(f"EventBus subscriber error [{event_name}]: {e}")
+
+
+def disable() -> None:
+    """全局禁用全部观测（紧急关停 / 测试隔离用）"""
+    global _enabled
+    _enabled = False
+
+
+def enable() -> None:
+    global _enabled
+    _enabled = True
+
+
+def reset() -> None:
+    """清空所有订阅（测试用）"""
+    _subscribers.clear()
+```
+
+> **⚠️ 多进程约束**：EventBus 使用模块级变量，`_subscribers` / `_enabled` 为**进程级状态**。
+> - `setup()` 必须在每个 Worker 进程的 `initialize()` 中各调用一次
+> - `disable()` / `reset()` 仅影响当前进程，无法跨 Worker 统一禁用
+> - 如需全局禁用，应通过共享环境变量 + 进程重启实现
+
+### 3.5 事件类型定义
+
+```python
+# observability/events.py
+"""可观测性事件类型 — 每个事件的 kwargs 契约在此声明"""
+
+# ── 请求开始 ──
+# kwargs: model: str, is_stream: bool, max_concurrent: int
+EVENT_REQUEST_STARTED = "request.started"
+
+# ── 请求完成（成功或失败）──
+# kwargs: context: ProcessContext, exception: Optional[Exception]
+EVENT_REQUEST_COMPLETED = "request.completed"
+
+# ── 推理调用完成（每次 InferClient 调用）──
+# kwargs: model: str, duration_ms: float, retry_count: int,
+#         error: Optional[Exception], error_type: Optional[str]
+EVENT_INFERENCE_COMPLETED = "inference.completed"
+
+# ── 模型生命周期 ──
+# kwargs: action: str("register"|"unregister"), model: str,
+#         run_id: str, model_type: str("static"|"dynamic")
+EVENT_MODEL_LIFECYCLE = "model.lifecycle"
+
+# ── 并发限流（429）── routes/Middleware 层发出，不经过 Processor ──
+# kwargs: model: str, run_id: str, wait_duration_ms: float
+EVENT_CONCURRENCY_REJECTED = "concurrency.rejected"
+
+# ── Semaphore 等待完成 ──
+# kwargs: wait_duration_ms: float, model: str
+EVENT_SEMAPHORE_ACQUIRED = "semaphore.acquired"
+
+# ── 轨迹存储失败（静默失败显式化）──
+# kwargs: model: str, error_type: str, error_message: str
+EVENT_TRAJECTORY_STORE_ERROR = "trajectory.store_error"
+
+# ── 流式客户端断连 ──
+# kwargs: model: str, chunk_count: int, duration_ms: float
+EVENT_STREAM_CLIENT_DISCONNECT = "stream.client_disconnect"
+```
+
+### 3.6 Outcome 判定 — 纯函数，零侵入
+
+**业务代码完全不感知 outcome 的存在。** outcome 由观测模块从 ProcessContext 状态推导：
+
+```python
+# observability/outcome.py
+"""
+请求结果归因 — 纯函数，仅依赖 ProcessContext + 异常类型
+
+业务代码（Pipeline/Processor/Routes）完全不需要知道 outcome 的存在。
+此函数由 EventBus 订阅者调用，不改变业务执行路径。
+"""
+
+from typing import Optional
+
+
+def determine_outcome(context, exception: Optional[Exception] = None) -> str:
+    """从 ProcessContext 状态 + 异常类型 推导 outcome"""
+    from traj_proxy.exceptions import InferTimeoutError, InferServiceError
+
+    # ── 异常驱动 ──
+    # 注意：InferTimeoutError 继承自 InferServiceError，
+    # 因此 isinstance 判断顺序至关重要：必须先匹配子类 InferTimeoutError，
+    # 再匹配父类 InferServiceError，否则 timeout 会被误判为 error_infer。
+    if exception:
+        if isinstance(exception, InferTimeoutError):
+            return "timeout"
+        if isinstance(exception, InferServiceError):
+            return "error_infer"
+        status = getattr(exception, "status_code", None)
+        if status == 429:
+            return "error_rate_limit"
+        if status and 400 <= status < 500:
+            return "error_client"
+        return "error_server"
+
+    # ── 流式请求特殊判定（HTTP 200 但不一定"成功"）──
+    if getattr(context, "is_stream", False):
+        if getattr(context, "stream_finished", True):
+            return "success"
+        if getattr(context, "stream_chunk_count", 0) > 0:
+            return "stream_partial"  # 首 token 后崩溃
+        return "error_server"
+
+    # ── 非流式：有 error 字段但无异常 ──
+    if getattr(context, "error", None):
+        return "error_server"
+
+    return "success"
+```
+
+> **⚠️ `error_rate_limit` (429) 的路径特殊性**：
+> `determine_outcome()` 中的 `status_code == 429` 分支**仅在异常携带 429 status_code 时触发**。
+> 但在实际代码路径中，并发限流（`routes.py` 的 `semaphore.acquire()` 超时）直接抛出 `HTTPException(429)`，
+> **不经过 Processor 层的 emit()**。因此 `error_rate_limit` outcome 由 §3.5 新增的
+> `EVENT_CONCURRENCY_REJECTED` 事件在 routes/Middleware 层单独记录，而非依赖 `determine_outcome()`。
+
+**Outcome 判定映射表**（完整规则）：
+
+| 异常类型 | status_code | outcome | 说明 |
+|----------|-------------|---------|------|
+| `InferTimeoutError` | 504 | `timeout` | 推理超时（区别于连接错误） |
+| `InferServiceError` | 502 | `error_infer` | 推理服务连接/HTTP 错误 |
+| `HTTPException(429)` / `ProxyCoreError(429)` | 429 | `error_rate_limit` | 并发限流 |
+| `TokenizerNotFoundError` / `SessionIdError` | 400/422 | `error_client` | 客户端参数问题 |
+| `CacheError` / `DatabaseError` | 500/503 | `error_server` | TrajProxy 内部故障 |
+| 未分类 `Exception` | 500 | `error_server` | 未知异常 |
+| 流式中途断连（无异常，但 stream_finished=False） | 200 | `stream_partial` | 首 Token 后推理服务崩溃 |
+| 流式正常完成 | 200 | `success` | — |
+| 非流式正常完成 | 200 | `success` | — |
+
+### 3.7 装饰器 — InferClient 观测注入
+
+```python
+# observability/decorators.py
+"""观测装饰器 — 透明包裹 InferClient / ProcessorManager 方法"""
+
+import time
+import functools
+from typing import Optional
+
+from traj_proxy.observability.event_bus import emit
+from traj_proxy.observability.events import (
+    EVENT_INFERENCE_COMPLETED,
+    EVENT_MODEL_LIFECYCLE,
+)
+from traj_proxy.exceptions import InferTimeoutError, InferServiceError
+
+
+def _classify_infer_error(e: Exception) -> str:
+    """将推理异常分类为 error_type 枚举"""
+    if isinstance(e, InferTimeoutError):
+        return "timeout"
+    if isinstance(e, InferServiceError):
+        msg = str(e).lower()
+        if "连接" in msg or "connection" in msg:
+            return "connection"
+        return "http_error"
+    return "unknown"
+
+
+def observe_inference(func):
+    """装饰 InferClient 的非流式请求方法
+    
+    契约依赖：
+    1. InferClient._last_retry_count：InferClient._handle_request() 重试循环末尾须设置
+       self._last_retry_count = attempt  # 供观测装饰器读取
+       → 实施时须在 InferClient 类 docstring 中明确此属性用途
+    2. model 参数位置：当前假设 model 为第 2 个位置参数或 keyword 参数。
+       若 InferClient 方法签名变更，须同步更新此处提取逻辑。
+    """
+    @functools.wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        # model 提取：优先 keyword，否则取第 2 个位置参数
+        # 当前 InferClient.send_* 签名 model 均在第 2 位（index=1）
+        model = kwargs.get("model", "") or (args[1] if len(args) > 1 else "")
+        t0 = time.perf_counter()
+        error = None
+        retry_count = 0
+        try:
+            result = await func(self, *args, **kwargs)
+            retry_count = getattr(self, "_last_retry_count", 0)
+            return result
+        except Exception as e:
+            error = e
+            retry_count = getattr(self, "_last_retry_count", 0)
+            raise
+        finally:
+            duration_ms = (time.perf_counter() - t0) * 1000
+            emit(
+                EVENT_INFERENCE_COMPLETED,
+                model=model,
+                duration_ms=duration_ms,
+                retry_count=retry_count,
+                error=error,
+                error_type=_classify_infer_error(error) if error else None,
+            )
+    return wrapper
+
+
+def observe_inference_stream(func):
+    """装饰 InferClient 的流式请求方法
+    
+    契约依赖：
+    1. model 参数位置：当前假设 model 为第 2 个位置参数或 keyword 参数。
+       若 InferClient 方法签名变更，须同步更新此处提取逻辑。
+    """
+    @functools.wraps(func)
+    async def wrapper(self, *args, **kwargs):
+        model = kwargs.get("model", "") or (args[1] if len(args) > 1 else "")
+        t0 = time.perf_counter()
+        error = None
+        try:
+            async for chunk in func(self, *args, **kwargs):
+                yield chunk
+        except Exception as e:
+            error = e
+            raise
+        finally:
+            duration_ms = (time.perf_counter() - t0) * 1000
+            emit(
+                EVENT_INFERENCE_COMPLETED,
+                model=model,
+                duration_ms=duration_ms,
+                retry_count=0,
+                error=error,
+                error_type=_classify_infer_error(error) if error else None,
+            )
+    return wrapper
+
+
+def observe_model_lifecycle(action: str, model_type: str):
+    """装饰 ProcessorManager 的 register/unregister 方法
+    
+    注意：register_from_config(config: ModelConfig) 第一参数是 ModelConfig 对象，
+    unregister_by_key(key: Tuple[str,str]) 第一参数是元组，需做类型适配。
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(self, *args, **kwargs):
+            result = await func(self, *args, **kwargs)
+            # 适配不同参数签名
+            first_arg = args[0] if args else None
+            if hasattr(first_arg, "model_name"):        # ModelConfig 对象
+                model = first_arg.model_name
+                run_id = getattr(first_arg, "run_id", "")
+            elif isinstance(first_arg, tuple):           # (run_id, model_name)
+                model = first_arg[1] if len(first_arg) > 1 else "unknown"
+                run_id = first_arg[0] if len(first_arg) > 0 else ""
+            else:
+                model = kwargs.get("model_name", str(first_arg) if first_arg else "unknown")
+                run_id = kwargs.get("run_id", "")
+            emit(
+                EVENT_MODEL_LIFECYCLE,
+                action=action,
+                model=model,
+                run_id=run_id,
+                model_type=model_type,
+            )
+            return result
+        return wrapper
+    return decorator
+```
+
+### 3.8 注册机制 — 启动时一次性绑定
+
+```python
+# observability/__init__.py
+"""可观测性模块 — 一键启用/禁用"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+_initialized = False
+
+
+def setup(app=None) -> None:
+    """初始化可观测性系统（Worker 启动时调用一次）"""
+    global _initialized
+    if _initialized:
+        return
+
+    import os
+    if os.getenv("OBSERVABILITY_ENABLED", "true").lower() != "true":
+        logger.info("可观测性系统已通过环境变量禁用")
+        return
+
+    from traj_proxy.observability.event_bus import enable
+    from traj_proxy.observability import metrics_collector
+    from traj_proxy.observability import request_summary
+    from traj_proxy.observability import run_id_tracker
+
+    enable()
+    metrics_collector.register_all()
+    request_summary.register()
+    run_id_tracker.register()
+
+    _initialized = True
+    logger.info("可观测性系统已初始化")
+
+
+def teardown() -> None:
+    """关闭可观测性系统"""
+    from traj_proxy.observability.event_bus import disable, reset
+    disable()
+    reset()
+    global _initialized
+    _initialized = False
+    logger.info("可观测性系统已关闭")
+```
+
+```python
+# worker.py 修改 — initialize() 中仅加 1 行
+async def initialize(self):
+    # ... 原有初始化代码 ...
+    from traj_proxy.observability import setup as setup_observability
+    setup_observability(self.app)   # ← 仅此一行
+```
+
+### 3.9 侵入性量化对比
+
+| 文件 | 原方案修改量 | 解耦方案V3修改量 | 改动性质 |
+|------|------------|-------------|---------|
+| `processor.py` | 不改 | **+10 行** | `import` + 2处 `emit(STARTED)` + 2处 `emit(COMPLETED)` in finally |
+| `infer_client.py` | **+10-15 行**（内联埋点） | **+8 行** | 4 处装饰器 + 2 处 `self._last_retry_count = attempt` |
+| `pipeline/base.py` | **+20 行**（调用 emit_summary） | **+4 行** | 轨迹存储失败 emit（P1修复） |
+| `pipeline/direct_pipeline.py` | 可能需改 | **+4 行** | 同上 |
+| `pipeline/token_pipeline.py` | 可能需改 | **0 行** | — |
+| `processor_manager.py` | **+5 行**（注册时打指标） | **+2 行** | 仅加装饰器 |
+| `worker.py` | **+15 行**（中间件埋点） | **+1 行** | `setup_observability()` |
+| `routes.py` | **+3 行** | **+8 行** | request_id 统一 + 429/信号量 emit（P0修复） |
+| **合计** | **~53 行 / 6 文件** | **~41 行 / 7 文件** | 覆盖度更高，侵入性仍可控 |
+
+**核心收益**：
+- **Pipeline 层零修改** — direct_pipeline.py 和 token_pipeline.py 完全不动
+- **outcome 判定完全外置** — 纯函数从 ProcessContext 推导，不改变业务路径
+- **可独立禁用** — `observability.disable()` + `observability.teardown()`
+
+---
+
+## 四、方案总览
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   可观测性方案（解耦架构版）                       │
 │                                                                  │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐│
 │  │ Request  │ │ 结构化   │ │Prometheus│ │ 请求摘要 │ │ 增强   ││
-│  │ ID 统一  │ │ JSON日志 │ │ Metrics  │ │ Summary  │ │ 健康   ││
-│  │          │ │          │ │          │ │ Log      │ │ 检查   ││
+│  │ ID 统一  │ │ JSON日志 │ │ Metrics  │ │ Log      │ │ 健康   ││
+│  │          │ │          │ │          │ │          │ │ 检查   ││
 │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └───┬────┘│
 │       │             │            │             │           │     │
 │       │     ┌───────┴────────────┴─────────────┴───────────┘     │
 │       │     │              observability/ 模块                   │
-│       │     │  ├── request_context.py  (ContextVar 传播)        │
-│       │     │  ├── metrics_collector.py(Prometheus 指标)        │
-│       │     │  ├── request_summary.py  (摘要日志)               │
-│       │     │  ├── json_formatter.py   (JSON 日志格式)          │
-│       │     │  └── health_checker.py   (健康检查)               │
+│       │     │  ├── event_bus.py          (轻量事件总线)         │
+│       │     │  ├── events.py             (事件类型定义)         │
+│       │     │  ├── outcome.py            (outcome 纯函数判定)   │
+│       │     │  ├── label_guards.py       (基数防护)             │
+│       │     │  ├── decorators.py         (观测装饰器)           │
+│       │     │  ├── metrics_collector.py  (Prometheus 订阅者)    │
+│       │     │  ├── request_summary.py    (摘要日志订阅者)       │
+│       │     │  ├── request_context.py    (ContextVar 传播)      │
+│       │     │  ├── json_formatter.py     (JSON 日志格式)        │
+│       │     │  └── health_checker.py     (健康检查)             │
 │       └─────┘                                                    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**新增依赖**：`prometheus-client`、`python-json-logger`（仅此两个）
+**新增依赖**：`prometheus-client`（仅此 1 个，JsonFormatter 自行实现仅 20 行）
 
 ---
 
-## 四、模块详细设计
+## 五、模块详细设计
 
-### 4.1 Request ID 统一
+### 5.1 Request ID 统一
 
 **问题**：中间件生成 `str(uuid.uuid4())[:8]`（8位），路由层生成 `str(uuid.uuid4())`（完整），两者无法关联。
 
@@ -81,13 +540,10 @@
 @self.app.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
     start_time = time.time()
-    # 统一使用完整 UUID，响应头仍返回短 ID 便于人眼查看
     request_id = str(uuid.uuid4())
-    request.state.request_id = request_id          # ← 传递给路由层
-    request.state.request_start_time = start_time   # ← 传递起始时间
-
-    # ...
-
+    request.state.request_id = request_id
+    request.state.request_start_time = start_time
+    # ... 原有日志逻辑 ...
     response.headers["X-Request-ID"] = request_id[:8]  # 短 ID 给客户端
     return response
 ```
@@ -99,17 +555,11 @@ async def chat_completions(request: Request, ...):
     # 路由层不再自己生成，复用中间件 ID
 ```
 
-**影响范围**：
-- `workers/worker.py`：中间件生成并注入 `request.state.request_id`
-- `serve/routes.py`：路由层从 `request.state` 取 request_id，不再独立生成
+**影响范围**：`workers/worker.py` + `serve/routes.py`
 
 ---
 
-### 4.2 结构化 JSON 日志
-
-**目标**：日志可被 ELK/Loki/Grafana Loki 等系统直接解析索引。
-
-**方案**：新增 `observability/json_formatter.py`，提供 JSON 格式的 `logging.Formatter`。
+### 5.2 结构化 JSON 日志
 
 ```python
 # observability/json_formatter.py
@@ -119,7 +569,7 @@ from datetime import datetime, timezone
 
 
 class JsonFormatter(logging.Formatter):
-    """JSON 格式日志输出器，兼容日志聚合系统"""
+    """JSON 格式日志输出器"""
 
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
@@ -129,46 +579,39 @@ class JsonFormatter(logging.Formatter):
             "worker_id": getattr(record, "worker_id", "-"),
             "message": record.getMessage(),
         }
-        # 附加 request_id（如果存在）
         request_id = getattr(record, "request_id", None)
         if request_id:
             log_entry["request_id"] = request_id
-        # 附加 exception
         if record.exc_info and record.exc_info[0]:
             log_entry["exception"] = self.formatException(record.exc_info)
         return json.dumps(log_entry, ensure_ascii=False)
 ```
 
-**配置切换**：通过环境变量 `LOG_FORMAT=json` 启用（默认保持 `text`）。
+**配置切换**：`LOG_FORMAT=json`（默认 `text`）。
 
 ```python
 # utils/logger.py 改动
-def get_logger(name, log_level=None, log_dir=None, worker_id=None):
-    # ...
-    log_format = os.getenv("LOG_FORMAT", "text")  # text | json
-
-    if log_format == "json":
-        from traj_proxy.observability.json_formatter import JsonFormatter
-        formatter = JsonFormatter()
-    else:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)s | %(module)s | %(worker_id)s | %(message)s'
-        )
+log_format = os.getenv("LOG_FORMAT", "text")
+if log_format == "json":
+    from traj_proxy.observability.json_formatter import JsonFormatter
+    formatter = JsonFormatter()
+else:
+    formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)s | %(module)s | %(worker_id)s | %(message)s'
+    )
 ```
 
-**request_id 注入**：利用 `logging.Filter` 将 request_id 注入到每条日志记录：
+**request_id 注入**：`logging.Filter` + `ContextVar`：
 
 ```python
 class RequestIDFilter(logging.Filter):
-    """从 ContextVar 获取 request_id，注入日志记录"""
-
     def filter(self, record: logging.LogRecord) -> bool:
         from traj_proxy.observability.request_context import get_request_id
-        record.request_id = get_request_id("")  # 空字符串表示无请求上下文
+        record.request_id = get_request_id("")
         return True
 ```
 
-**request_id 上下文传播**：使用 `contextvars.ContextVar`，在中间件层设置，全链路自动传播：
+#### ContextVar 传播机制与边界
 
 ```python
 # observability/request_context.py
@@ -176,133 +619,321 @@ from contextvars import ContextVar
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 
-
 def set_request_id(request_id: str) -> None:
     _request_id.set(request_id)
-
 
 def get_request_id(default: str = "") -> str:
     return _request_id.get(default)
 ```
 
+**⚠️ ContextVar 传播边界**：
+
+| 场景 | 传播? | 说明 |
+|------|-------|------|
+| `async def` 协程 | ✅ | async/await 链自动继承 |
+| `async for` 生成器 | ✅ | 继承创建时的上下文 |
+| `asyncio.create_task()` | ✅ | 新 Task 继承父 Task |
+| `asyncio.to_thread()` | ❌ | 线程池不继承 ContextVar |
+
+**线程池处理**：Tokenizer 等 CPU 密集操作如需 `to_thread()`，需显式传递：
+
 ```python
-# workers/worker.py - 中间件中设置
-from traj_proxy.observability.request_context import set_request_id
-
-@self.app.middleware("http")
-async def request_logging_middleware(request, call_next):
-    request_id = str(uuid.uuid4())
-    request.state.request_id = request_id
-    set_request_id(request_id)  # ← ContextVar 设置，async 自动传播
-    # ...
+current_request_id = get_request_id()
+result = await asyncio.to_thread(cpu_intensive_fn, current_request_id, ...)
 ```
-
-这样全链路（路由 → Processor → Pipeline → InferClient → DB）的日志自动携带 request_id，无需手动传参。
 
 ---
 
-### 4.3 Prometheus Metrics
+### 5.3 Prometheus Metrics
 
-**目标**：提供量化观测能力 — QPS、延迟分布、错误率、Token 消耗、推理延迟。
+**目标**：量化观测 — QPS、延迟、错误率（含结果归因）、Token、推理延迟/重试、流式完整性、并发水位。
 
-**新增依赖**：`prometheus-client`
+#### 5.3.1 结果归因（outcome）
 
-**核心指标设计**：
+outcome 由 `observability/outcome.py` 纯函数判定（§3.6），**业务代码无感知**。
+
+#### 5.3.2 核心指标定义（16 个核心 + 3 个可选 + ProcessCollector）
 
 ```python
 # observability/metrics_collector.py
 from prometheus_client import Counter, Histogram, Gauge
 
+# ===== A. 请求核心 (5个) =====
+REQUEST_TOTAL = Counter("trajproxy_requests_total", "...",
+    ["method", "model", "stream", "outcome", "run_id"])
+REQUEST_DURATION = Histogram("trajproxy_request_duration_seconds", "...",
+    ["model", "stream", "run_id"],
+    buckets=[0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60])
+ACTIVE_REQUESTS = Gauge("trajproxy_active_requests", "...")
+CONCURRENCY_UTILIZATION = Gauge("trajproxy_concurrency_utilization", "...")
+MAX_CONCURRENT = Gauge("trajproxy_max_concurrent_requests", "...",
+    ["model"])   # 暴露为常量 Gauge，Grafana 计算利用率更灵活
 
-# ===== 请求级指标 =====
+# ===== A2. 并发控制 (2个) =====
+SEMAPHORE_WAIT_DURATION = Histogram("trajproxy_semaphore_wait_seconds",
+    "信号量等待耗时", ["model"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10])
+SEMAPHORE_REJECTED = Counter("trajproxy_semaphore_rejected_total",
+    "信号量超时拒绝数", ["model"])
 
-REQUEST_TOTAL = Counter(
-    "trajproxy_requests_total",
-    "Total number of requests",
-    ["method", "model", "status", "stream"]    # 按模型、状态码、流/非流 分桶
-)
+# ===== B. 流式 (2个核心 + 1个可选) =====
+TTFT_SECONDS = Histogram("trajproxy_ttft_seconds", "...",
+    ["model", "run_id"], buckets=[0.05, 0.1, 0.25, 0.5, 1, 2, 5])
+STREAM_COMPLETION = Counter("trajproxy_stream_completion_total", "...",
+    ["model", "run_id", "result"])
+STREAM_CLIENT_DISCONNECT = Counter("trajproxy_stream_client_disconnect_total",
+    "流式传输中途客户端断连", ["model"])   # Phase 3+
+# STREAM_CHUNKS — 可选，Phase 3+
 
-REQUEST_DURATION = Histogram(
-    "trajproxy_request_duration_seconds",
-    "Request end-to-end duration",
-    ["model", "stream"],
-    buckets=[0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60]  # 覆盖 100ms~60s
-)
+# ===== C. 阶段 (1个) =====
+PHASE_DURATION = Histogram("trajproxy_phase_duration_seconds", "...",
+    ["model", "phase"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10])
 
-# ===== 阶段级指标（Pipeline 内部耗时）=====
+# ===== D. Token (1个) =====
+TOKENS_TOTAL = Counter("trajproxy_tokens_total", "...",
+    ["model", "run_id", "type"])
 
-PHASE_DURATION = Histogram(
-    "trajproxy_phase_duration_seconds",
-    "Duration of processing phases",
-    ["model", "phase"],                        # phase: transform/encode/inference/decode/store
-    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10]
-)
+# ===== E. 下游依赖 (5个) =====
+INFER_DURATION = Histogram("trajproxy_infer_duration_seconds", "...",
+    ["model"], buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60])
+INFER_ERRORS = Counter("trajproxy_infer_errors_total", "...",
+    ["model", "error_type"])
+INFER_RETRIES = Counter("trajproxy_infer_retries_total", "...",
+    ["model", "outcome"])   # 区分"推理慢了"还是"重试多了"
+DB_POOL_USAGE = Gauge("trajproxy_db_pool_usage", "...", ["state"])
+TRAJECTORY_STORE_ERRORS = Counter("trajproxy_trajectory_store_errors_total",
+    "轨迹存储失败数（DB写入静默失败显式化）", ["model", "error_type"])
 
-# ===== Token 指标 =====
-
-TOKENS_TOTAL = Counter(
-    "trajproxy_tokens_total",
-    "Total tokens processed",
-    ["model", "type"]                          # type: prompt/completion/cached
-)
-
-# ===== 流式指标 =====
-
-TTFT_SECONDS = Histogram(
-    "trajproxy_ttft_seconds",
-    "Time to first token (streaming)",
-    ["model"],
-    buckets=[0.05, 0.1, 0.25, 0.5, 1, 2, 5]
-)
-
-# ===== 系统指标 =====
-
-ACTIVE_REQUESTS = Gauge(
-    "trajproxy_active_requests",
-    "Currently active requests"
-)
-
-MODELS_REGISTERED = Gauge(
-    "trajproxy_models_registered",
-    "Number of registered models",
-    ["type"]                                   # type: static/dynamic
-)
-
-DB_POOL_USAGE = Gauge(
-    "trajproxy_db_pool_usage",
-    "Database connection pool usage",
-    ["state"]                                  # state: used/available/peak
-)
-
-# ===== 推理服务指标 =====
-
-INFER_DURATION = Histogram(
-    "trajproxy_infer_duration_seconds",
-    "Inference service call duration",
-    ["model"],
-    buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60]
-)
-
-INFER_ERRORS = Counter(
-    "trajproxy_infer_errors_total",
-    "Inference service errors",
-    ["model", "error_type"]                    # error_type: timeout/connection/http_error
-)
+# ===== F. 可选（Phase 3+）=====
+MODEL_LIFECYCLE = Counter("trajproxy_model_lifecycle_total", "...",
+    ["action", "type"])
+STREAM_CHUNKS = Histogram("trajproxy_stream_chunks_per_request", "...",
+    ["model", "run_id"], buckets=[1, 10, 50, 100, 200, 500, 1000, 5000])
+PROCESSOR_CACHE_OPS = Counter("trajproxy_processor_cache_operations_total",
+    "Processor缓存操作", ["result"])   # result: hit/miss/evicted
 ```
 
-**埋点位置与策略**：
+> **已删除 `REQUESTS_INFLIGHT_PEAK`**：用 PromQL `max_over_time(trajproxy_active_requests[24h])` 替代。
 
-| 指标 | 埋点位置 | 方式 |
-|------|---------|------|
-| `REQUEST_TOTAL` / `REQUEST_DURATION` / `ACTIVE_REQUESTS` | `request_logging_middleware` | 中间件层，request/response 前后 |
-| `PHASE_DURATION` | `base.py._update_timing()` + Pipeline 各阶段 | 从 ProcessContext 读取耗时 |
-| `TOKENS_TOTAL` | Pipeline 完成时（`_store_trajectory` 之后） | 从 ProcessContext 读取 token 数 |
-| `TTFT_SECONDS` | Pipeline 首 Token 产生时 | 从 ProcessContext.ttft_ms 读取 |
-| `INFER_DURATION` / `INFER_ERRORS` | `InferClient` 调用前后 | 在 InferClient 的 send_* 方法中 |
-| `DB_POOL_USAGE` | `DatabaseManager._monitor_pool()` | 复用已有的监控逻辑 |
-| `MODELS_REGISTERED` | `ProcessorManager` 注册/删除时 | 在 register/unregister 方法中 |
+#### 5.3.3 ProcessCollector（零侵入进程级指标）
 
-**Metrics 端点注册**：
+```python
+from prometheus_client import ProcessCollector
+ProcessCollector()  # 自动暴露: process_cpu_seconds, process_resident_memory_bytes,
+                    # process_open_fds, process_max_fds, process_start_time_seconds
+```
+
+#### 5.3.4 埋点位置（解耦架构版）
+
+| 指标 | 截获层 | 方式 |
+|------|--------|------|
+| `REQUEST_TOTAL` / `REQUEST_DURATION` / `ACTIVE_REQUESTS` / `CONCURRENCY_UTILIZATION` | Layer 2: `processor.py` emit | EventBus 订阅 |
+| `TTFT_SECONDS` / `STREAM_COMPLETION` / `PHASE_DURATION` / `TOKENS_TOTAL` | Layer 2: 从 ProcessContext 读取 | 订阅者处理 |
+| `SEMAPHORE_WAIT_DURATION` / `SEMAPHORE_REJECTED` | **Layer 1.5: `routes.py` emit** | EventBus 订阅 |
+| `INFER_DURATION` / `INFER_ERRORS` / `INFER_RETRIES` | Layer 3: `@observe_inference` | 装饰器透明 |
+| `DB_POOL_USAGE` | `DatabaseManager._monitor_pool()` | 已有 |
+| `TRAJECTORY_STORE_ERRORS` | **Layer 5: `pipeline/*.py` emit** | EventBus 订阅 |
+| `STREAM_CLIENT_DISCONNECT` | **Layer 5: StreamingResponse 异常捕获** | EventBus 订阅 |
+| `MODEL_LIFECYCLE` | Layer 4: `@observe_model_lifecycle` | 装饰器 |
+| ProcessCollector | Prometheus 内置 | `setup()` 一行注册 |
+
+#### 5.3.5 Metrics 订阅者实现
+
+```python
+# observability/metrics_collector.py — EventBus 订阅者
+
+from traj_proxy.observability.event_bus import subscribe
+from traj_proxy.observability.events import (
+    EVENT_REQUEST_COMPLETED, EVENT_INFERENCE_COMPLETED, EVENT_MODEL_LIFECYCLE,
+    EVENT_CONCURRENCY_REJECTED, EVENT_SEMAPHORE_ACQUIRED,
+    EVENT_TRAJECTORY_STORE_ERROR, EVENT_STREAM_CLIENT_DISCONNECT,
+)
+from traj_proxy.observability.outcome import determine_outcome
+from traj_proxy.observability.label_guards import safe_model_label, safe_run_id_label
+
+# ── ProcessContext 字段守卫：防止字段重命名导致指标静默消失 ──
+_REQUIRED_CONTEXT_FIELDS = frozenset({
+    "model", "is_stream", "processing_duration_ms", "request_id", "run_id",
+})
+_OPTIONAL_CONTEXT_FIELDS = frozenset({
+    "transform_duration_ms", "encode_duration_ms", "cache_db_query_ms",
+    "cache_prefix_match_ms", "inference_duration_ms", "decode_duration_ms",
+    "prompt_tokens", "completion_tokens", "cache_hit_tokens", "ttft_ms",
+    "stream_finished", "stream_chunk_count", "error",
+})
+
+
+def validate_context_fields(context) -> None:
+    """启动时或首次请求时校验 ProcessContext 字段完整性"""
+    missing = _REQUIRED_CONTEXT_FIELDS - {
+        f for f in _REQUIRED_CONTEXT_FIELDS if hasattr(context, f)
+    }
+    if missing:
+        import logging
+        logging.getLogger(__name__).error(
+            f"ProcessContext 缺少必需字段: {missing}，指标可能不完整"
+        )
+
+
+def _on_request_started(model, is_stream, max_concurrent) -> None:
+    ACTIVE_REQUESTS.inc()
+    if max_concurrent > 0:
+        CONCURRENCY_UTILIZATION.set(ACTIVE_REQUESTS._value.get() / max_concurrent)
+        MAX_CONCURRENT.labels(safe_model_label(model)).set(max_concurrent)
+
+
+def _on_request_completed(context, exception) -> None:
+    ACTIVE_REQUESTS.dec()
+    model = safe_model_label(context.model)
+    run_id = safe_run_id_label(context.run_id or "")
+    stream = str(getattr(context, "is_stream", False)).lower()
+    outcome = determine_outcome(context, exception)
+    duration_s = (getattr(context, "processing_duration_ms", 0) or 0) / 1000
+
+    REQUEST_TOTAL.labels("POST", model, stream, outcome, run_id).inc()
+    REQUEST_DURATION.labels(model, stream, run_id).observe(duration_s)
+
+    # 分阶段耗时
+    for phase, attr in [
+        ("transform", "transform_duration_ms"), ("encode", "encode_duration_ms"),
+        ("cache_db_query", "cache_db_query_ms"), ("cache_prefix_match", "cache_prefix_match_ms"),
+        ("inference", "inference_duration_ms"), ("decode", "decode_duration_ms"),
+    ]:
+        ms = getattr(context, attr, None)
+        if ms is not None:
+            PHASE_DURATION.labels(model, phase).observe(ms / 1000)
+
+    # Token + 流式指标 ... (省略重复代码，完整实现同上文)
+
+
+def _on_semaphore_acquired(wait_duration_ms, model) -> None:
+    """信号量等待耗时记录"""
+    SEMAPHORE_WAIT_DURATION.labels(safe_model_label(model)).observe(wait_duration_ms / 1000)
+
+
+def _on_concurrency_rejected(model, run_id, wait_duration_ms) -> None:
+    """429 限流记录（P0 修复：此事件由 routes.py 发出，不经过 Processor）"""
+    SEMAPHORE_REJECTED.labels(safe_model_label(model)).inc()
+    REQUEST_TOTAL.labels("POST", safe_model_label(model), "false",
+                         "error_rate_limit", safe_run_id_label(run_id or "")).inc()
+
+
+def _on_trajectory_store_error(model, error_type, error_message) -> None:
+    """轨迹存储失败记录（DB 写入静默失败显式化）"""
+    TRAJECTORY_STORE_ERRORS.labels(safe_model_label(model), error_type).inc()
+
+
+def _on_stream_client_disconnect(model, chunk_count, duration_ms) -> None:
+    """流式客户端断连记录"""
+    STREAM_CLIENT_DISCONNECT.labels(safe_model_label(model)).inc()
+
+
+def _on_inference_completed(model, duration_ms, retry_count, error, error_type) -> None:
+    model = safe_model_label(model)
+    INFER_DURATION.labels(model).observe(duration_ms / 1000)
+    if error:
+        INFER_ERRORS.labels(model, error_type).inc()
+    if retry_count > 0:
+        INFER_RETRIES.labels(model, "success" if not error else "failed").inc(retry_count)
+
+
+def register_all() -> None:
+    subscribe(EVENT_REQUEST_STARTED, _on_request_started)
+    subscribe(EVENT_REQUEST_COMPLETED, _on_request_completed)
+    subscribe(EVENT_INFERENCE_COMPLETED, _on_inference_completed)
+    subscribe(EVENT_MODEL_LIFECYCLE, _on_model_lifecycle)
+    subscribe(EVENT_CONCURRENCY_REJECTED, _on_concurrency_rejected)
+    subscribe(EVENT_SEMAPHORE_ACQUIRED, _on_semaphore_acquired)
+    subscribe(EVENT_TRAJECTORY_STORE_ERROR, _on_trajectory_store_error)
+    subscribe(EVENT_STREAM_CLIENT_DISCONNECT, _on_stream_client_disconnect)
+```
+
+#### 5.3.6 Processor 拦截点（+6 行）
+
+```python
+# processor.py — 非流式
+from traj_proxy.observability.event_bus import emit
+from traj_proxy.observability.events import EVENT_REQUEST_COMPLETED
+
+async def process_request(self, messages, request_id, ...) -> ProcessContext:
+    context = self._pipeline._create_context(...)
+    emit(EVENT_REQUEST_STARTED, model=context.model, is_stream=context.is_stream,
+         max_concurrent=self._max_concurrent)   # ← 请求开始
+    exception = None
+    try:
+        context = await self._pipeline.process(messages, context)
+        return context
+    except Exception as e:
+        exception = e
+        raise
+    finally:
+        emit(EVENT_REQUEST_COMPLETED, context=context, exception=exception)
+
+# processor.py — 流式（async generator）
+async def process_stream(self, messages, request_id, ...):
+    context = self._pipeline._create_context(...)
+    emit(EVENT_REQUEST_STARTED, model=context.model, is_stream=True,
+         max_concurrent=self._max_concurrent)   # ← 请求开始
+    exception = None
+    try:
+        async for chunk in self._pipeline.process_stream(messages, context):
+            yield chunk
+    except Exception as e:
+        exception = e
+        raise
+    finally:
+        emit(EVENT_REQUEST_COMPLETED, context=context, exception=exception)
+```
+
+#### 5.3.7 Routes 层 429 限流拦截点（+3 行）— P0 修复
+
+**问题**：并发限流（`HTTPException(429)`）在 `routes.py` 直接抛出，**不经过 Processor 层**，
+导致 `error_rate_limit` outcome 在 Processor emit 事件中永远不可达。
+
+```python
+# routes.py — semaphore 获取失败时 emit
+from traj_proxy.observability.event_bus import emit
+from traj_proxy.observability.events import (
+    EVENT_CONCURRENCY_REJECTED, EVENT_SEMAPHORE_ACQUIRED,
+)
+
+try:
+    t_wait = time.perf_counter()
+    await asyncio.wait_for(semaphore.acquire(), timeout=semaphore_timeout)
+    wait_ms = (time.perf_counter() - t_wait) * 1000
+    emit(EVENT_SEMAPHORE_ACQUIRED, wait_duration_ms=wait_ms, model=model)
+except asyncio.TimeoutError:
+    emit(EVENT_CONCURRENCY_REJECTED, model=model, run_id=run_id,
+         wait_duration_ms=semaphore_timeout * 1000)
+    raise HTTPException(status_code=429, detail="Concurrency limit exceeded")
+```
+
+**侵入性**：`routes.py` 改动从 +3 行增加至 **+8 行**（含时间计量）。
+
+#### 5.3.8 Pipeline 层轨迹存储拦截点（+2 行）
+
+**问题**：`base.py:152-154` 和 `direct_pipeline.py:182` 中，轨迹存储失败仅 `catch + log`，不中断主流程。
+DB 故障可能长期不被发现。
+
+```python
+# pipeline/base.py — _store_trajectory 的 except 块中追加
+from traj_proxy.observability.event_bus import emit
+from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
+
+try:
+    await self._store_trajectory(context)
+except DatabaseError as e:
+    logger.error(f"轨迹存储失败: {e}")
+    emit(EVENT_TRAJECTORY_STORE_ERROR,
+         model=context.model,
+         error_type=type(e).__name__,
+         error_message=str(e)[:200])
+```
+
+**侵入性**：`pipeline/base.py` 新增 **+4 行**（原"零修改"变为 +4 行），`direct_pipeline.py` 类似 +4 行。
+
+**Metrics 端点**：
 
 ```python
 # workers/route_registrar.py
@@ -310,785 +941,470 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 @self.app.get("/metrics", tags=["Observability"])
 async def metrics():
-    """Prometheus metrics endpoint"""
     from starlette.responses import Response
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 ```
 
-**Prometheus 采集配置（多节点部署方案）**：
-
-每个 ProxyWorker 在各自端口暴露 `/metrics`（12300, 12301, ...），不做 WorkerManager 聚合。
-
-**理由**：当前部署为多节点静态部署（Docker/裸机），单节点 10+ Workers。如果在应用层做聚合，需要跨 Ray 进程拉取指标、合并注册表、处理 Worker 动态启停，复杂度高且收益低。50~100 targets 对 Prometheus 毫无性能压力（轻松处理数万 target）。
-
-部署时自动生成 targets 文件，Prometheus 热加载：
-
-```yaml
-# prometheus/targets.json — 部署脚本自动生成
-[
-  {
-    "targets": [
-      "node-1:12300", "node-1:12301", "node-1:12302", "...",
-      "node-2:12300", "node-2:12301", "...",
-      "node-3:12300", "node-3:12301", "..."
-    ],
-    "labels": { "job": "trajproxy-workers" }
-  }
-]
-```
-
-```yaml
-# prometheus.yml
-scrape_configs:
-  - job_name: "trajproxy"
-    file_sd_configs:
-      - files: ["targets.json"]
-        refresh_interval: 30s
-
-    # 跨 Worker/节点聚合（PromQL 示例）
-    # 全局 QPS:          rate(trajproxy_requests_total[5m])
-    # 按模型 QPS:        sum by (model) (rate(trajproxy_requests_total[5m]))
-    # P95 延迟:          histogram_quantile(0.95, sum by (le) (rate(trajproxy_request_duration_seconds_bucket[5m])))
-    # 推理服务错误率:    sum by (model) (rate(trajproxy_infer_errors_total[5m])) / sum by (model) (rate(trajproxy_requests_total[5m]))
-```
-
-> **不做的事**：
-> - 不引入 Pushgateway（Worker 是常驻服务，不需要推送模式）
-> - 不做 WorkerManager 聚合（运维复杂度高于维护 targets.json 的收益）
-> - 不引入 OpenTelemetry（当前链路短，Prometheus + 摘要日志足够）
-
 ---
 
-### 4.4 请求摘要日志（Request Summary Log）
+### 5.4 请求摘要日志（EventBus 订阅者）
 
-**目标**：每个请求产生一条结构化摘要日志，一眼可见完整生命周期，替代散落的多行日志。
-
-**方案**：在 Pipeline/BasePipeline 处理结束时，输出统一格式的摘要日志。
+**解耦方式**：订阅 `EVENT_REQUEST_COMPLETED`，Pipeline 层无需调用。
 
 ```python
 # observability/request_summary.py
 import logging
-from dataclasses import dataclass
-from typing import Optional
 
 logger = logging.getLogger(__name__)
+_worker_id: str = "unknown"
 
 
-def emit_request_summary(
-    request_id: str,
-    model: str,
-    stream: bool,
-    status: str,                              # "ok" | "error"
-    duration_ms: float,
-    run_id: str = "",
-    session_id: str = "",
-    prompt_tokens: Optional[int] = None,
-    completion_tokens: Optional[int] = None,
-    cache_hit_tokens: Optional[int] = None,
-    ttft_ms: Optional[float] = None,
-    inference_duration_ms: Optional[float] = None,
-    transform_duration_ms: Optional[float] = None,
-    encode_duration_ms: Optional[float] = None,
-    decode_duration_ms: Optional[float] = None,
-    error_type: Optional[str] = None,
-    error_message: Optional[str] = None,
-) -> None:
-    """输出一条结构化请求摘要日志"""
+def _on_request_completed(context, exception) -> None:
+    from traj_proxy.observability.outcome import determine_outcome
+    from traj_proxy.observability.label_guards import safe_model_label
+
+    outcome = determine_outcome(context, exception)
+    model_raw = getattr(context, "model", "unknown")
+    model_known = safe_model_label(model_raw) != "unknown"
+
     summary = {
-        "request_id": request_id,
-        "model": model,
-        "stream": stream,
-        "status": status,
-        "duration_ms": round(duration_ms, 1),
+        "request_id": getattr(context, "request_id", ""),
+        "worker_id": _worker_id,
+        "model": model_raw,
+        "model_known": model_known,
+        "stream": getattr(context, "is_stream", False),
+        "outcome": outcome,
+        "duration_ms": round(getattr(context, "processing_duration_ms", 0) or 0, 1),
     }
-    # 可选字段（非 None 时才加入）
     optional = {
-        "run_id": run_id,
-        "session_id": session_id,
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "cache_hit_tokens": cache_hit_tokens,
-        "ttft_ms": round(ttft_ms, 1) if ttft_ms else None,
-        "inference_ms": round(inference_duration_ms, 1) if inference_duration_ms else None,
-        "transform_ms": round(transform_duration_ms, 1) if transform_duration_ms else None,
-        "encode_ms": round(encode_duration_ms, 1) if encode_duration_ms else None,
-        "decode_ms": round(decode_duration_ms, 1) if decode_duration_ms else None,
-        "error_type": error_type,
-        "error_message": error_message,
+        "run_id": getattr(context, "run_id", None),
+        "session_id": getattr(context, "session_id", None),
+        "client_ip": getattr(context, "client_ip", None),
+        "prompt_tokens": getattr(context, "prompt_tokens", None),
+        "completion_tokens": getattr(context, "completion_tokens", None),
+        "cache_hit_tokens": getattr(context, "cache_hit_tokens", None),
+        "ttft_ms": getattr(context, "ttft_ms", None),
+        "inference_ms": getattr(context, "inference_duration_ms", None),
+        "transform_ms": getattr(context, "transform_duration_ms", None),
+        "encode_ms": getattr(context, "encode_duration_ms", None),
+        "decode_ms": getattr(context, "decode_duration_ms", None),
     }
     summary.update({k: v for k, v in optional.items() if v is not None})
+    if exception:
+        summary["error_type"] = type(exception).__name__
+        summary["error_message"] = str(exception)[:200]
 
-    if status == "error":
+    if outcome.startswith("error") or outcome in ("timeout", "stream_partial"):
         logger.error("request_summary", extra={"summary": summary})
     else:
         logger.info("request_summary", extra={"summary": summary})
+
+
+def register() -> None:
+    from traj_proxy.observability.event_bus import subscribe
+    from traj_proxy.observability.events import EVENT_REQUEST_COMPLETED
+    subscribe(EVENT_REQUEST_COMPLETED, _on_request_completed)
 ```
 
-**埋点位置**：`BasePipeline` 的 `_update_timing` 之后调用 `emit_request_summary`。
-
-```python
-# pipeline/base.py - process() 末尾
-# 在 _store_trajectory 之后
-emit_request_summary(
-    request_id=context.request_id,
-    model=context.model,
-    stream=context.is_stream,
-    status="error" if context.error else "ok",
-    duration_ms=context.processing_duration_ms,
-    run_id=context.run_id or "",
-    session_id=context.session_id or "",
-    prompt_tokens=context.prompt_tokens,
-    completion_tokens=context.completion_tokens,
-    cache_hit_tokens=context.cache_hit_tokens,
-    ttft_ms=context.ttft_ms,
-    inference_duration_ms=context.inference_duration_ms,
-    transform_duration_ms=context.transform_duration_ms,
-    encode_duration_ms=context.encode_duration_ms,
-    decode_duration_ms=context.decode_duration_ms,
-    error_type=type(context.error).__name__ if context.error else None,
-    error_message=str(context.error) if context.error else None,
-)
-```
-
-**输出示例**（JSON 格式下）：
-
-```json
-{
-  "timestamp": "2026-06-11T08:30:15.123+00:00",
-  "level": "INFO",
-  "module": "request_summary",
-  "worker_id": "worker-0",
-  "message": "request_summary",
-  "summary": {
-    "request_id": "a1b2c3d4-e5f6-...",
-    "model": "qwen-72b",
-    "stream": false,
-    "status": "ok",
-    "duration_ms": 3247.5,
-    "run_id": "exp-001",
-    "session_id": "sess-abc",
-    "prompt_tokens": 1024,
-    "completion_tokens": 256,
-    "cache_hit_tokens": 768,
-    "inference_ms": 2800.0,
-    "encode_ms": 150.0,
-    "ttft_ms": null
-  }
-}
-```
-
-**价值**：一条日志 = 完整请求画像。可直接导入日志系统做聚合分析（P95 延迟、慢请求 TopN、模型错误率排行等）。
+**摘要日志特性**：
+- 包含 `worker_id`（多 Worker 定位）和 `client_ip`（异常客户端识别）
+- `model_known` 字段与 Metrics 的 `safe_model_label` 对齐
 
 ---
 
-### 4.5 增强健康检查
+### 5.5 增强健康检查
 
-**目标**：提供分层健康检查，快速判断依赖是否可用。
-
-**方案**：扩展 `GET /health` 端点，增加可选的 `?deep=1` 参数做深度检查。
+**改进**：按 `base_url` 去重后全量检查（原来只查 3 个，50 模型会有 47 个盲区）。
 
 ```python
-# workers/route_registrar.py
-@self.app.get("/health", tags=["Health"])
-async def health(request: Request, deep: bool = False):
-    """
-    健康检查端点
-    
-    - 默认(GET /health): 轻量级，检查进程存活
-    - 深度(GET /health?deep=1): 检查 DB 连接、推理服务连通性
-    """
-    from traj_proxy.observability.health_checker import HealthChecker
+# observability/health_checker.py（关键变更）
 
-    checker = HealthChecker(request.app)
-
-    if deep:
-        result = await checker.deep_check()
-    else:
-        result = checker.shallow_check()
-
-    status_code = 200 if result["status"] == "healthy" else 503
-    return JSONResponse(content=result, status_code=status_code)
-```
-
-```python
-# observability/health_checker.py
-import logging
-import time
-from typing import Any, Dict
-
-logger = logging.getLogger(__name__)
+# 默认健康检查路径，可通过配置覆盖
+_DEFAULT_HEALTH_PATH = "/health"
 
 
-class HealthChecker:
-    """分层健康检查器"""
+async def deep_check(self, processor_manager, config: dict | None = None) -> Dict[str, Any]:
+    # ... DB 检查 ...
 
-    def __init__(self, app):
-        self.app = app
+    # 推理服务：按 base_url 去重后全量检查
+    if processor_manager:
+        processors_info = processor_manager.get_all_processors_info()
+        seen_urls = set()
+        unique_services = []
+        for info in processors_info:
+            url = info.get("infer_client_url", "").rstrip("/")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                unique_services.append(info)
 
-    def shallow_check(self) -> Dict[str, Any]:
-        """轻量级检查：进程存活 + 基本状态"""
-        return {
-            "status": "healthy",
-            "timestamp": time.time(),
-            "worker_id": getattr(self.app.state, "worker_id", "unknown"),
-            "processor_count": len(
-                getattr(self.app.state, "processor_manager", None)
-                and self.app.state.processor_manager.list_models() or []
-            ),
-        }
-
-    async def deep_check(self) -> Dict[str, Any]:
-        """深度检查：DB 连接 + 推理服务可达性"""
-        checks: Dict[str, Any] = {}
-        overall_healthy = True
-
-        # 1. DB 连接池检查
-        db_manager = getattr(self.app.state, "db_manager", None) if hasattr(self.app, "state") else None
-        # 注意: db_manager 挂在 worker 实例上，需要适配
-        if db_manager:
+        errors = []
+        for info in unique_services:
+            url = info.get("infer_client_url", "")
+            # 支持每模型配置健康检查路径（兼容 vLLM/Ollama/TGI 等不同框架）
+            health_path = info.get("health_check_path", _DEFAULT_HEALTH_PATH)
             try:
-                async with db_manager.pool.connection(timeout=2) as conn:
-                    await conn.execute("SELECT 1")
-                checks["database"] = {"status": "healthy"}
+                async with httpx.AsyncClient(timeout=3) as client:
+                    resp = await client.get(f"{url}{health_path}")
+                    if resp.status_code >= 500:
+                        errors.append(f"{info.get('model_name', '?')}: HTTP {resp.status_code}")
             except Exception as e:
-                checks["database"] = {"status": "unhealthy", "error": str(e)}
-                overall_healthy = False
-        else:
-            checks["database"] = {"status": "unknown", "error": "db_manager not initialized"}
-            overall_healthy = False
-
-        # 2. ProcessorManager 检查
-        processor_manager = getattr(self.app.state, "processor_manager", None)
-        if processor_manager:
-            models = processor_manager.list_models()
-            checks["processors"] = {
-                "status": "healthy",
-                "total": len(models),
-            }
-        else:
-            checks["processors"] = {"status": "unknown"}
-
-        # 3. 推理服务连通性（仅检查第一个模型的 URL 是否可达）
-        infer_ok = True
-        if processor_manager:
-            processed_info = processor_manager.get_all_processors_info()
-            for info in processed_info[:3]:  # 最多检查 3 个
-                url = info.get("url", "")
-                if url:
-                    try:
-                        import httpx
-                        async with httpx.AsyncClient(timeout=3) as client:
-                            resp = await client.get(f"{url}/health")
-                            if resp.status_code >= 500:
-                                infer_ok = False
-                                checks.setdefault("infer_services", {})["errors"] = (
-                                    checks.get("infer_services", {}).get("errors", [])
-                                    + [f"{info['model_name']}: HTTP {resp.status_code}"]
-                                )
-                    except Exception as e:
-                        infer_ok = False
-                        checks.setdefault("infer_services", {})["errors"] = (
-                            checks.get("infer_services", {}).get("errors", [])
-                            + [f"{info['model_name']}: {str(e)[:100]}"]
-                        )
-        if "infer_services" not in checks:
-            checks["infer_services"] = {"status": "healthy" if infer_ok else "unhealthy"}
-        else:
-            checks["infer_services"]["status"] = "unhealthy" if not infer_ok else "degraded"
-
-        return {
-            "status": "healthy" if overall_healthy and infer_ok else "degraded",
-            "timestamp": time.time(),
-            "worker_id": getattr(self.app.state, "worker_id", "unknown"),
-            "checks": checks,
-        }
+                errors.append(f"{info.get('model_name', '?')}: {str(e)[:100]}")
+        # ...
 ```
 
-**响应示例**（深度检查）：
+**配置示例**（`configs/config.yaml`）：
 
-```json
-{
-  "status": "degraded",
-  "timestamp": 1718091015.123,
-  "worker_id": "worker-0",
-  "checks": {
-    "database": {"status": "healthy"},
-    "processors": {"status": "healthy", "total": 5},
-    "infer_services": {
-      "status": "degraded",
-      "errors": ["qwen-72b: Connection timeout"]
-    }
-  }
-}
+```yaml
+models:
+  - name: "llama-3-70b"
+    infer_url: "http://vllm-node:8000"
+    health_check_path: "/health"        # vLLM 默认
+  - name: "qwen-72b"
+    infer_url: "http://ollama-node:11434"
+    health_check_path: "/api/tags"      # Ollama 使用此路径
 ```
 
 ---
 
-## 五、目录结构
+## 六、目录结构
 
 ```
 traj_proxy/
-├── observability/                          # ← 新增模块
-│   ├── __init__.py
-│   ├── request_context.py                 # ContextVar request_id 传播
-│   ├── json_formatter.py                  # JSON 日志格式器
-│   ├── metrics_collector.py               # Prometheus 指标定义 + 埋点辅助函数
-│   ├── request_summary.py                 # 请求摘要日志
-│   └── health_checker.py                  # 分层健康检查
-├── utils/
-│   └── logger.py                          # 改动：支持 JSON 格式切换
-├── workers/
-│   ├── worker.py                          # 改动：中间件设置 ContextVar + request.state
-│   └── route_registrar.py                 # 改动：注册 /metrics 端点 + 增强 /health
+├── observability/                          # ← 新增模块（自包含）
+│   ├── __init__.py                         # setup() / teardown()
+│   ├── event_bus.py                        # 轻量事件总线（<50行）
+│   ├── events.py                           # 事件类型常量
+│   ├── outcome.py                          # outcome 纯函数
+│   ├── label_guards.py                     # 基数防护
+│   ├── decorators.py                       # @observe_inference 等
+│   ├── metrics_collector.py                # Prometheus 订阅者
+│   ├── request_summary.py                  # 摘要日志订阅者
+│   ├── request_context.py                  # ContextVar
+│   ├── json_formatter.py                   # JSON 格式器
+│   └── health_checker.py                   # 健康检查
 ├── proxy_core/
-│   ├── pipeline/
-│   │   └── base.py                        # 改动：_update_timing 后调用 emit_request_summary
-│   └── infer_client.py                    # 改动：INFER_DURATION / INFER_ERRORS 埋点
-└── serve/
-    └── routes.py                          # 改动：从 request.state 获取 request_id
+│   ├── processor.py                        # 改动：+6行 emit()
+│   ├── infer_client.py                     # 改动：+4行装饰器
+│   ├── processor_manager.py                # 改动：+2行装饰器
+│   ├── pipeline/base.py                    # 改动：+4行 轨迹存储emit（P1修复）
+│   └── pipeline/direct|token_pipeline.py   # 改动：+4行 同上
+├── workers/worker.py                       # 改动：+1行 setup
+└── serve/routes.py                         # 改动：+8行 request_id + 429/信号量emit（P0修复）
 ```
 
-**新增文件 5 个，修改文件 5 个，新增依赖 2 个。**
+**新增文件 11 个，修改文件 7 个（核心业务文件改动仍 <10 行），新增依赖 1 个。**
 
 ---
 
-## 六、实施路线
+## 七、实施路线
 
-### Phase 1：基础（1-2 天）
+### Phase 1：基础 + 解耦骨架（2-3 天）
 
-- [ ] 新增 `observability/` 模块骨架
+- [ ] 新增 `observability/` 模块骨架（含 `event_bus.py`, `events.py`, `outcome.py`, `label_guards.py`）
 - [ ] 实现 `request_context.py`（ContextVar 传播）
 - [ ] 实现 `json_formatter.py`
 - [ ] 修改 `utils/logger.py` 支持 `LOG_FORMAT=json` 切换
 - [ ] Request ID 统一（中间件 → `request.state` → 路由层）
 - [ ] 中间件设置 ContextVar
+- [ ] `observability/__init__.py` 实现 `setup()` / `teardown()` / `disable()`
+- [ ] Worker 初始化中调用 `setup_observability()`
+- [ ] 添加 ContextVar 传播边界测试（含流式路径和 to_thread 场景）
 
-> **价值**：日志可被聚合系统解析，request_id 全链路可追溯。
+> **价值**：日志可被聚合系统解析，request_id 全链路可追溯。全部观测可一键禁用。
 
 ### Phase 2：Metrics（2-3 天）
 
-- [ ] 实现 `metrics_collector.py`（核心指标定义）
-- [ ] 中间件层埋点（REQUEST_TOTAL / REQUEST_DURATION / ACTIVE_REQUESTS）
-- [ ] InferClient 埋点（INFER_DURATION / INFER_ERRORS）
-- [ ] Pipeline 阶段埋点（PHASE_DURATION / TOKENS_TOTAL / TTFT_SECONDS）
+- [ ] 实现 `metrics_collector.py`（11 核心指标 + ProcessCollector）
+- [ ] 实现 `decorators.py`（`@observe_inference`、`@observe_model_lifecycle`）
+- [ ] `processor.py` 增加 EventBus emit（finally 块 +6 行）
+- [ ] `infer_client.py` 添加装饰器（4 处）+ `_last_retry_count` 属性
+- [ ] `processor_manager.py` 添加装饰器（2 处）
 - [ ] 注册 `/metrics` 端点
 - [ ] `requirements.txt` 添加 `prometheus-client`
 
-> **价值**：可量化 QPS、延迟分布、错误率；可接入 Grafana 做可视化告警。
+> **价值**：可量化 QPS、延迟分布、错误率（含 7 种结果归因）、推理重试、作业级成本。
 
 ### Phase 3：增强（1-2 天）
 
-- [ ] 实现 `request_summary.py`
-- [ ] Pipeline 处理完成时输出摘要日志
-- [ ] 实现 `health_checker.py`
+- [ ] 实现 `request_summary.py`（EventBus 订阅者）
+- [ ] 实现 `health_checker.py`（按 base_url 去重 + 可配置检查路径）
 - [ ] 增强 `/health` 端点
+- [ ] （可选）启用 `MODEL_LIFECYCLE` / `STREAM_CHUNKS` 可选指标
+- [ ] 添加基数稳定性测试
+- [ ] 实现 `PROCESSOR_CACHE_OPS`（Processor 缓存 hit/miss/evicted 指标）
+- [ ] 实现 `STREAM_CLIENT_DISCONNECT`（StreamingResponse 断连检测，通过 `aclose()` 捕获）
+- [ ] `label_guards.refresh_known_models()` 与 model 注册/注销联动
 
-> **价值**：单请求快速可观测；依赖健康状态可监控。
+### Phase 4：可视化与告警（2-3 天，独立于应用层代码）
+
+- [ ] 部署 Prometheus + Grafana + targets.json
+- [ ] 导入 Level 1 Dashboard（9 核心面板，详见 §13）
+- [ ] 配置关键告警规则（见 §12.6）
+- [ ] （Level 2）部署 Loki + Vector，扩展 Dashboard 到完整版
+- [ ] （Level 2）配置 AlertManager + 钉钉/邮件推送
 
 ---
 
-## 七、配置项
+## 八、配置项
 
 ```yaml
 # configs/config.yaml 新增
 observability:
-  log_format: text                    # text | json，环境变量 LOG_FORMAT 可覆盖
-  metrics_enabled: true               # 是否启用 Prometheus metrics
-  health_deep_check: false            # 健康检查默认是否做深度检查
+  enabled: true                      # 是否启用可观测性系统（环境变量 OBSERVABILITY_ENABLED 可覆盖）
+  log_format: text                   # text | json，环境变量 LOG_FORMAT 可覆盖
+  metrics_enabled: true              # 是否启用 Prometheus metrics
+  health_deep_check: false           # 健康检查默认是否做深度检查
 ```
+
+**环境变量**（优先级高于配置文件）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `OBSERVABILITY_ENABLED` | `true` | 全局开关，`false` 时 setup() 直接跳过 |
+| `LOG_FORMAT` | `text` | `json` 启用结构化日志 |
 
 ---
 
-## 八、数据存储与内存分析
+## 九、数据存储与内存分析
 
-### 8.1 各模块数据持有情况
+### 9.1 各模块数据持有情况
 
-| 模块 | 进程内持久持有 | 持有内容 | 生命周期 | 内存风险 |
-|------|-------------|---------|---------|---------|
-| `request_context` | 否 | 当前请求的 `request_id` | 请求级，async context 结束自动回收 | 无 |
-| `json_formatter` | 否 | 无状态 | — | 无 |
-| `request_summary` | 否 | 无状态，调用 `logger.info()` 后丢弃 | — | 无 |
-| `health_checker` | 否 | 无状态，每次即时查询 | — | 无 |
-| **`metrics_collector`** | **是** | 时间序列注册表（prometheus-client 进程内 registry） | **进程生命周期，重启清零** | **需见下文** |
+| 模块 | 进程内持久持有 | 持有内容 | 内存风险 |
+|------|-------------|---------|---------|
+| `event_bus` | 是 | 订阅者函数引用列表（3-5 个回调） | 极小，< 1KB |
+| `outcome.py` | 否 | 无状态纯函数 | 无 |
+| `decorators.py` | 否 | 无状态函数包裹 | 无 |
+| `label_guards.py` | 是 | `_KNOWN_RUN_IDS: set` + 已知 model set 引用 | < 10KB |
+| `request_context` | 否 | 当前请求的 `request_id` | 请求级，async context 结束回收 |
+| `json_formatter` | 否 | 无状态 | 无 |
+| `request_summary` | 否 | 无状态，调用 logger 后丢弃 | 无 |
+| `health_checker` | 否 | 无状态，每次即时查询 | 无 |
+| **`metrics_collector`** | **是** | 时间序列注册表 | **见下文** |
 
-**核心结论**：除 Prometheus 指标注册表外，方案不引入任何进程内数据持有，不存在内存累积。
+### 9.2 Prometheus 指标内存模型
 
-### 8.2 Prometheus 指标内存模型
-
-`prometheus-client` 的内存模型：**每出现一个唯一的 label 值组合，就创建一个序列对象，进程生命周期内不释放。**
-
-各对象内存开销：
-
-| 指标类型 | 单序列内存 | 组成 |
-|---------|-----------|------|
-| `Counter` | ~几百字节 | 一个 `float` 值 |
-| `Gauge` | ~几百字节 | 一个 `float` 值 |
-| `Histogram`（N buckets） | ~几百字节 × N | N 个 bucket counter + sum + count |
-
-**本方案序列数量估算**（假设 50 个注册模型）：
+按典型规模（50 个注册模型 × 10 个 run_id）：
 
 | 指标 | label 组合 | 序列数 |
 |------|-----------|-------|
-| `REQUEST_TOTAL(method × model × status × stream)` | 3 × 50 × 5 × 2 | ~1500 |
-| `REQUEST_DURATION(model × stream)` | 50 × 2，每序列 11 buckets | ~100 |
-| `PHASE_DURATION(model × phase)` | 50 × 5，每序列 10 buckets | ~250 |
-| `TOKENS_TOTAL(model × type)` | 50 × 3 | ~150 |
-| `TTFT_SECONDS(model)` | 50，每序列 8 buckets | ~50 |
-| `INFER_DURATION(model)` | 50，每序列 9 buckets | ~50 |
+| `REQUEST_TOTAL(method × model × stream × outcome × run_id)` | 1 × 50 × 2 × 7 × 10 | ~7000 |
+| `REQUEST_DURATION(model × stream × run_id)` | 50 × 2 × 10 | ~1000 |
+| `STREAM_COMPLETION(model × run_id × result)` | 50 × 10 × 3 | ~1500 |
+| `TTFT_SECONDS(model × run_id)` | 50 × 10 | ~500 |
+| `PHASE_DURATION(model × phase)` | 50 × 6 | ~300 |
+| `TOKENS_TOTAL(model × run_id × type)` | 50 × 10 × 3 | ~1500 |
+| `SEMAPHORE_WAIT_DURATION(model)` | 50 | ~50 |
+| `SEMAPHORE_REJECTED(model)` | 50 | ~50 |
+| `MAX_CONCURRENT(model)` | 50 | ~50 |
+| `INFER_DURATION(model)` | 50 | ~50 |
 | `INFER_ERRORS(model × error_type)` | 50 × 3 | ~150 |
-| `MODELS_REGISTERED`, `DB_POOL_USAGE`, `ACTIVE_REQUESTS` | 固定 | ~10 |
-| **合计** | | **~2260 序列，< 2MB** |
+| `INFER_RETRIES(model × outcome)` | 50 × 2 | ~100 |
+| `TRAJECTORY_STORE_ERRORS(model × error_type)` | 50 × 2 | ~100 |
+| `DB_POOL_USAGE` / `ACTIVE_REQUESTS` / `CONCURRENCY_UTILIZATION` | 固定 | ~8 |
+| **合计** | | **~13858 序列，约 5-10MB / Worker** |
 
-进程重启后全部清零，无持久化负担。
+> **内存影响**：每 Worker 增量 < 15MB，进程重启清零。
 
-### 8.3 基数爆炸防护（必须遵守）
-
-**禁止行为**：
-
-```python
-# ❌ 禁止：用 request_id 做 label — 每请求一个序列，无限增长
-Counter("trajproxy_requests_total", ["request_id", "model"])
-
-# ❌ 禁止：用 session_id / run_id 做 label — 高基数且不可预测
-Histogram("...", ["model", "session_id"])
-
-# ❌ 禁止：用原始异常消息做 label — 基数不可控
-Counter("...", ["model", "error_message"])  # ← 每条异常消息不同
-```
-
-**正确做法**：将高基数数据放入**日志**，只将有限枚举值放入 label：
+### 9.3 基数爆炸防护
 
 ```python
-# ✅ 正确：label 仅限已知枚举值
-INFER_ERRORS = Counter("...", ["model", "error_type"])  # error_type: timeout | connection | http_error
-# 详细异常消息通过 logger.error() 输出
+# observability/label_guards.py
+"""基数防护 — 防止高 cardinality 导致 Prometheus 内存爆炸"""
 
-# ✅ 正确：未知 model 名统一归入 "unknown"，防止恶意 model 名制造序列
-def safe_model_label(model: str, known_models: set[str]) -> str:
-    return model if model in known_models else "unknown"
+_KNOWN_RUN_IDS: set = set()
+_MAX_RUN_ID_CARDINALITY = 100
+
+# ── known model 缓存：避免每次请求重新获取 ──
+_KNOWN_MODELS: set = set()
+_models_cache_initialized: bool = False
+
+
+def refresh_known_models(models: set) -> None:
+    """由 model 注册/注销事件触发，增量更新缓存"""
+    global _KNOWN_MODELS
+    _KNOWN_MODELS = set(models)
+
+
+def safe_model_label(model: str) -> str:
+    """未注册模型归为 'unknown'，防止恶意 model 名制造序列
+    使用缓存的 _KNOWN_MODELS，避免每次请求调用 ProcessorManager"""
+    return model if model in _KNOWN_MODELS else "unknown"
+
+
+def register_known_run_id(run_id: str) -> None:
+    _KNOWN_RUN_IDS.add(run_id)
+
+
+def unregister_known_run_id(run_id: str) -> None:
+    _KNOWN_RUN_IDS.discard(run_id)
+
+
+def safe_run_id_label(run_id: str) -> str:
+    """run_id = 作业/租户级标识，基数封顶 100"""
+    if not run_id:
+        return ""
+    if len(_KNOWN_RUN_IDS) >= _MAX_RUN_ID_CARDINALITY and run_id not in _KNOWN_RUN_IDS:
+        return "other"
+    return run_id
 ```
+
+> **缓存同步机制**：`refresh_known_models()` 由 `EVENT_MODEL_LIFECYCLE` 订阅者在
+> `register`/`unregister` 事件触发时调用，确保每次模型变更后立即更新缓存。
+> 不再依赖每次请求时 `ProcessorManager.get_known_model_set()` 的实时查询。
 
 **基数上限约束**：
 
-| label | 允许值范围 | 基数上限 |
-|-------|-----------|---------|
-| `model` | ProcessorManager 中已注册的 model_name；未注册值归为 `"unknown"` | ≤ 注册数 + 1 |
+| label | 允许值 | 上限 |
+|-------|--------|------|
+| `model` | ProcessorManager 已注册 model_name | ≤ 注册数 + 1 |
 | `method` | `POST`, `GET`, `DELETE`, `OTHER` | ≤ 4 |
-| `status` | `200`, `400`, `404`, `500`, `502` 等整数分组 | ≤ 10 |
 | `stream` | `true`, `false` | 2 |
-| `phase` | `transform`, `encode`, `inference`, `decode`, `store` | 5 |
+| `outcome` | 7 种归因（固定枚举） | 7 |
+| `run_id` | 已注册 run_id，超出归 `"other"` | ≤ 100 |
+| `phase` | 7 个处理阶段 | 7 |
 | `type` (token) | `prompt`, `completion`, `cached` | 3 |
+| `result` (stream) | `full`, `partial`, `empty` | 3 |
 | `error_type` | `timeout`, `connection`, `http_error` | 3 |
-| `state` (db pool) | `used`, `available`, `peak` | 3 |
+| `outcome` (retry) | `success`, `failed` | 2 |
 
-**`model` label 防护实现**（`metrics_collector.py` 中提供）：
+**🚫 禁止行为**：`request_id`、`session_id`、原始 `error_message` 作为 label。
 
-```python
-def safe_model_label(model: str) -> str:
-    """将 model 名归一化：未注册模型统一为 'unknown'，防止未知 model 名制造时间序列"""
-    from traj_proxy.proxy_core.processor_manager import ProcessorManager
-    # 通过全局或 app.state 获取 ProcessorManager 的 known_models 集合
-    known = ProcessorManager.get_known_model_set()  # 类方法，O(1) 查询
-    return model if model in known else "unknown"
-```
+### 9.4 内存泄露验证
 
-### 8.4 内存泄露验证
-
-实施时必须通过以下测试确认无内存泄露：
-
-1. **基数稳定性测试**：运行 1 小时压测后，检查 `GET /metrics` 输出的序列数量不再增长（稳定在预期值附近）
-2. **未知 model 攻击测试**：用 `curl` 发送 1000 个不同随机 model 名的请求，确认 `model=unknown` 的序列只有一个
-3. **进程重启后清零**：压测中重启进程，确认序列数从 0 重新开始
-4. **基线内存监控**：对比有无 metrics 模块的 Worker 基准内存占用，增量应在 < 5MB / Worker 以内
-
-### 8.5 数据存储总结
-
-```
-本方案不引入任何自建持久化存储：
-  - Prometheus 数据 → prometheus-client 进程内 registry（重启清零，< 2MB）
-  - 日志数据        → 写入文件/标准输出（已有 RotatingFileHandler 管理）
-  - 请求详情        → 已有 RequestRepository → PostgreSQL（无新增）
-  - 健康状态        → 即时查询，不持久化
-```
+1. **基数稳定性测试**：压测 1h，`GET /metrics` 序列数稳定在预期值
+2. **未知 model 攻击测试**：1000 个随机 model 名，确认 `model=unknown` 只有一个序列
+3. **进程重启清零**：压测中重启进程，序列从 0 开始
+4. **基线对比**：对比有无 metrics 的 Worker 内存增量 < 5MB
 
 ---
 
-## 九、不做的事（有意识排除）
+## 十、不做的事（有意识排除）
 
-| 方案 | 不采用的原因 |
-|------|-------------|
-| **OpenTelemetry 分布式追踪** | 当前架构为单服务代理+推理服务，链路短，Prometheus + 摘要日志足够；引入 OTel 增加运维复杂度但不解决核心问题 |
-| **ELK/Loki 集成代码** | 日志格式改为 JSON 即可被任意聚合系统消费，不在应用层做集成 |
-| **实时告警** | 告警逻辑由 Prometheus AlertManager / Grafana 端处理，应用层只负责指标暴露 |
-| **跨 Worker 指标聚合** | 各 Worker 独立暴露 `/metrics`，由 Prometheus 服务端聚合；不引入 Pushgateway |
-| **自定义 Dashboard** | 提供指标和 Grafana dashboard JSON 模板即可，不在应用层嵌入 UI |
-| **请求体/响应体日志** | 安全规则禁止，且大体积内容会冲刷有用信息 |
+| 方案 | 原因 |
+|------|------|
+| **OpenTelemetry** | 单服务代理链路短，Prometheus + 摘要日志足够 |
+| **ELK/Loki 集成代码** | JSON 日志即可被任意聚合系统消费，不在应用层集成 |
+| **实时告警** | 由 AlertManager / Grafana 端处理 |
+| **跨 Worker 指标聚合** | 各 Worker 独立暴露，Prometheus 服务端聚合 |
+| **自定义 Dashboard** | 提供模板即可，不在应用层嵌入 UI |
+| **请求体/响应体日志** | 安全规则禁止，大体积冲刷有用信息 |
+| **引入 blinker / 第三方事件库** | EventBus < 50 行自行实现，不值得引入新依赖 |
 
 ---
 
-## 十、验证方式
+## 十一、验证方式
 
 | 验证项 | 方法 |
 |--------|------|
-| Request ID 统一 | 同一请求在中间件日志、路由日志、摘要日志中 request_id 一致 |
-| JSON 日志格式 | `LOG_FORMAT=json` 启动后，日志输出为合法 JSON |
-| Prometheus 指标 | `curl http://localhost:12300/metrics` 返回所有定义的指标 |
-| 请求摘要日志 | 发送一个请求后，grep `request_summary` 可见完整摘要 |
-| 健康检查 | `curl /health` 返回 200；`curl /health?deep=1` 返回 DB/推理服务状态 |
-| 异常场景 | 模拟推理服务不可达 → 指标 `trajproxy_infer_errors_total` 递增，摘要日志 status=error |
+| Request ID 统一 | 同一请求在中间件、路由、摘要日志中 request_id 一致 |
+| ContextVar 传播 | 流式处理路径日志携带 request_id；to_thread 场景有显式传递 |
+| JSON 日志 | `LOG_FORMAT=json` 后日志为合法 JSON |
+| Prometheus 指标 | `curl /metrics` 返回所有定义指标 |
+| 请求摘要 | 发请求后 grep `request_summary` 可见完整摘要（含 worker_id, client_ip） |
+| outcome 判定 | 模拟 InferTimeoutError → outcome=timeout；流式中途断连 → stream_partial |
+| 健康检查 | `/health` 返回 200；`/health?deep=1` 返回所有推理服务状态 |
+| EventBus 禁用 | `observability.disable()` 后 `/metrics` 返回空，业务不受影响 |
+| 基数防护 | 1000 个随机 model 名 → `model=unknown` 只有一个序列 |
+| 异常场景 | 推理不可达 → `infer_errors_total` 递增，`infer_retries_total` 递增 |
 
 ---
 
-## 十一、完整部署方案
+## 十二、完整指标清单
 
-### 11.1 组件全景
+### 12.1 A 类：请求核心指标（4 个）
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           可观测性部署全景                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────┐       │
-│  │                    业务请求流（已有）                         │       │
-│  │                                                             │       │
-│  │  Client ──► TrajProxy Workers ──► Infer Services            │       │
-│  │                          │                                  │       │
-│  │                          ├──── /v1/chat/completions          │       │
-│  │                          ├──── /health[?deep=1]              │       │
-│  │                          └──── /metrics                      │       │
-│  └──────────────────────────────────────────────────────────────┘      │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────┐      │
-│  │                   指标流（Prometheus 拉取）                   │       │
-│  │                                                             │       │
-│  │  Worker-0 :12300 ─┐                                         │       │
-│  │  Worker-1 :12301 ─┤                                         │       │
-│  │  Worker-2 :12302 ─┼──► file_sd targets.json ──► Prometheus  │       │
-│  │  ...              │         ▲                    │           │       │
-│  │  Worker-N :1230X ─┘         │                    ▼           │       │
-│  │                      部署脚本生成          Grafana (可视化)    │       │
-│  │                                       AlertManager (告警)   │       │
-│  └──────────────────────────────────────────────────────────────┘      │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────┐      │
-│  │                 日志流（文件/标准输出）                       │       │
-│  │                                                             │       │
-│  │  Worker stdout ─┐                                           │       │
-│  │  Worker stdout ─┼─► 本地日志文件 (RotatingFileHandler)       │       │
-│  │  Worker stdout ─┘       │                                   │       │
-│  │                         └──► 可选: 日志采集 (Fluentd/        │       │
-│  │                              Vector/Filebeat)               │       │
-│  │                                    │                        │       │
-│  │                                    ▼                        │       │
-│  │                              Loki / ELK                     │       │
-│  │                              (查询 & 告警)                  │       │
-│  └──────────────────────────────────────────────────────────────┘      │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────┐      │
-│  │                    依赖流（业务直连）                          │       │
-│  │                                                             │       │
-│  │  TrajProxy Workers ──── PostgreSQL (已有)                   │       │
-│  │  TrajProxy Workers ──── Infer Services (已有)               │       │
-│  └──────────────────────────────────────────────────────────────┘      │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+| 指标名 | 类型 | Label | 用途 |
+|--------|------|-------|------|
+| `trajproxy_requests_total` | Counter | `method, model, stream, outcome, run_id` | 请求计数 |
+| `trajproxy_request_duration_seconds` | Histogram | `model, stream, run_id` | 端到端延迟 |
+| `trajproxy_active_requests` | Gauge | — | 当前活跃请求 |
+| `trajproxy_concurrency_utilization` | Gauge | — | 并发使用率 |
 
-### 11.2 组件清单
+### 12.2 B 类：流式请求指标（2 个核心 + 1 个可选）
 
-| 组件 | 类型 | 职责 | 是否新增 |
-|------|------|------|---------|
-| **TrajProxy Workers** | 应用 | 处理业务请求；暴露 `/metrics`、`/health`、`/health?deep=1`；输出结构化日志 | 已有（需改造） |
-| **WorkerManager** | 应用 | 管理 Workers 生命周期 | 已有 |
-| **Prometheus** | 基础设施 | 拉取 Workers 的 `/metrics`；聚合多节点、多 Worker 指标；存储时间序列 | **需新增** |
-| **Grafana** | 基础设施 | 查询 Prometheus，展示 Dashboard；告警规则可视化 | **需新增**（可选，但强烈推荐） |
-| **AlertManager** | 基础设施 | 接收 Prometheus 告警规则触发，推送到钉钉/邮件/PagerDuty | **需新增**（可选） |
-| **日志采集器**（Vector/Fluentd/Filebeat） | 基础设施 | 采集 Worker 日志文件/stdout，转发至日志聚合系统 | **需新增**（可选） |
-| **Loki 或 ELK** | 基础设施 | 日志存储、查询、告警（Loki 更轻量，与 Grafana 生态整合好） | **需新增**（可选，但有 Loki 后查询效率大幅提升） |
-| **Prometheus targets.json** | 配置文件 | 声明所有 Worker 的 `<host>:<port>` 列表，由部署脚本生成 | **需新增** |
-| **PostgreSQL** | 基础设施 | 业务数据存储（请求轨迹、模型注册） | 已有 |
-| **Infer Services** | 外部依赖 | LLM 推理服务 | 已有 |
+| 指标名 | 类型 | Label | 阶段 |
+|--------|------|-------|------|
+| `trajproxy_ttft_seconds` | Histogram | `model, run_id` | Phase 2 |
+| `trajproxy_stream_completion_total` | Counter | `model, run_id, result` | Phase 2 |
+| `trajproxy_stream_chunks_per_request` | Histogram | `model, run_id` | Phase 3+（可选） |
 
-### 11.3 三条核心数据流
+### 12.3 C 类：阶段级指标（1 个）
 
-#### A. 指标流（Metrics）
+| 指标名 | 类型 | Label | 用途 |
+|--------|------|-------|------|
+| `trajproxy_phase_duration_seconds` | Histogram | `model, phase` | Pipeline 内部阶段 |
 
-```
-[Worker 进程内]                 [Prometheus]              [消费者]
-     │                             │                        │
-     │  prometheus-client 维护      │  每 15s scrape         │
-     │  时间序列注册表              │                         │
-     │                            │                         │
-     ├─ /metrics (pull) ◄─────────┤                        │
-     │                            │                         │
-     │                            ├─────► 时序存储 (tsdb)   │
-     │                            │         (本地磁盘 /     │
-     │                            │          TSDB block)   │
-     │                            │                         │
-     │                            ├─────► Grafana (查询)    │
-     │                            │                │        │
-     │                            ├─────► AlertManager──────┤
-     │                            │         (告警触发)  ┌───┴───┐
-     │                            │                    │ 钉钉  │
-     │                            │                    │ 邮件  │
-     │                            │                    │ PagerDuty │
-     │                            │                    └────────┘
-```
+`phase`: `transform` / `encode` / `cache_db_query` / `cache_prefix_match` / `inference` / `decode`
 
-**关键决策点**：
-- **Pull 模型**：Prometheus 主动拉取（不是 Workers 推送），Workers 完全无感知，无阻塞
-- **存储位置**：Prometheus 的 TSDB（本地磁盘默认；如需长期存储可对接 Thanos/Cortex，**当前不需要**）
-- **数据保留**：默认 15 天，可配置延长；历史更久数据通过 Grafana 接入其他数据源（如 Loki），但不在 Prometheus 内堆积
+> **注**：`store` phase 暂不纳入指标（ProcessContext 无 `store_duration_ms` 字段），如需可后续扩展。
 
-#### B. 日志流（Logs）
+### 12.4 D 类：Token 消耗指标（1 个）
 
-```
-[Worker 进程]            [日志文件/stdout]         [采集器]       [聚合系统]
-     │                         │                     │                  │
-     │  结构化 JSON            │                     │                  │
-     ├─► stdout ──────────────► docker logs ────────►│                  │
-     │  (容器化时)              │                     │                  │
-     │                          │                     │                  │
-     ├─► traj_proxy.log ────────► 日志文件           │                  │
-     │  (RotatingFileHandler)    │                     │                  │
-     │                          │                     │                  │
-     │                          └──── file_sd ────────┤                  │
-     │                          (或 docker log driver) ▼                  │
-     │                                           Vector/Fluentd          │
-     │                                                 │                  │
-     │                                                 ▼                  │
-     │                                            Loki / ELK            │
-     │                                            (查询 + 告警)          │
-     │                                                 │                  │
-     │                                                 └──► Grafana       │
-```
+| 指标名 | 类型 | Label | 用途 |
+|--------|------|-------|------|
+| `trajproxy_tokens_total` | Counter | `model, run_id, type` | Token 消耗累计 |
 
-**两种部署形态**：
+### 12.5 E 类：下游依赖指标（3+1 个）
 
-| 部署方式 | 日志流 | 推荐度 |
-|---------|-------|--------|
-| **Docker Compose** | Worker stdout → Docker daemon → 通过 log driver 写入宿主机文件 → Vector tail → Loki | ⭐⭐⭐ |
-| **裸机部署** | Worker 直接写 `logs/traj_proxy.log`（JSON 格式）→ Vector tail → Loki | ⭐⭐⭐⭐（最直接） |
-| **K8s（未来）** | Worker stdout → K8s 日志采集 DaemonSet → Loki/ELK | 未来再考虑 |
+| 指标名 | 类型 | Label | 用途 |
+|--------|------|-------|------|
+| `trajproxy_infer_duration_seconds` | Histogram | `model` | 推理延迟 |
+| `trajproxy_infer_errors_total` | Counter | `model, error_type` | 推理错误 |
+| `trajproxy_infer_retries_total` | Counter | `model, outcome` | **推理重试（新增）** |
+| `trajproxy_db_pool_usage` | Gauge | `state` | DB 连接池 |
 
-**当前场景（裸机/Docker 静态部署）**：推荐裸机直接写文件 + Vector 采集，最少组件、最稳定。
+### 12.6 F 类：模型生命周期（可选）
 
-#### C. 业务请求流（已有，不变化）
+| 指标名 | 类型 | Label | 阶段 |
+|--------|------|-------|------|
+| `trajproxy_model_lifecycle_total` | Counter | `action, type` | Phase 3+ |
 
-```
-Client ──► TrajProxy Workers ──► Infer Services
-                  │
-                  ├─► PostgreSQL (轨迹存储、模型注册)
-                  └─► /health, /metrics (观测端点，仅读取，不写入业务数据)
-```
+### 12.7 G 类：进程级指标（ProcessCollector 自动暴露）
 
-### 11.4 多节点部署拓扑
+| 指标名 | 类型 | 来源 |
+|--------|------|------|
+| `process_cpu_seconds_total` | Counter | prometheus-client 内置 |
+| `process_resident_memory_bytes` | Gauge | prometheus-client 内置 |
+| `process_open_fds` | Gauge | prometheus-client 内置 |
+| `process_start_time_seconds` | Gauge | prometheus-client 内置 |
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          监控节点（1 台）                             │
-│                                                                     │
-│  ┌──────────┐   ┌──────────┐   ┌──────────────┐   ┌──────────┐     │
-│  │Prometheus│──►│  Loki    │──►│   Grafana    │──►│  Alert   │     │
-│  │ (tsdb)   │   │ (日志)   │   │ (Dashboard)  │   │ Manager  │     │
-│  └──────────┘   └──────────┘   └──────────────┘   └──────────┘     │
-│       ▲              ▲                                │             │
-│       │              │                                │             │
-└───────┼──────────────┼────────────────────────────────┼─────────────┘
-        │              │                                │
-        │              │                                ▼
-        │              │                          钉钉/邮件
-        │              │
-┌───────┼──────────────┼──────────────────────────────────────────────┐
-│       │           生产节点 1 (Worker Node A)                          │
-│       │                                                             │
-│  ┌────┴──────────────────────────┐   ┌──────────────┐               │
-│  │  WorkerManager                 │   │   Vector     │               │
-│  │  ├── Worker-0 :12300 /metrics  │   │  (日志采集)  │               │
-│  │  ├── Worker-1 :12301 /metrics  │   └──────┬───────┘               │
-│  │  ├── ...                       │          │                       │
-│  │  └── Worker-N :1230N /metrics  │          │ tail                  │
-│  │                                │          │ logs/traj_proxy.log   │
-│  │  stdout/stderr (容器化时)      │          │                       │
-│  └────────────────────────────────┘          │                       │
-└──────────────────────────────────────────────┼───────────────────────┘
-                                               │
-┌──────────────────────────────────────────────┼───────────────────────┐
-│                                           生产节点 2 (Worker Node B)  │
-│                                               │                       │
-│  ┌────────────────────────────────┐  ┌────────┴───────┐              │
-│  │  WorkerManager                  │  │   Vector        │              │
-│  │  ├── Worker-0 :12300 /metrics   │  └─────────────────┘              │
-│  │  ├── Worker-1 :12301 /metrics   │                                   │
-│  │  └── ...                        │                                   │
-│  └─────────────────────────────────┘                                   │
-└──────────────────────────────────────────────────────────────────────┘
-```
+### 12.8 指标总数汇总
 
-**Prometheus `targets.json` 示例**：
+| 类别 | Counter | Histogram | Gauge | 小计 | 阶段 |
+|------|---------|-----------|-------|------|------|
+| A. 请求核心 | 1 | 1 | 2 | 4 | Phase 2 |
+| B. 流式 | 1 | 1 | 0 | 2 | Phase 2 |
+| C. 阶段 | 0 | 1 | 0 | 1 | Phase 2 |
+| D. Token | 1 | 0 | 0 | 1 | Phase 2 |
+| E. 下游依赖 | 2 | 1 | 1 | 4 | Phase 2 |
+| F. 生命周期 | 1 | 0 | 0 | 1 | Phase 3+ |
+| G. 进程级 | 1 | 0 | 3 | 4 | Phase 2 |
+| **核心合计** | **6** | **4** | **3** | **13** | |
+| **含可选** | **7** | **5** | **3** | **15** | |
 
-```json
-[
-  {
-    "targets": [
-      "node-a:12300", "node-a:12301", "node-a:12302", "node-a:12303",
-      "node-a:12304", "node-a:12305", "node-a:12306", "node-a:12307",
-      "node-a:12308", "node-a:12309", "node-a:12310"
-    ],
-    "labels": { "job": "trajproxy", "node": "node-a" }
-  },
-  {
-    "targets": [
-      "node-b:12300", "node-b:12301", "node-b:12302"
-    ],
-    "labels": { "job": "trajproxy", "node": "node-b" }
-  }
-]
-```
+### 12.9 Outcome 枚举值定义
 
-通过 `node` label 可以在 Grafana 按节点维度聚合查询（对比节点间负载分布）。
+| outcome | 含义 | 典型场景 |
+|---------|------|---------|
+| `success` | 正常完成 | 非流式 200、流式完整返回 |
+| `stream_partial` | 流式中途崩溃 | 首 Token 后推理断连 |
+| `error_client` | 客户端错误 | 参数非法（HTTP 4xx） |
+| `error_server` | TrajProxy 内部错误 | 代码异常（HTTP 5xx） |
+| `error_infer` | 推理服务错误 | 502/连接失败 |
+| `error_rate_limit` | 并发限流 | HTTP 429 |
+| `timeout` | 推理超时 | InferTimeoutError (504) |
 
-### 11.5 部署步骤（一次性）
-
-**1. TrajProxy 应用层（每个生产节点）**
-
-| 步骤 | 操作 |
-|------|------|
-| a | 新增依赖：`pip install prometheus-client python-json-logger` |
-| b | 部署代码（已包含可观测性改造） |
-| c | 设置环境变量：`LOG_FORMAT=json`，`METRICS_ENABLED=true` |
-| d | 生成 `prometheus/targets.json`（遍历节点 × Worker 端口，按部署约定） |
-| e | 重启 Workers |
-
-**2. 监控节点（一次性搭建）**
-
-| 步骤 | 操作 | 资源占用（预估） |
-|------|------|--------------|
-| a | 安装 Prometheus，配置 `scrape_configs` + `file_sd_configs` | CPU < 1, RAM 2-4GB, Disk 50-200GB |
-| b | 安装 Grafana，对接 Prometheus 数据源 | CPU < 0.5, RAM 500MB |
-| c | （可选）安装 Loki，对接 Grafana | CPU < 1, RAM 1-2GB, Disk 50-500GB |
-| d | （可选）安装 AlertManager，对接钉钉/邮件 | CPU < 0.2, RAM 200MB |
-| e | 导入预置 Dashboard（Grafana JSON 模板） | — |
-| f | 配置关键告警规则（见下方告警示例） | — |
-
-**3. 每个生产节点**
-
-| 步骤 | 操作 |
-|------|------|
-| a | 安装 Vector（或 Fluentd），配置 tail TrajProxy 日志文件 |
-| b | 配置 Vector 输出到 Loki |
-
-### 11.6 告警示例（Prometheus 告警规则）
+### 12.10 告警规则
 
 ```yaml
 # prometheus/alert_rules.yml
 groups:
   - name: trajproxy
     rules:
-      # 1. 错误率过高
+      # 1. 错误率过高（使用 outcome label，非 status）
       - alert: HighErrorRate
         expr: >
-          sum by (node) (rate(trajproxy_requests_total{status=~"5.."}[5m]))
+          sum by (node) (rate(trajproxy_requests_total{outcome=~"error_.+|timeout|stream_partial"}[5m]))
           / sum by (node) (rate(trajproxy_requests_total[5m])) > 0.05
         for: 5m
         labels: { severity: warning }
@@ -1103,8 +1419,6 @@ groups:
           ) > 60
         for: 5m
         labels: { severity: warning }
-        annotations:
-          summary: "P95 延迟 > 60s"
 
       # 3. 推理服务故障
       - alert: InferErrors
@@ -1112,74 +1426,256 @@ groups:
           sum by (model, node) (rate(trajproxy_infer_errors_total[5m])) > 0.5
         for: 3m
         labels: { severity: critical }
-        annotations:
-          summary: "模型 {{ $labels.model }} 在 {{ $labels.node }} 推理服务持续报错"
 
-      # 4. DB 连接池饱和
+      # 4. 推理重试频繁（新增）
+      - alert: InferRetriesHigh
+        expr: >
+          sum by (model) (rate(trajproxy_infer_retries_total[5m])) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "模型 {{ $labels.model }} 重试频率过高"
+
+      # 5. DB 连接池饱和
       - alert: DBPoolSaturation
         expr: >
           trajproxy_db_pool_usage{state="used"}
           / trajproxy_db_pool_usage{state="peak"} > 0.85
         for: 5m
         labels: { severity: warning }
-        annotations:
-          summary: "DB 连接池使用率 > 85%"
 
-      # 5. Worker 健康检查失败
+      # 6. Worker 不可达
       - alert: WorkerDown
         expr: up{job="trajproxy"} == 0
         for: 1m
         labels: { severity: critical }
-        annotations:
-          summary: "Worker {{ $labels.instance }} 不可达"
+
+      # 7. Worker 内存过高（新增）
+      - alert: WorkerHighMemory
+        expr: process_resident_memory_bytes > 2147483648  # 2GB
+        for: 10m
+        labels: { severity: warning }
 ```
-
-### 11.7 资源总览
-
-| 类别 | 数量 | 资源 |
-|------|------|------|
-| TrajProxy 应用代码改造 | 5 个新文件 + 5 处修改 | 每个 Worker 增加 < 5MB 内存 |
-| 监控节点 | 1~2 台（Prometheus + Grafana + Loki 同机部署） | 4-8 CPU, 8-16GB RAM, 200-500GB Disk |
-| 生产节点采集器 | 每个生产节点 1 个 Vector | CPU < 0.3, RAM 50-100MB/节点 |
-| 新增 Python 依赖 | 2 个包（prometheus-client, python-json-logger） | 安装体积 < 5MB |
-
-### 11.8 部署形态分级
-
-根据团队和规模选择不同等级：
-
-```
-Level 1 — 最小可用（1 人团队，1-2 节点）
-  ✅ Grafana + Prometheus（同机部署）
-  ✅ Prometheus file_sd 自动 target 发现
-  ❌ Loki（暂不部署，日志仍走文件 grep）
-  ❌ AlertManager（暂不配置告警）
-
-Level 2 — 标准生产（推荐起步）
-  ✅ Level 1 全部内容
-  ✅ Loki + 日志采集器（Vector）
-  ✅ AlertManager + 关键告警规则
-
-Level 3 — 完整观测（5+ 节点规模）
-  ✅ Level 2 全部内容
-  ✅ Prometheus 长期存储（Thanos 或 Grafana Mimir）
-  ✅ 更多 Dashboard 定制
-  ✅ 告警分级、值班系统接入
-```
-
-**建议起步为 Level 1**，1-2 天内可搭建；根据实际使用反馈，逐步升级到 Level 2、3。
 
 ---
 
-## 十二、总结
+## 十三、Grafana Dashboard 设计
 
-本方案聚焦 **五个核心改进**，新增 **2 个依赖**，**5 个新文件**，**5 处修改**：
+### 13.1 部署形态分级
 
-| 模块 | 解决的核心问题 |
-|------|---------------|
-| Request ID 统一 | 跨层日志无法关联 |
-| 结构化 JSON 日志 | 日志无法被机器解析索引 |
-| Prometheus Metrics | 无法量化负载、延迟、错误率 |
-| 请求摘要日志 | 单请求生命周期散乱、难以快速定位 |
-| 增强健康检查 | 依赖故障无预警 |
+| Level | 适用规模 | Dashboard 面板数 | 基础设施 |
+|-------|---------|----------------|---------|
+| **Level 1** | 1-2 节点，1 人团队 | **9 个核心面板** | Prometheus + Grafana |
+| **Level 2** | 3-5 节点 | **完整版 ~30 面板** | + Loki + AlertManager |
+| **Level 3** | 5+ 节点 | 完整 + 自定义 | + Thanos/Mimir |
 
-**预计实施工作量**：4-7 天（分阶段可独立上线）
+### 13.2 Level 1 Dashboard（9 个核心面板）
+
+**Row 1：全局概览（6 个）**
+
+| 面板 | 类型 | PromQL |
+|------|------|--------|
+| 全局 QPS | Stat | `sum(rate(trajproxy_requests_total[5m]))` |
+| 平均延迟 | Stat | `sum(rate(..._sum[5m])) / sum(rate(..._count[5m]))` |
+| 成功率% | Gauge | `sum(rate(...{outcome="success"}[5m])) / sum(rate(...[5m])) * 100` |
+| 当前活跃 | Stat | `sum(trajproxy_active_requests)` |
+| 1h 总量 | Stat | `sum(increase(trajproxy_requests_total[1h]))` |
+| 并发利用率 | Gauge | `avg(trajproxy_concurrency_utilization) * 100` |
+
+**Row 2：核心错误（3 个）**
+
+| 面板 | 类型 | PromQL |
+|------|------|--------|
+| 错误率 by outcome | Stacked Time Series | `sum by (outcome) (rate(...{outcome=~"error_.+"}[5m]))` |
+| 推理错误 by model | Table | `sum by (model) (increase(trajproxy_infer_errors_total[1h]))` |
+| 推理重试 trend | Time Series | `sum(rate(trajproxy_infer_retries_total[5m]))` |
+
+### 13.3 Level 2+ 完整面板（追加约 20 个）
+
+完整面板按 "概览 → 负载 → 性能 → 错误 → 系统" 五行布局：
+
+- **Row 2 负载**：QPS by model/run_id/outcome/stream、Token by run_id
+- **Row 3 性能**：延迟 P50/P95/P99、TTFT、阶段耗时趋势、推理延迟
+- **Row 4 错误**（扩展）：错误率 run_id、流式完整率、429 限流、生命周期事件
+- **Row 5 系统**：DB 连接池、Worker up/down、QPS by 实例、Worker 内存 RSS
+
+### 13.4 面板布局示意
+
+```
+┌──────────────────── Grafana Dashboard (Level 1) ────────────────────┐
+│                                                                      │
+│  ┌── Row 1 概览 ──────────────────────────────────────────────┐     │
+│  │ [QPS] [延迟] [成功率%] [活跃] [1h总量] [并发利用率%]         │     │
+│  └────────────────────────────────────────────────────────────┘     │
+│                                                                      │
+│  ┌── Row 2 核心错误 ─────────────────────────────────────────┐     │
+│  │ [错误率 by outcome]  [推理错误 by model]  [重试趋势]        │     │
+│  └────────────────────────────────────────────────────────────┘     │
+│                                                                      │
+│  (Level 2+ 追加 Row 3-5: 负载/性能/系统)                            │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 十四、业务场景 → 面板/指标映射
+
+### 14.1 宏观健康度
+
+| 问题 | 面板 | PromQL |
+|------|------|--------|
+| 整体服务健不健康？ | Row 1 | 成功率 + QPS + 延迟 |
+| 最近处理了多少请求？ | Row 1 | `increase(...[1h])` |
+
+### 14.2 负载归因（Level 2+）
+
+| 问题 | 面板 | PromQL |
+|------|------|--------|
+| 哪个模型负载最高？ | Row 2 负载 | `sum by (model) (rate(...))` |
+| 哪个作业在消耗资源？ | Row 2 负载 | `sum by (run_id) (rate(...))` |
+| Token 消耗排行 | Row 2 负载 | `sum by (run_id) (increase(tokens_total[1h]))` |
+
+### 14.3 性能定位（Level 2+）
+
+| 问题 | 面板 | PromQL |
+|------|------|--------|
+| P95 延迟？ | Row 3 | `histogram_quantile(0.95, ...)` |
+| 哪个阶段是瓶颈？ | Row 3 | phase_duration by phase |
+| 推理服务延迟？ | Row 3 | infer_duration P95 |
+
+### 14.4 失败归因
+
+| 问题 | 面板/指标 | 说明 |
+|------|----------|------|
+| 多少请求真正成功？ | Row 1 成功率 | `outcome="success"` |
+| 失败归因 | Row 2 错误 | outcome stacked |
+| 是推理慢还是重试多？ | **推理重试 trend（新增）** | `infer_retries_total` vs `infer_duration_seconds` |
+| 哪个 run_id 最不稳定？ | Level 2+ | 错误率 by run_id |
+
+### 14.5 定位能力边界
+
+**本方案能定位**：
+- 推理服务挂了 / DB 连接池瓶颈
+- Pipeline 各阶段耗时异常 / 并发限流
+- 推理重试频繁 / 特定 run_id 的高错误率
+
+**本方案不能直接定位**（诚实说明）：
+
+| 场景 | 局限 | 缓解方式 |
+|------|------|---------|
+| 具体哪条 SQL 慢 | 只知道 `store` phase 长 | 可在 RequestRepository 加 SQL 级日志 |
+| 推理服务内部排队 | 只知道端到端延迟 | 推理服务侧需有自己的 metrics |
+| Tokenizer CPU 热点 | 知道 `encode` 慢，不知内部 | 需 py-spy/pyroscope |
+| 单请求调用链 | 无分布式追踪 | 通过 request_id grep 摘要日志 |
+
+---
+
+## 十五、部署方案
+
+### 15.1 组件全景
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      TrajProxy Workers                        │
+│  (暴露 /metrics, /health, /health?deep=1; 输出 JSON 日志)    │
+└────────────┬──────────────────────┬──────────────────────────┘
+             │                      │
+     /metrics (pull)           stdout / log 文件
+             │                      │
+             ▼                      ▼
+      ┌──────────┐           ┌──────────────┐
+      │Prometheus│           │ Vector/日志   │
+      │  (tsdb)  │           │ 采集器       │
+      └────┬─────┘           └──────┬───────┘
+           │                       │
+           ▼                       ▼
+     ┌──────────┐            ┌───────────┐
+     │ Grafana  │◄───────────│   Loki    │
+     └────┬─────┘            └───────────┘
+          │
+          ▼
+    ┌───────────┐
+    │  Alert    │──► 钉钉/邮件
+    │  Manager  │
+    └───────────┘
+```
+
+### 15.2 部署步骤
+
+**TrajProxy 应用层**：
+1. `pip install prometheus-client`
+2. 部署代码
+3. 设置 `LOG_FORMAT=json`
+4. 生成 `prometheus/targets.json`
+5. 重启 Workers
+
+**监控节点**（一次性）：
+
+| 组件 | 资源 |
+|------|------|
+| Prometheus | CPU < 1, RAM 2-4GB, Disk 50-200GB |
+| Grafana | CPU < 0.5, RAM 500MB |
+| Loki（可选）| CPU < 1, RAM 1-2GB |
+| AlertManager（可选）| CPU < 0.2, RAM 200MB |
+
+### 15.3 Prometheus 多节点配置
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: "trajproxy"
+    file_sd_configs:
+      - files: ["targets.json"]
+        refresh_interval: 30s
+```
+
+```json
+// prometheus/targets.json
+[
+  {"targets": ["node-a:12300", "node-a:12301", "..."], "labels": {"job": "trajproxy", "node": "a"}},
+  {"targets": ["node-b:12300", "node-b:12301", "..."], "labels": {"job": "trajproxy", "node": "b"}}
+]
+```
+
+---
+
+## 十六、总结
+
+### 核心改进
+
+| 模块 | 解决问题 | 解耦方式 |
+|------|---------|---------|
+| **EventBus + 解耦架构** | 观测逻辑与业务逻辑分离 | 订阅者模式，业务代码不感知 |
+| Request ID 统一 | 跨层日志无法关联 | 中间件 + ContextVar |
+| 结构化 JSON 日志 | 日志无法被机器解析 | 环境变量切换 |
+| Prometheus 指标（7 种 outcome + retry + 信号量 + 存储失败） | 无法量化 QPS/延迟/错误率 | 五层拦截 + 装饰器 |
+| 429 限流指标 | 并发饱和不可见 | routes 层独立 emit（P0 修复） |
+| ProcessContext 字段守卫 | 字段重命名导致指标静默消失 | 启动时必填字段校验 |
+| 请求摘要日志 | 单请求生命周期散乱 | EventBus 订阅者 |
+| 增强健康检查 | 依赖故障无预警 | base_url 去重 + 可配置检查路径 |
+
+### 关键数字
+
+| 维度 | V1（原方案） | V2（V1+P0/P1/P2 修复版） |
+|------|------------|------------------------|
+| Prometheus 核心指标 | 14 | **16 核心 + 3 可选**（新增 signal/rejected/store_error/disconnect） |
+| 业务文件修改量 | ~53 行 / 6 文件 | **~41 行 / 7 文件** |
+| Pipeline 层修改 | 需改动 base.py | **+4 行**（轨迹存储 emit，P1 修复） |
+| outcome 判定 | 中侵入（写入 context.outcome） | **零侵入**（纯函数推导 + routes 层独立记录 429） |
+| 可独立禁用 | 否 | **是**（`observability.disable()`，进程级） |
+| 新增依赖 | 2 个 | **1 个**（prometheus-client） |
+| 每 Worker 内存增量 | < 15MB | < 10MB（~14000 序列） |
+| 新增文件 | 5 | 11（均为 observability/ 目录，模块化） |
+| 预计实施工作量 | 5-8 天 | 7-10 天（含 P0/P1 修复） |
+| Grafana 面板（Level 1）| 30 个 | **9 个核心面板** |
+
+### 核心价值
+
+```
+五层拦截（Middleware + Routes + Processor + InferClient + Pipeline）
+  × EventBus × outcome 纯函数 × 字段守卫
+  = 业务代码极低侵入 + 观测可独立演进/禁用/测试
+  = 429 限流、轨迹存储失败、信号量等待均可观测
+  = 回答"有多少请求 / 谁在用 / 有多快 / 失败在哪 / 卡在哪 / 资源够不够"
+  = 定位错误边界：客户端层 vs TrajProxy 层 vs 推理服务层 vs DB 存储层
+```

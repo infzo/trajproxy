@@ -46,9 +46,22 @@ class RouteRegistrar:
         @self.app.get("/health", tags=["Health"])
         async def health():
             return {"status": "ok"}
+
+    def register_metrics_route(self):
+        """注册 Prometheus /metrics 端点"""
+        @self.app.get("/metrics", tags=["Observability"])
+        async def metrics():
+            from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+            from fastapi.responses import Response
+            return Response(
+                content=generate_latest(),
+                media_type=CONTENT_TYPE_LATEST,
+            )
+
     def register_all(self):
         """注册所有路由"""
         self.register_proxy_routes()
         self.register_transcript_routes()
         self.register_trajectory_routes()
         self.register_health_route()
+        self.register_metrics_route()

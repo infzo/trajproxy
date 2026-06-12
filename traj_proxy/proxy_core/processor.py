@@ -23,6 +23,9 @@ from traj_proxy.proxy_core.parsers import ParserManager
 from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
+from traj_proxy.observability.event_bus import emit
+from traj_proxy.observability.events import EVENT_REQUEST_STARTED, EVENT_REQUEST_COMPLETED
+from traj_proxy.utils.config import get_max_concurrent_requests
 
 logger = get_logger(__name__)
 
@@ -228,17 +231,23 @@ class Processor:
 
         self._warn_unsupported_params(context, request_params)
 
+        emit(EVENT_REQUEST_STARTED, model=self.model, is_stream=False,
+             max_concurrent=get_max_concurrent_requests())
+        exception = None
         try:
             # 使用 Pipeline 处理
             context = await self._pipeline.process(messages, context)
             return context
 
         except Exception as e:
+            exception = e
             logger.error(
                 f"[{context.unique_id}] 处理请求时发生异常: {str(e)}\n"
                 f"{traceback.format_exc()}"
             )
             raise
+        finally:
+            emit(EVENT_REQUEST_COMPLETED, context=context, exception=exception)
 
     # ==================== 流式处理接口 ====================
 
@@ -288,12 +297,16 @@ class Processor:
 
         self._warn_unsupported_params(context, request_params)
 
+        emit(EVENT_REQUEST_STARTED, model=self.model, is_stream=True,
+             max_concurrent=get_max_concurrent_requests())
+        exception = None
         try:
             # 使用 Pipeline 处理流式请求
             async for chunk in self._pipeline.process_stream(messages, context):
                 yield chunk
 
         except Exception as e:
+            exception = e
             logger.error(
                 f"[{context.unique_id}] 流式处理异常: {str(e)}\n"
                 f"{traceback.format_exc()}"
@@ -303,3 +316,4 @@ class Processor:
             # 将上下文写入容器
             if context_holder is not None:
                 context_holder['context'] = context
+            emit(EVENT_REQUEST_COMPLETED, context=context, exception=exception)

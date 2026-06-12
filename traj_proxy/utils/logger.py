@@ -49,10 +49,15 @@ def get_logger(
 
     # 创建格式化器
     # 格式：时间戳 | 日志级别 | 模块名 | WorkerID | 消息
-    formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)s | %(module)s | %(worker_id)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    log_format = os.getenv("LOG_FORMAT", "text")
+    if log_format == "json":
+        from traj_proxy.observability.json_formatter import JsonFormatter
+        formatter = JsonFormatter()
+    else:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)s | %(module)s | %(worker_id)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
     # 尝试创建日志目录并添加文件处理器
     log_path = Path(log_dir)
@@ -87,6 +92,10 @@ def get_logger(
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
+    # 添加 Request ID 上下文过滤器（从 ContextVar 读取）
+    request_filter = RequestIDFilter()
+    logger.addFilter(request_filter)
+
     # 添加 Worker ID 上下文过滤器
     worker_filter = WorkerIDFilter(worker_id or "-")
     logger.addFilter(worker_filter)
@@ -116,4 +125,13 @@ class WorkerIDFilter(logging.Filter):
 
     def filter(self, record):
         record.worker_id = self.worker_id
+        return True
+
+
+class RequestIDFilter(logging.Filter):
+    """Request ID 过滤器，从 ContextVar 读取 request_id"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        from traj_proxy.observability.request_context import get_request_id
+        record.request_id = get_request_id("-")
         return True

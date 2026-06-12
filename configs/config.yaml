@@ -72,3 +72,10 @@ infer_client:
   read_timeout: 600         # 读取超时（秒）
   max_connections: 0        # HTTP 连接池上限（0 = 不限制，每个 InferClient）
   max_retries: 2            # 请求失败重试次数（针对 502/503/504 错误）
+
+# 可观测性配置
+observability:
+  enabled: true                    # 全局开关（环境变量 OBSERVABILITY_ENABLED 可覆盖）
+  log_format: text                 # text | json（环境变量 LOG_FORMAT 可覆盖）
+  metrics_enabled: true            # 是否启用 Prometheus metrics
+  health_deep_check: false         # 健康检查是否做深度检查

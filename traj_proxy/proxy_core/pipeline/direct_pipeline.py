@@ -179,7 +179,13 @@ class DirectPipeline(BasePipeline):
         except Exception as e:
             self._handle_error(context, e)
             # 即使出错也尝试存储
-            await self._store_trajectory(context, run_id=context.run_id)
+            try:
+                await self._store_trajectory(context, run_id=context.run_id)
+            except Exception as store_err:
+                from traj_proxy.observability.event_bus import emit
+                from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
+                emit(EVENT_TRAJECTORY_STORE_ERROR, model=context.model,
+                     error_type=type(store_err).__name__, error_message=str(store_err)[:200])
             raise
 
     async def process_stream(
@@ -245,6 +251,12 @@ class DirectPipeline(BasePipeline):
 
         except Exception as e:
             self._handle_error(context, e)
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_STREAM_CLIENT_DISCONNECT
+            emit(EVENT_STREAM_CLIENT_DISCONNECT, model=context.model,
+                 chunk_count=context.stream_chunk_count,
+                 duration_ms=(time.perf_counter() - context.start_time.timestamp()) * 1000
+                 if context.start_time else 0)
             raise
 
     def _accumulate_stream_fields(
