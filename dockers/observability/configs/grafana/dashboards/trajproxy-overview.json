@@ -1785,7 +1785,13 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "targets": [],
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"trajproxy\",instance=~\"$instance\"}",
+          "legendFormat": "{{ instance }}",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",

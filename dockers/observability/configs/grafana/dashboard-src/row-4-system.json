@@ -81,7 +81,11 @@
       "uid": "$datasource"
     },
     "targets": [
-
+      {
+        "expr": "process_resident_memory_bytes{job=\"trajproxy\",instance=~\"$instance\"}",
+        "legendFormat": "{{ instance }}",
+        "refId": "A"
+      }
     ],
     "fieldConfig": {
       "defaults": {
