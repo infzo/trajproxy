@@ -13,7 +13,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGETS_FILE="${SCRIPT_DIR}/../docker/observability/prometheus/targets.json"
+TARGETS_FILE="${SCRIPT_DIR}/../dockers/observability/configs/prometheus/targets.json"
 
 # --- 参数解析 ---
 NODE_IP="${1:?❌ 请提供节点 IP: $0 <IP> [PORT_START] [PORT_COUNT]}"

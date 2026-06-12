@@ -10,7 +10,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="${SCRIPT_DIR}/../docker/observability"
+PROJECT_DIR="${SCRIPT_DIR}/../dockers/observability"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -54,6 +54,17 @@ fi
 PROM_PORT="${PROMETHEUS_PORT:-19090}"
 GRAF_PORT="${GRAFANA_PORT:-3000}"
 ALERT_PORT="${ALERTMANAGER_PORT:-9093}"
+
+# ── 2.5 预创建持久化数据目录 ──────────────────────────────────
+echo ""
+echo -e "${CYAN}📂 预创建数据持久化目录...${NC}"
+mkdir -p data/prometheus data/grafana data/alertmanager
+# Grafana 容器以 UID 472 运行，需要写权限
+if [ "$(uname)" != "Darwin" ]; then
+    # Linux 下需要修改属主（macOS Docker Desktop 自动映射）
+    chown -R 472:472 data/grafana 2>/dev/null || true
+fi
+echo -e "${GREEN}✅ 数据目录就绪 ($(pwd)/data/)${NC}"
 
 # ── 3. 拉取镜像 ─────────────────────────────────────────────
 echo ""
@@ -101,6 +112,9 @@ echo ""
 echo -e "  ${CYAN}Prometheus:${NC}    http://localhost:${PROM_PORT}"
 echo -e "  ${CYAN}Grafana:${NC}       http://localhost:${GRAF_PORT}  ${YELLOW}(admin / ${GRAFANA_ADMIN_PASSWORD:-trajproxy})${NC}"
 echo -e "  ${CYAN}AlertManager:${NC}  http://localhost:${ALERT_PORT}"
+echo -e "  ${CYAN}Viewer:${NC}        http://localhost:${VIEWER_PORT:-8081}"
+echo ""
+echo -e "  ${CYAN}数据 persisted:${NC} $(pwd)/data/  (宿主机 bind mount)"
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
 echo -e "  下一步操作:"
@@ -108,7 +122,7 @@ echo ""
 echo -e "  ${CYAN}添加节点:${NC}  bash scripts/add_node_observability.sh <节点IP>"
 echo -e "             # 例如: bash scripts/add_node_observability.sh 192.168.1.100"
 echo ""
-echo -e "  ${CYAN}停止服务:${NC}  cd docker/observability && docker compose down"
-echo -e "  ${CYAN}查看状态:${NC}  cd docker/observability && docker compose ps"
-echo -e "  ${CYAN}查看日志:${NC}  cd docker/observability && docker compose logs -f"
+echo -e "  ${CYAN}停止服务:${NC}  cd dockers/observability && docker compose down"
+echo -e "  ${CYAN}查看状态:${NC}  cd dockers/observability && docker compose ps"
+echo -e "  ${CYAN}查看日志:${NC}  cd dockers/observability && docker compose logs -f"
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"

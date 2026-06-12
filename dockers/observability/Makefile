@@ -17,9 +17,10 @@ up:
 	docker compose up -d
 	@echo ""
 	@echo "✅ 服务已启动:"
-  @echo "   Prometheus:    http://localhost:$${PROMETHEUS_PORT:-19090}"
+	@echo "   Prometheus:    http://localhost:$${PROMETHEUS_PORT:-19090}"
 	@echo "   Grafana:       http://localhost:$${GRAFANA_PORT:-3000} (admin/trajproxy)"
 	@echo "   AlertManager:  http://localhost:$${ALERTMANAGER_PORT:-9093}"
+	@echo "   Viewer:        http://localhost:$${VIEWER_PORT:-8081} (轨迹回放)"
 	@echo ""
 	@echo "📌 下一步: make add IP=<节点IP>"
 
@@ -35,7 +36,7 @@ logs:
 # 显示当前配置的节点目标
 targets:
 	@echo "📋 当前 TrajProxy 节点目标:"
-	@cat prometheus/targets.json | python3 -m json.tool 2>/dev/null || cat prometheus/targets.json
+	@cat configs/prometheus/targets.json | python3 -m json.tool 2>/dev/null || cat configs/prometheus/targets.json
 
 # 添加新节点 (用法: make add IP=192.168.1.100)
 add:
@@ -63,3 +64,4 @@ status:
 	@curl -s http://localhost:$${PROMETHEUS_PORT:-19090}/-/healthy > /dev/null 2>&1 && echo "✅ Prometheus: 健康" || echo "❌ Prometheus: 不可用"
 	@curl -s http://localhost:$${GRAFANA_PORT:-3000}/api/health > /dev/null 2>&1 && echo "✅ Grafana: 健康" || echo "❌ Grafana: 不可用"
 	@curl -s http://localhost:$${ALERTMANAGER_PORT:-9093}/-/healthy > /dev/null 2>&1 && echo "✅ AlertManager: 健康" || echo "❌ AlertManager: 不可用"
+	@curl -s http://localhost:$${VIEWER_PORT:-8081}/ > /dev/null 2>&1 && echo "✅ Viewer:       健康" || echo "❌ Viewer:       不可用"

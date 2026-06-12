@@ -220,6 +220,12 @@ postgres_data/
 
 # TrajProxy specific
 dockers/images/
+dockers/observability/data/prometheus/*
+!dockers/observability/data/prometheus/.gitkeep
+dockers/observability/data/grafana/*
+!dockers/observability/data/grafana/.gitkeep
+dockers/observability/data/alertmanager/*
+!dockers/observability/data/alertmanager/.gitkeep
 models/
 archives/
 

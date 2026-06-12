@@ -1,5 +1,8 @@
 # ============================================================
-# Prometheus 主配置（compose 部署版）
+# Prometheus 主配置（独立部署版）
+# ============================================================
+# 通过 host.docker.internal 访问宿主机上的业务服务。
+# TrajProxy /metrics 默认监听 12300-12320 端口范围。
 # ============================================================
 
 global:
@@ -11,15 +14,15 @@ global:
 rule_files:
   - "alert_rules.yml"
 
-# AlertManager 地址（compose 网络内通过服务名通信）
+# AlertManager 地址（与 prometheus 同 compose 网络，通过服务名通信）
 alerting:
   alertmanagers:
     - static_configs:
         - targets: ["alertmanager:9093"]
 
-# 抓取配置 — 使用 file_sd_configs 动态加载节点
+# 抓取配置 — 通过 host.docker.internal 采集宿主机上的服务
 scrape_configs:
-  # TrajProxy 业务指标
+  # TrajProxy 业务指标（多端口，通过 file_sd 动态加载）
   - job_name: "trajproxy"
     scrape_interval: 15s
     scrape_timeout: 10s
@@ -29,14 +32,14 @@ scrape_configs:
           - "targets.json"
         refresh_interval: 30s
 
-  # LiteLLM 指标（带鉴权占位，未配置 bearer_token_file 前会 401）
+  # LiteLLM 指标
   - job_name: "litellm"
     scrape_interval: 15s
     metrics_path: "/metrics"
     static_configs:
-      - targets: ["litellm:4000"]
+      - targets: ["host.docker.internal:4000"]
 
   # Prometheus 自身监控
   - job_name: "prometheus"
     static_configs:
-      - targets: ["localhost:9090"]
+      - targets: ["localhost:19090"]

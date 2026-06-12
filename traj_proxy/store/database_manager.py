@@ -14,6 +14,7 @@ from typing import Optional
 from psycopg_pool import AsyncConnectionPool
 
 from traj_proxy.exceptions import DatabaseError
+from traj_proxy.observability import metrics_collector
 from traj_proxy.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -98,6 +99,12 @@ class DatabaseManager:
                     self._peak_used = used
                 if usage_pct > self._peak_usage_pct:
                     self._peak_usage_pct = usage_pct
+
+                # 上报 Prometheus 指标（register_all 后才会生效）
+                # 注意：必须通过模块属性访问，不能 import 值——因为 Gauge 在 register_all 时才创建
+                if metrics_collector.DB_POOL_USAGE is not None:
+                    metrics_collector.DB_POOL_USAGE.labels(state="used").set(used)
+                    metrics_collector.DB_POOL_USAGE.labels(state="peak").set(pool_max)
 
                 requests_queued = stats.get('requests_queued', 0)
                 requests_errors = stats.get('requests_errors', 0)

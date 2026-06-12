@@ -1,8 +1,8 @@
 [
   {
     "targets": [
-      "traj-proxy:12300",
-      "traj-proxy:12301"
+      "host.docker.internal:12300",
+      "host.docker.internal:12301"
     ],
     "labels": {
       "job": "trajproxy",

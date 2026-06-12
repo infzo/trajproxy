@@ -1,3 +1,26 @@
+# ============================================================
+# TrajProxy 可观测性栈（独立部署）
+# ============================================================
+# 通过 host.docker.internal 网络采集业务服务指标。
+# 前提：业务服务（TrajProxy、LiteLLM）已在宿主机运行。
+#
+# 数据持久化（bind mount 到宿主机，重新部署不会丢失）：
+#   Prometheus   → ./data/prometheus/
+#   Grafana      → ./data/grafana/
+#   AlertManager → ./data/alertmanager/
+#
+# 启动：
+#   docker compose -f dockers/observability/docker-compose.yml up -d
+#   或使用 Makefile: cd dockers/observability && make up
+#   或一键脚本: bash scripts/start_docker_observability.sh
+#
+# 访问（端口可通过 .env 配置）：
+#   Prometheus  → http://localhost:${PROMETHEUS_PORT:-19090}
+#   Grafana     → http://localhost:${GRAFANA_PORT:-3000}  (admin / trajproxy)
+#   AlertManager→ http://localhost:${ALERTMANAGER_PORT:-9093}
+#   Viewer      → http://localhost:${VIEWER_PORT:-8081}  (轨迹回放查看器)
+# ============================================================
+
 services:
   prometheus:
     image: prom/prometheus:v2.53.0
@@ -8,8 +31,8 @@ services:
     networks:
       - observability-net
     volumes:
-      - ./prometheus:/etc/prometheus:ro
-      - prometheus_data:/prometheus
+      - ./configs/prometheus:/etc/prometheus:ro
+      - ./data/prometheus:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -19,6 +42,8 @@ services:
       - "--web.enable-lifecycle"
       - "--web.console.libraries=/etc/prometheus/console_libraries"
       - "--web.console.templates=/etc/prometheus/consoles"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:
@@ -46,9 +71,9 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
     depends_on:
       prometheus:
         condition: service_healthy
@@ -72,8 +97,8 @@ services:
     networks:
       - observability-net
     volumes:
-      - ./alertmanager:/etc/alertmanager:ro
-      - alertmanager_data:/alertmanager
+      - ./configs/alertmanager:/etc/alertmanager:ro
+      - ./data/alertmanager:/alertmanager
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
       - "--storage.path=/alertmanager"
@@ -89,10 +114,26 @@ services:
       timeout: 5s
       retries: 3
 
-volumes:
-  prometheus_data:
-  grafana_data:
-  alertmanager_data:
+  trajectory-viewer:
+    image: nginx:alpine
+    container_name: observability-viewer
+    restart: unless-stopped
+    ports:
+      - "${VIEWER_PORT:-8081}:80"
+    networks:
+      - observability-net
+    volumes:
+      - ../../scripts/replay_trajectory_viewer.html:/usr/share/nginx/html/index.html:ro
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.1"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 networks:
   observability-net:
