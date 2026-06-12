@@ -141,7 +141,9 @@ cd dockers/compose && docker-compose up -d --build
 | litellm | 4000 | API 网关 |
 | db | 5432 | PostgreSQL 数据库 |
 | traj_proxy | 12300-12320 | ProxyWorkers |
-| prometheus | 9090 | 监控服务 |
+
+> 可观测性栈（Prometheus + Grafana + AlertManager + Viewer）已独立为单独的 Docker Compose 部署，
+> 详见 [方式五：可观测性栈独立部署](#方式五可观测性栈独立部署)。
 
 ### 4. 验证
 
@@ -491,6 +493,72 @@ cd dockers/compose && docker-compose exec traj_proxy ps aux | grep worker
 
 # 检查 Worker 配置
 cd dockers/compose && docker-compose exec traj_proxy cat /app/configs/config.yaml
+```
+
+---
+
+## 方式五：可观测性栈独立部署
+
+可观测性栈（Prometheus + Grafana + AlertManager + Trajectory Viewer）独立于业务服务部署，
+通过 `host.docker.internal` 网络采集宿主机上 TrajProxy Workers 的 `/metrics` 指标。
+
+> 详细运维操作见 [可观测性运维指南](observability.md)
+
+### 1. 配置
+
+```bash
+cd dockers/observability
+cp .env.example .env
+```
+
+编辑 `.env`，关键配置：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PROMETHEUS_PORT` | 19090 | Prometheus 端口（Docker Desktop 占用 9090）|
+| `GRAFANA_PORT` | 3000 | Grafana 端口 |
+| `WORKER_PORT_START` | 12300 | Worker 起始端口 |
+| `WORKER_PORT_COUNT` | 10 | Worker 端口数量 |
+| `MONITOR_NODES` | localhost | 监控节点 IP（空格分隔）|
+
+### 2. 启动
+
+```bash
+cd dockers/observability
+make start
+
+# 或指定临时节点
+make start IP="192.168.1.100 10.0.0.5"
+```
+
+### 3. 容器组说明
+
+| 容器名 | 端口 | 说明 |
+|--------|------|------|
+| observability-prometheus | 19090 | 指标采集与告警评估 |
+| observability-grafana | 3000 | 指标可视化 Dashboard |
+| observability-alertmanager | 9093 | 告警分组与通知路由 |
+| observability-viewer | 8081 | 轨迹回放页面 |
+
+### 4. 验证
+
+```bash
+make status
+
+# Prometheus 健康
+curl http://localhost:19090/-/healthy
+
+# Grafana Dashboard
+# 浏览器访问 http://localhost:3000（admin / trajproxy）
+```
+
+### 5. 管理监控节点
+
+```bash
+make add IP=192.168.1.100      # 持久追加节点
+make remove IP=192.168.1.100   # 持久移除节点
+make sync                       # 重新生成 targets.json
+make reload                     # 热重载 Prometheus 配置
 ```
 
 ---

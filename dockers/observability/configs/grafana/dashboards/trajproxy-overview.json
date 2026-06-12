@@ -1070,7 +1070,7 @@
       "id": 13,
       "type": "piechart",
       "title": "推理流式与非流式占比",
-      "description": "流式请求占比",
+      "description": "流式请求占比（基于最近 1 小时的 increase 统计，不受面板时间选择器影响）",
       "gridPos": {
         "h": 8,
         "w": 6,

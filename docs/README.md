@@ -11,6 +11,7 @@ docs/
 │
 ├── design/                      # 架构设计（Why & What）
 │   ├── architecture.md          # 系统总体架构（Pipeline 模式）
+│   ├── observability.md         # 可观测性系统设计（EventBus + Prometheus + Grafana）
 │   │
 │   ├── data/                    # 数据层设计
 │   │   ├── schema.md            # 数据库 Schema（元数据+详情分离）
@@ -34,7 +35,8 @@ docs/
 │
 ├── guide/                       # 操作指南（How）
 │   ├── quickstart.md            # 快速上手（常用命令与核心用例）
-│   ├── deployment.md            # 部署指南（本地 / Docker）
+│   ├── deployment.md            # 部署指南（本地 / Docker / 可观测性栈）
+│   ├── observability.md         # 可观测性运维指南（Prometheus + Grafana）
 │   ├── configuration.md         # 配置文件详解
 │   └── development.md           # 开发环境搭建
 │
@@ -62,11 +64,12 @@ docs/
 ### 我是新手，从哪开始？
 
 1. [快速上手](guide/quickstart.md) — 5 分钟跑通注册模型 → 发请求 → 查轨迹的完整流程
-2. [部署指南](guide/deployment.md) — 本地 / Docker 部署方式
-3. [开发环境搭建](guide/development.md) — 本地环境配置、依赖安装、测试运行
-4. [配置说明](guide/configuration.md) — 配置文件字段详解
-5. [API 总览](api/overview.md) — 选择 Nginx 入口 或 直连 Proxy
-6. [轨迹查看器](tools/trajectory-viewer.md) — 对话轨迹可视化
+2. [部署指南](guide/deployment.md) — 本地 / Docker / 可观测性栈部署方式
+3. [可观测性运维](guide/observability.md) — Prometheus + Grafana 监控部署与运维
+4. [开发环境搭建](guide/development.md) — 本地环境配置、依赖安装、测试运行
+5. [配置说明](guide/configuration.md) — 配置文件字段详解
+6. [API 总览](api/overview.md) — 选择 Nginx 入口 和 直连 Proxy
+7. [轨迹查看器](tools/trajectory-viewer.md) — 对话轨迹可视化
 
 ### 我想知道最近更新了什么
 
@@ -75,6 +78,7 @@ docs/
 ### 我想了解架构设计
 
 - [总体架构](design/architecture.md) — Pipeline 模式、Processor、核心组件
+- [可观测性设计](design/observability.md) — EventBus 架构、Prometheus 指标、Grafana Dashboard
 - [ID 语义规范](design/modules/identifiers.md) — `run_id` / `session_id` 语义与提取规则
 - [数据库设计](design/data/schema.md) — 元数据+详情分离架构
 - [Parser 模块](design/modules/parser.md) — 工具调用和推理内容解析
