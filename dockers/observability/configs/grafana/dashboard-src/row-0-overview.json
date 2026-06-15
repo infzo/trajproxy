@@ -13,8 +13,8 @@
   {
     "id": 100,
     "type": "piechart",
-    "title": "全站请求类型占比 (1h)",
-    "description": "各请求类型在过去 1 小时的请求占比",
+    "title": "全站请求类型占比",
+    "description": "各请求类型在所选时间范围内的请求占比",
     "gridPos": {
       "h": 8,
       "w": 4,
@@ -27,7 +27,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[1h]))",
+        "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[$__range]))",
         "legendFormat": "{{ route }}",
         "refId": "A",
         "instant": true

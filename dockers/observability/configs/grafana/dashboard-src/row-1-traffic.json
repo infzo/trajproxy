@@ -14,7 +14,7 @@
     "id": 4,
     "type": "stat",
     "title": "推理请求概览",
-    "description": "推理流量综合概览：请求趋势、活跃请求数、1h成功率、1h平均耗时",
+    "description": "推理流量综合概览：当前请求数、活跃请求数、成功率、平均耗时",
     "gridPos": {
       "h": 8,
       "w": 8,
@@ -28,18 +28,24 @@
     "targets": [
       {
         "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$rate_interval])))",
-        "legendFormat": "请求数",
+        "legendFormat": "当前请求数",
         "refId": "A"
       },
       {
-        "expr": "sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\",outcome=\"success\"}[1h])) / sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h])) * 100",
-        "legendFormat": "成功率(1h)",
+        "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$__range])))",
+        "legendFormat": "总请求数",
+        "refId": "B",
+        "instant": true
+      },
+      {
+        "expr": "sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\",outcome=\"success\"}[$__range])) / sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$__range])) * 100",
+        "legendFormat": "成功率",
         "refId": "C",
         "instant": true
       },
       {
-        "expr": "sum(rate(trajproxy_request_duration_seconds_sum{node=~\"$node\",model=~\"$model\"}[1h])) / sum(rate(trajproxy_request_duration_seconds_count{node=~\"$node\",model=~\"$model\"}[1h]))",
-        "legendFormat": "平均耗时(1h)",
+        "expr": "sum(rate(trajproxy_request_duration_seconds_sum{node=~\"$node\",model=~\"$model\"}[$__range])) / sum(rate(trajproxy_request_duration_seconds_count{node=~\"$node\",model=~\"$model\"}[$__range]))",
+        "legendFormat": "平均耗时",
         "refId": "D",
         "instant": true
       }
@@ -65,7 +71,7 @@
         {
           "matcher": {
             "id": "byName",
-            "options": "成功率(1h)"
+            "options": "成功率"
           },
           "properties": [
             {
@@ -101,7 +107,7 @@
         {
           "matcher": {
             "id": "byName",
-            "options": "平均耗时(1h)"
+            "options": "平均耗时"
           },
           "properties": [
             {
@@ -141,7 +147,7 @@
     "id": 110,
     "type": "stat",
     "title": "模型请求概览",
-    "description": "模型管理 API（注册/删除/列表）综合概览：请求趋势、1h成功率、1h平均耗时",
+    "description": "模型管理 API（注册/删除/列表）综合概览：当前请求数、成功率、平均耗时",
     "gridPos": {
       "h": 8,
       "w": 8,
@@ -155,19 +161,25 @@
     "targets": [
       {
         "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$rate_interval])))",
-        "legendFormat": "请求数",
+        "legendFormat": "当前请求数",
         "refId": "A"
       },
       {
-        "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\",status_code=~\"2..\"}[1h])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h])) * 100",
-        "legendFormat": "成功率(1h)",
+        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$__range])))",
+        "legendFormat": "总请求数",
         "refId": "B",
         "instant": true
       },
       {
-        "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h]))",
-        "legendFormat": "平均耗时(1h)",
+        "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\",status_code=~\"2..\"}[$__range])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$__range])) * 100",
+        "legendFormat": "成功率",
         "refId": "C",
+        "instant": true
+      },
+      {
+        "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$__range])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$__range]))",
+        "legendFormat": "平均耗时",
+        "refId": "D",
         "instant": true
       }
     ],
@@ -192,7 +204,7 @@
         {
           "matcher": {
             "id": "byName",
-            "options": "成功率(1h)"
+            "options": "成功率"
           },
           "properties": [
             {
@@ -228,7 +240,7 @@
         {
           "matcher": {
             "id": "byName",
-            "options": "平均耗时(1h)"
+            "options": "平均耗时"
           },
           "properties": [
             {
@@ -268,7 +280,7 @@
     "id": 111,
     "type": "stat",
     "title": "轨迹请求概览",
-    "description": "轨迹查询（列表 + 详情）综合概览：请求趋势、1h成功率、1h平均耗时",
+    "description": "轨迹查询（列表 + 详情）综合概览：当前请求数、成功率、平均耗时",
     "gridPos": {
       "h": 8,
       "w": 8,
@@ -282,19 +294,25 @@
     "targets": [
       {
         "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$rate_interval])))",
-        "legendFormat": "请求数",
+        "legendFormat": "当前请求数",
         "refId": "A"
       },
       {
-        "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\",status_code=~\"2..\"}[1h])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h])) * 100",
-        "legendFormat": "成功率(1h)",
+        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$__range])))",
+        "legendFormat": "总请求数",
         "refId": "B",
         "instant": true
       },
       {
-        "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h]))",
-        "legendFormat": "平均耗时(1h)",
+        "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\",status_code=~\"2..\"}[$__range])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$__range])) * 100",
+        "legendFormat": "成功率",
         "refId": "C",
+        "instant": true
+      },
+      {
+        "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$__range])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$__range]))",
+        "legendFormat": "平均耗时",
+        "refId": "D",
         "instant": true
       }
     ],
@@ -319,7 +337,7 @@
         {
           "matcher": {
             "id": "byName",
-            "options": "成功率(1h)"
+            "options": "成功率"
           },
           "properties": [
             {
@@ -355,7 +373,7 @@
         {
           "matcher": {
             "id": "byName",
-            "options": "平均耗时(1h)"
+            "options": "平均耗时"
           },
           "properties": [
             {

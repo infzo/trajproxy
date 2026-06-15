@@ -183,8 +183,8 @@
     {
       "id": 100,
       "type": "piechart",
-      "title": "全站请求类型占比 (1h)",
-      "description": "各请求类型在过去 1 小时的请求占比",
+      "title": "全站请求类型占比",
+      "description": "各请求类型在所选时间范围内的请求占比",
       "gridPos": {
         "h": 8,
         "w": 4,
@@ -197,7 +197,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[1h]))",
+          "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[$__range]))",
           "legendFormat": "{{ route }}",
           "refId": "A",
           "instant": true
@@ -410,7 +410,7 @@
       "id": 4,
       "type": "stat",
       "title": "推理请求概览",
-      "description": "推理流量综合概览：请求趋势、活跃请求数、1h成功率、1h平均耗时",
+      "description": "推理流量综合概览：当前请求数、活跃请求数、成功率、平均耗时",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -424,18 +424,24 @@
       "targets": [
         {
           "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$rate_interval])))",
-          "legendFormat": "请求数",
+          "legendFormat": "当前请求数",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\",outcome=\"success\"}[1h])) / sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h])) * 100",
-          "legendFormat": "成功率(1h)",
+          "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$__range])))",
+          "legendFormat": "总请求数",
+          "refId": "B",
+          "instant": true
+        },
+        {
+          "expr": "sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\",outcome=\"success\"}[$__range])) / sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$__range])) * 100",
+          "legendFormat": "成功率",
           "refId": "C",
           "instant": true
         },
         {
-          "expr": "sum(rate(trajproxy_request_duration_seconds_sum{node=~\"$node\",model=~\"$model\"}[1h])) / sum(rate(trajproxy_request_duration_seconds_count{node=~\"$node\",model=~\"$model\"}[1h]))",
-          "legendFormat": "平均耗时(1h)",
+          "expr": "sum(rate(trajproxy_request_duration_seconds_sum{node=~\"$node\",model=~\"$model\"}[$__range])) / sum(rate(trajproxy_request_duration_seconds_count{node=~\"$node\",model=~\"$model\"}[$__range]))",
+          "legendFormat": "平均耗时",
           "refId": "D",
           "instant": true
         }
@@ -461,7 +467,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "成功率(1h)"
+              "options": "成功率"
             },
             "properties": [
               {
@@ -497,7 +503,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "平均耗时(1h)"
+              "options": "平均耗时"
             },
             "properties": [
               {
@@ -537,7 +543,7 @@
       "id": 110,
       "type": "stat",
       "title": "模型请求概览",
-      "description": "模型管理 API（注册/删除/列表）综合概览：请求趋势、1h成功率、1h平均耗时",
+      "description": "模型管理 API（注册/删除/列表）综合概览：当前请求数、成功率、平均耗时",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -551,19 +557,25 @@
       "targets": [
         {
           "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$rate_interval])))",
-          "legendFormat": "请求数",
+          "legendFormat": "当前请求数",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\",status_code=~\"2..\"}[1h])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h])) * 100",
-          "legendFormat": "成功率(1h)",
+          "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$__range])))",
+          "legendFormat": "总请求数",
           "refId": "B",
           "instant": true
         },
         {
-          "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h]))",
-          "legendFormat": "平均耗时(1h)",
+          "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\",status_code=~\"2..\"}[$__range])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$__range])) * 100",
+          "legendFormat": "成功率",
           "refId": "C",
+          "instant": true
+        },
+        {
+          "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$__range])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$__range]))",
+          "legendFormat": "平均耗时",
+          "refId": "D",
           "instant": true
         }
       ],
@@ -588,7 +600,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "成功率(1h)"
+              "options": "成功率"
             },
             "properties": [
               {
@@ -624,7 +636,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "平均耗时(1h)"
+              "options": "平均耗时"
             },
             "properties": [
               {
@@ -664,7 +676,7 @@
       "id": 111,
       "type": "stat",
       "title": "轨迹请求概览",
-      "description": "轨迹查询（列表 + 详情）综合概览：请求趋势、1h成功率、1h平均耗时",
+      "description": "轨迹查询（列表 + 详情）综合概览：当前请求数、成功率、平均耗时",
       "gridPos": {
         "h": 8,
         "w": 8,
@@ -678,19 +690,25 @@
       "targets": [
         {
           "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$rate_interval])))",
-          "legendFormat": "请求数",
+          "legendFormat": "当前请求数",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\",status_code=~\"2..\"}[1h])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h])) * 100",
-          "legendFormat": "成功率(1h)",
+          "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$__range])))",
+          "legendFormat": "总请求数",
           "refId": "B",
           "instant": true
         },
         {
-          "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h]))",
-          "legendFormat": "平均耗时(1h)",
+          "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\",status_code=~\"2..\"}[$__range])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$__range])) * 100",
+          "legendFormat": "成功率",
           "refId": "C",
+          "instant": true
+        },
+        {
+          "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$__range])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$__range]))",
+          "legendFormat": "平均耗时",
+          "refId": "D",
           "instant": true
         }
       ],
@@ -715,7 +733,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "成功率(1h)"
+              "options": "成功率"
             },
             "properties": [
               {
@@ -751,7 +769,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "平均耗时(1h)"
+              "options": "平均耗时"
             },
             "properties": [
               {
@@ -1078,7 +1096,7 @@
       "id": 50,
       "type": "timeseries",
       "title": "推理请求端到端耗时 - 按作业 (q=$quantile)",
-      "description": "端到端请求延迟 q=$quantile 分位（含全 Pipeline），按 run_id 分组",
+      "description": "端到端请求延迟 q=$quantile 分位（含全 Pipeline），按作业分组",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1125,7 +1143,7 @@
       "id": 51,
       "type": "timeseries",
       "title": "推理服务调用耗时 - 按作业 (q=$quantile)",
-      "description": "对下游推理服务的单次 HTTP 调用耗时 q=$quantile 分位（取 phase=inference），按 run_id 分组",
+      "description": "对下游推理服务的单次 HTTP 调用耗时 q=$quantile 分位（取 phase=inference），按作业分组",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1171,7 +1189,7 @@
       "id": 52,
       "type": "timeseries",
       "title": "推理首 Token 耗时 (TTFT) - 按作业 (q=$quantile)",
-      "description": "流式请求首 Token 耗时 q=$quantile 分位，按 run_id 分组",
+      "description": "流式请求首 Token 耗时 q=$quantile 分位，按作业分组",
       "gridPos": {
         "h": 8,
         "w": 4,
@@ -1217,7 +1235,7 @@
       "id": 53,
       "type": "timeseries",
       "title": "推理序列长度（输入+输出） - 按作业 (q=$quantile)",
-      "description": "每请求总序列长度 $quantile:text 分位（prompt + completion tokens），按 run_id 分组",
+      "description": "每请求总序列长度 $quantile:text 分位（prompt + completion tokens），按作业分组",
       "gridPos": {
         "h": 8,
         "w": 4,
@@ -1308,7 +1326,7 @@
     {
       "id": 13,
       "type": "piechart",
-      "title": "推理流式与非流式占比(1h)",
+      "title": "推理流式与非流式占比",
       "description": "流式请求占比",
       "gridPos": {
         "h": 8,
@@ -1322,7 +1340,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (stream) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h]))",
+          "expr": "sum by (stream) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$__range]))",
           "legendFormat": "{{ stream }}",
           "refId": "A",
           "instant": true
@@ -1342,7 +1360,7 @@
     {
       "id": 14,
       "type": "piechart",
-      "title": "DIRECT vs TITO 模式占比(1h)",
+      "title": "DIRECT vs TITO 模式占比",
       "description": "直接转发模式（direct）与 Token 模式（tito）请求占比",
       "gridPos": {
         "h": 8,
@@ -1356,7 +1374,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (pipeline_mode) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h]))",
+          "expr": "sum by (pipeline_mode) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$__range]))",
           "legendFormat": "{{ pipeline_mode }}",
           "refId": "A",
           "instant": true
@@ -1376,8 +1394,8 @@
     {
       "id": 139,
       "type": "timeseries",
-      "title": "推理请求失败数量 - 按节点",
-      "description": "推理请求失败按节点聚合统计：左轴为请求级失败总数，右轴为轨迹写入 DB 失败数",
+      "title": "推理失败请求数 - 按节点",
+      "description": "所有非成功推理请求按节点聚合统计（含客户端/服务端/限流/超时等），具体错误原因见「推理请求错误细分」",
       "gridPos": {
         "h": 10,
         "w": 8,
@@ -1424,14 +1442,9 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (node) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[$rate_interval])))",
-          "legendFormat": "失败: {{ node }}",
+          "expr": "round(sum by (node) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server|error_client|error_rate_limit\"}[$rate_interval])))",
+          "legendFormat": "错误: {{ node }}",
           "refId": "A"
-        },
-        {
-          "expr": "round(sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])))",
-          "legendFormat": "写入: {{ node }}",
-          "refId": "B"
         }
       ],
       "options": {
@@ -1451,8 +1464,8 @@
     {
       "id": 140,
       "type": "timeseries",
-      "title": "推理请求失败数量 - 按作业",
-      "description": "推理请求失败按作业聚合统计：左轴为请求级失败总数，右轴为轨迹写入 DB 失败数",
+      "title": "推理失败请求数 - 按作业",
+      "description": "所有非成功推理请求按作业聚合统计（含客户端/服务端/限流/超时等），具体错误原因见下方「推理请求错误细分」",
       "gridPos": {
         "h": 10,
         "w": 8,
@@ -1475,38 +1488,13 @@
             "showPoints": "auto",
             "spanNulls": false
           }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^写入.*"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "palette-classic"
-                }
-              }
-            ]
-          }
-        ]
+        }
       },
       "targets": [
         {
-          "expr": "round(sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[$rate_interval])))",
-          "legendFormat": "失败: {{ run_id }}",
+          "expr": "round(sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server|error_client|error_rate_limit\"}[$rate_interval])))",
+          "legendFormat": "错误: {{ run_id }}",
           "refId": "A"
-        },
-        {
-          "expr": "round(sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])))",
-          "legendFormat": "写入: {{ run_id }}",
-          "refId": "B"
         }
       ],
       "options": {
@@ -1526,8 +1514,8 @@
     {
       "id": 141,
       "type": "timeseries",
-      "title": "推理请求错误细分（请选择 Run ID）",
-      "description": "展示所选 run_id 的推理请求所有错误（含客户端、内部、推理服务）按 outcome 拆分的时间分布，含中文友好名称。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
+      "title": "推理请求错误细分（请选择作业）",
+      "description": "展示所选作业的推理请求所有错误（含客户端、内部、推理服务）按 outcome 拆分的时间分布，含中文友好名称。需先在顶端作业下拉框选择具体作业，选 All 时为所有作业的聚合。",
       "gridPos": {
         "h": 10,
         "w": 8,
@@ -1551,6 +1539,25 @@
           }
         },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "stream_partial"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "流式传输部分完成 (Stream Partial)"
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -1650,7 +1657,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout\"}[$rate_interval])))",
+          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial\"}[$rate_interval])))",
           "legendFormat": "{{ outcome }}",
           "refId": "A"
         }
@@ -1781,7 +1788,7 @@
       "id": 161,
       "type": "timeseries",
       "title": "活跃作业数量",
-      "description": "有推理请求的活动 run_id 数量，反映当前同时运行的作业数",
+      "description": "有推理请求的活动作业数，反映当前同时运行的作业数",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -1795,7 +1802,7 @@
       "targets": [
         {
           "expr": "count(count by (run_id) (increase(trajproxy_requests_total{node=~\"$node\"}[$rate_interval]) > 0))",
-          "legendFormat": "活跃 Run ID 数量",
+          "legendFormat": "活跃作业数量",
           "refId": "A"
         }
       ],
@@ -1828,7 +1835,7 @@
       "id": 162,
       "type": "timeseries",
       "title": "Prefill 吞吐量 (Tokens/s) - 按作业",
-      "description": "各作业每秒 Prompt Token 消耗速率（Prefill 阶段吞吐量），按 run_id 分组",
+      "description": "各作业每秒 Prompt Token 消耗速率（Prefill 阶段吞吐量），按作业分组",
       "gridPos": {
         "h": 8,
         "w": 4,
@@ -1875,7 +1882,7 @@
       "id": 163,
       "type": "timeseries",
       "title": "Decode 吞吐量 (Tokens/s) - 按作业",
-      "description": "各作业每秒 Completion Token 产出速率（Decode 阶段吞吐量），按 run_id 分组",
+      "description": "各作业每秒 Completion Token 产出速率（Decode 阶段吞吐量），按作业分组",
       "gridPos": {
         "h": 8,
         "w": 4,
@@ -1921,8 +1928,8 @@
     {
       "id": 150,
       "type": "timeseries",
-      "title": "TITO模式缓存命中率 - 按作业（1h）",
-      "description": "前缀缓存 1h 滚动窗口命中率 = 近1h内hits / 近1h内(hits + misses) × 100，按 run_id 分组。使用 increase() 计算最近 1 小时增量，不受进程重启影响。仅 TITO 模式有数据。",
+      "title": "TITO模式缓存命中率 - 按作业",
+      "description": "命中率 = hits / (hits + misses) × 100，按作业分组。使用 increase() 计算所选时间范围内的增量，不受进程重启影响。仅 TITO 模式有数据。",
       "gridPos": {
         "h": 8,
         "w": 4,
@@ -1935,7 +1942,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\",result=\"hit\"}[1h])) / sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\"}[1h])) * 100",
+          "expr": "sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\",result=\"hit\"}[$__range])) / sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\"}[$__range])) * 100",
           "legendFormat": "{{ run_id }}",
           "refId": "A"
         }
@@ -1981,7 +1988,7 @@
       "id": 121,
       "type": "timeseries",
       "title": "轨迹详情请求数 - 按作业",
-      "description": "轨迹详情请求 (trajectory_detail) 增量数，按 run_id 分组",
+      "description": "轨迹详情请求 (trajectory_detail) 增量数，按作业分组",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -2026,7 +2033,7 @@
       "id": 122,
       "type": "timeseries",
       "title": "轨迹详情请求端到端耗时 - 按作业 (q=$quantile)",
-      "description": "轨迹详情请求的端到端耗时分位数，按 run_id 分组",
+      "description": "轨迹详情请求的端到端耗时分位数，按作业分组",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -2072,7 +2079,7 @@
       "id": 127,
       "type": "timeseries",
       "title": "轨迹平均对话数量 - 按作业",
-      "description": "每次轨迹查询返回的 records 条数平均值，按 run_id 分组（基于 trajproxy_trajectory_record_count histogram）",
+      "description": "每次轨迹查询返回的 records 条数平均值，按作业分组（基于 trajproxy_trajectory_record_count histogram）",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -2122,7 +2129,7 @@
       "id": 128,
       "type": "timeseries",
       "title": "轨迹请求平均大小 - 按作业",
-      "description": "每次轨迹查询返回的响应体平均字节数，按 run_id 分组（基于 trajproxy_trajectory_response_size_bytes histogram）。Grafana bytes 单位自动转换 KB/MB/GB。",
+      "description": "每次轨迹查询返回的响应体平均字节数，按作业分组（基于 trajproxy_trajectory_response_size_bytes histogram）。Grafana bytes 单位自动转换 KB/MB/GB。",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -2171,8 +2178,8 @@
     {
       "id": 129,
       "type": "timeseries",
-      "title": "轨迹请求失败数量 - 按节点",
-      "description": "轨迹请求失败按节点聚合统计：左轴为请求级失败总数（5xx），右轴为轨迹写入 DB 失败数",
+      "title": "轨迹失败请求数 - 按节点",
+      "description": "所有非成功轨迹请求按节点聚合统计（含 4xx 客户端错误、5xx 服务端错误等）",
       "gridPos": {
         "h": 10,
         "w": 8,
@@ -2195,38 +2202,13 @@
             "showPoints": "auto",
             "spanNulls": false
           }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^写入.*"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "palette-classic"
-                }
-              }
-            ]
-          }
-        ]
+        }
       },
       "targets": [
         {
-          "expr": "round(sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[$rate_interval])))",
-          "legendFormat": "失败: {{ node }}",
+          "expr": "round(sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"[45]..\"}[$rate_interval])))",
+          "legendFormat": "错误: {{ node }}",
           "refId": "A"
-        },
-        {
-          "expr": "round(sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])))",
-          "legendFormat": "写入: {{ node }}",
-          "refId": "B"
         }
       ],
       "options": {
@@ -2246,8 +2228,8 @@
     {
       "id": 125,
       "type": "timeseries",
-      "title": "轨迹请求失败数量 - 按作业",
-      "description": "轨迹请求失败按作业聚合统计：左轴为请求级失败总数（5xx），右轴为轨迹写入 DB 失败数",
+      "title": "轨迹失败请求数 - 按作业",
+      "description": "所有非成功轨迹请求按作业聚合统计（含 4xx 客户端错误、5xx 服务端错误等）",
       "gridPos": {
         "h": 10,
         "w": 8,
@@ -2270,38 +2252,13 @@
             "showPoints": "auto",
             "spanNulls": false
           }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^写入.*"
-            },
-            "properties": [
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "palette-classic"
-                }
-              }
-            ]
-          }
-        ]
+        }
       },
       "targets": [
         {
-          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[$rate_interval])))",
-          "legendFormat": "失败: {{ run_id }}",
+          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"[45]..\"}[$rate_interval])))",
+          "legendFormat": "错误: {{ run_id }}",
           "refId": "A"
-        },
-        {
-          "expr": "round(sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])))",
-          "legendFormat": "写入: {{ run_id }}",
-          "refId": "B"
         }
       ],
       "options": {
@@ -2321,8 +2278,8 @@
     {
       "id": 126,
       "type": "timeseries",
-      "title": "轨迹请求错误细分（请选择 Run ID）",
-      "description": "展示所选 run_id 的轨迹请求错误按错误类别（database / timeout / serialize_timeout / other）拆分的时间分布。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
+      "title": "轨迹请求错误细分（请选择作业）",
+      "description": "展示所选 作业 的轨迹请求错误按错误类别（database / timeout / serialize_timeout / other）拆分的时间分布。需先在顶端 作业下拉框选择具体作业，选 All 时为所有作业的聚合。",
       "gridPos": {
         "h": 10,
         "w": 8,
