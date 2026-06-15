@@ -30,6 +30,7 @@
 - **模型生命周期面板噪音**: 移除模型生命周期面板中不相关的轨迹存储错误指标
 
 ### 文档更新
+- **Grafana Dashboard 使用指南**: 新增 `docs/guide/grafana-dashboard.md`，详细说明两个 Dashboard（Overview + Model Mix）共 47 个面板的结构组织、各面板含义、颜色编码、中文标签映射、全局模板变量用法、7 条告警规则及常见故障诊断路径
 - **可观测性指南**: 新增 `docs/guide/observability.md`，详细说明指标体系、Grafana 面板配置与告警规则使用
 - **可观测性设计文档精简**: `docs/design/observability.md` 大幅精简，移除已实现的详细设计，保留架构决策和未来演进方向
 - **部署指南更新**: `docs/guide/deployment.md` 补充可观测性部署说明
@@ -44,6 +45,7 @@
 - `traj_proxy/proxy_core/pipeline/token_pipeline.py` - 自动标记 pipeline_mode=tito
 - `traj_proxy/serve/routes.py` - 信号量拒绝补全 rate_limit 上报
 - `dockers/observability/configs/grafana/dashboard-src/` - Dashboard 分片全面更新
+- `docs/guide/grafana-dashboard.md` - 新增 Grafana Dashboard 面板使用指南
 - `docs/guide/observability.md` - 新增可观测性使用指南
 - `docs/design/observability.md` - 设计文档精简
 - `docs/guide/deployment.md` - 部署指南更新
