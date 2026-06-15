@@ -6,6 +6,50 @@
 
 ---
 
+## [0.3.3] - 2026-06-15
+
+**类型**: 可观测性增强 + Grafana 优化 + 文档
+
+### 新增功能
+- **管道模式指标**: 为 `trajproxy_requests_total` 新增 `pipeline_mode` 标签（`direct`/`tito`），自动标记请求经过的管道类型
+- **缓存命中率计数器**: 新增 `trajproxy_cache_lookups_total` 指标，追踪前缀缓存命中/未命中次数
+- **推理重试计数**: 新增 `trajproxy_infer_retries_total` 指标（5min 面板），追踪推理内部重试次数
+- **ProcessContext pipeline_mode 字段**: `ProcessContext` 新增 `pipeline_mode` 字段，`DirectPipeline`/`TokenPipeline` 创建上下文时自动标记
+
+### Grafana 可视化优化
+- **计数面板取整**: 所有 `increase()` 计数面板包裹 `round()`，统一设置 `decimals: 0`，消除浮点显示
+- **TITO 缓存命中率**: 从累计统计改为 1h 滚动窗口（`increase(...[1h])`），进程重启不再导致命中率归零
+- **错误分类面板统一**: 推理/轨迹错误细分面板统一中文前缀（推理-/内部-/DB-/客户端-），请求错误细分改为按 `outcome` 分类
+- **限流上报补全**: 轨迹请求错误细分新增 `rate_limit` 分类，信号量拒绝时补全 `rate_limit` 错误上报
+- **推理行布局调整**: 面板宽度改为 4+4+4 三列布局
+- **DIRECT vs TITO 占比面板**: 新增按 `pipeline_mode` 分组的请求占比面板
+- **时间序列样式**: 改为非堆叠线条样式，优化布局宽度
+
+### Bug 修复
+- **推理重试次数硬编码**: 修复 `observe_inference_stream` 装饰器 `retry_count` 硬编码为 0 的问题，改为从 `InferClient._last_retry_count` 读取实际重试次数
+- **模型生命周期面板噪音**: 移除模型生命周期面板中不相关的轨迹存储错误指标
+
+### 文档更新
+- **可观测性指南**: 新增 `docs/guide/observability.md`，详细说明指标体系、Grafana 面板配置与告警规则使用
+- **可观测性设计文档精简**: `docs/design/observability.md` 大幅精简，移除已实现的详细设计，保留架构决策和未来演进方向
+- **部署指南更新**: `docs/guide/deployment.md` 补充可观测性部署说明
+- **推理流式/非流式面板说明**: 补充时间范围说明
+
+### 影响范围
+- `traj_proxy/observability/metrics_collector.py` - 新增 cache_lookups / infer_retries / pipeline_mode 指标定义
+- `traj_proxy/observability/decorators.py` - 修复流式重试次数读取
+- `traj_proxy/observability/events.py` - 事件参数补全
+- `traj_proxy/proxy_core/context.py` - ProcessContext 新增 pipeline_mode 字段
+- `traj_proxy/proxy_core/pipeline/direct_pipeline.py` - 自动标记 pipeline_mode=direct
+- `traj_proxy/proxy_core/pipeline/token_pipeline.py` - 自动标记 pipeline_mode=tito
+- `traj_proxy/serve/routes.py` - 信号量拒绝补全 rate_limit 上报
+- `dockers/observability/configs/grafana/dashboard-src/` - Dashboard 分片全面更新
+- `docs/guide/observability.md` - 新增可观测性使用指南
+- `docs/design/observability.md` - 设计文档精简
+- `docs/guide/deployment.md` - 部署指南更新
+
+---
+
 ## [0.3.2] - 2026-06-12
 
 **类型**: 功能增强 + 重构
