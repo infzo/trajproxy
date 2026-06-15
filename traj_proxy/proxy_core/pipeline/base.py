@@ -7,6 +7,7 @@ BasePipeline - 处理管道抽象基类
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
+import time
 import traceback
 
 from traj_proxy.proxy_core.context import ProcessContext
@@ -145,12 +146,27 @@ class BasePipeline(ABC):
         if not self.request_repository:
             return
 
+        store_start = time.perf_counter()
+
         try:
             await self.request_repository.insert(context, tokenizer_path, run_id)
             logger.info(f"[{context.unique_id}] 轨迹存储成功")
         except DatabaseError as e:
             context.error = f"存储轨迹失败: {str(e)}"
             logger.error(f"[{context.unique_id}] 存储轨迹失败: {str(e)}")
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
+            model = getattr(context, 'model', 'unknown') if context else 'unknown'
+            run_id = getattr(context, 'run_id', '') if context else ''
+            emit(
+                EVENT_TRAJECTORY_STORE_ERROR,
+                model=model,
+                error_type=type(e).__name__,
+                error_message=str(e)[:200],
+                run_id=run_id or "",
+            )
+
+        context.store_duration_ms = (time.perf_counter() - store_start) * 1000
 
     def _update_timing(self, context: ProcessContext):
         """更新时间统计

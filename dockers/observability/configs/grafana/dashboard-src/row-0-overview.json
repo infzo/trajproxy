@@ -1,0 +1,228 @@
+[
+  {
+    "type": "row",
+    "title": "Row 0 — 全局总览",
+    "gridPos": {
+      "h": 1,
+      "w": 24,
+      "x": 0,
+      "y": 0
+    },
+    "collapsed": false
+  },
+  {
+    "id": 100,
+    "type": "piechart",
+    "title": "全站请求类型占比 (1h)",
+    "description": "各请求类型在过去 1 小时的请求占比",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 0,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[1h]))",
+        "legendFormat": "{{ route }}",
+        "refId": "A",
+        "instant": true
+      }
+    ],
+    "options": {
+      "pieType": "donut",
+      "displayLabels": [
+        "percent"
+      ],
+      "legend": {
+        "displayMode": "list",
+        "placement": "right"
+      }
+    }
+  },
+  {
+    "id": 101,
+    "type": "timeseries",
+    "title": "全站请求数 - 按请求类型",
+    "description": "各请求类型请求数量趋势",
+    "gridPos": {
+      "h": 8,
+      "w": 5,
+      "x": 4,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "round(sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[$rate_interval])))",
+        "legendFormat": "{{ route }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 10,
+          "stacking": {
+            "mode": "none"
+          },
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 103,
+    "type": "timeseries",
+    "title": "全站请求数 - 按节点",
+    "description": "各节点请求数量趋势",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 9,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "round(sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\"}[$rate_interval])))",
+        "legendFormat": "{{ node }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 10,
+          "stacking": {
+            "mode": "none"
+          },
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 102,
+    "type": "timeseries",
+    "title": "全站请求耗时 - 按请求类型",
+    "description": "各请求类型 HTTP 耗时 ${quantile:text} 分位",
+    "gridPos": {
+      "h": 8,
+      "w": 5,
+      "x": 15,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile($quantile, sum by (le, route) (rate(trajproxy_api_request_duration_seconds_bucket{node=~\"$node\"}[$rate_interval])))",
+        "legendFormat": "{{ route }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "s",
+        "decimals": 3,
+        "custom": {
+          "fillOpacity": 5,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 36,
+    "type": "timeseries",
+    "title": "模型生命周期事件",
+    "description": "register / unregister",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 20,
+      "y": 1
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[$rate_interval]))",
+        "legendFormat": "{{ action }}:{{ type }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "drawStyle": "bars"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom"
+      }
+    }
+  }
+]

@@ -1,0 +1,1133 @@
+[
+  {
+    "type": "row",
+    "title": "Row 2 — 推理请求",
+    "gridPos": {
+      "h": 1,
+      "w": 24,
+      "x": 0,
+      "y": 20
+    },
+    "collapsed": false
+  },
+  {
+    "id": 11,
+    "type": "timeseries",
+    "title": "推理请求数 - 按作业",
+    "description": "各作业请求数量趋势",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 0,
+      "y": 21
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "round(sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 10,
+          "stacking": {
+            "mode": "none"
+          },
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 12,
+    "type": "timeseries",
+    "title": "推理请求数 - 按结果",
+    "description": "请求数量按结果分类",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 6,
+      "y": 21
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$rate_interval])))",
+        "legendFormat": "{{ outcome }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 20,
+          "drawStyle": "line"
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "success"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "请求成功 (Success)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "stream_partial"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "light-green"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "流式传输部分完成 (Stream Partial)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_client"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "orange"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "客户端-请求不合法 (4xx Client Error)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_server"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "dark-red"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "内部-服务端错误 (5xx Server Error)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_rate_limit"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "purple"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理-请求被限流 (429 Too Many Requests)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_infer"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "blue"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理-服务异常（连接 / HTTP 错误）"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "timeout"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "red"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理-服务超时 (Timeout)"
+            }
+          ]
+        }
+      ]
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 142,
+    "type": "timeseries",
+    "title": "推理内部重试次数 - 按节点",
+    "description": "下游推理服务重试计数，按节点分组，展示重试次数趋势",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 20,
+      "y": 37
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$rate_interval]))",
+        "legendFormat": "{{ node }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 20,
+          "drawStyle": "bars",
+          "stacking": {
+            "mode": "normal"
+          }
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 50,
+    "type": "timeseries",
+    "title": "推理请求端到端耗时 - 按作业 (q=$quantile)",
+    "description": "端到端请求延迟 q=$quantile 分位（含全 Pipeline），按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 0,
+      "y": 29
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile($quantile, sum by (le, run_id) (rate(trajproxy_request_duration_seconds_bucket{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$rate_interval])))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "s",
+        "decimals": 2,
+        "custom": {
+          "fillOpacity": 5,
+          "drawStyle": "line",
+          "spanNulls": true
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 51,
+    "type": "timeseries",
+    "title": "推理服务调用耗时 - 按作业 (q=$quantile)",
+    "description": "对下游推理服务的单次 HTTP 调用耗时 q=$quantile 分位（取 phase=inference），按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 6,
+      "y": 29
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile($quantile, sum by (le, run_id) (rate(trajproxy_phase_duration_seconds_bucket{node=~\"$node\",phase=\"inference\",run_id=~\"$run_id\"}[$rate_interval])))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "s",
+        "decimals": 2,
+        "custom": {
+          "fillOpacity": 5,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 52,
+    "type": "timeseries",
+    "title": "推理首 Token 耗时 (TTFT) - 按作业 (q=$quantile)",
+    "description": "流式请求首 Token 耗时 q=$quantile 分位，按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 12,
+      "y": 29
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile($quantile, sum by (le, run_id) (rate(trajproxy_ttft_seconds_bucket{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "s",
+        "decimals": 2,
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 53,
+    "type": "timeseries",
+    "title": "推理序列长度（输入+输出） - 按作业 (q=$quantile)",
+    "description": "每请求总序列长度 $quantile:text 分位（prompt + completion tokens），按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 16,
+      "y": 29
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile($quantile, sum by (le, run_id) (rate(trajproxy_sequence_length_tokens_bucket{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$rate_interval])))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 22,
+    "type": "timeseries",
+    "title": "推理 Pipeline 各阶段耗时",
+    "description": "识别瓶颈阶段",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 12,
+      "y": 21
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "histogram_quantile(0.95, sum by (le, phase) (rate(trajproxy_phase_duration_seconds_bucket{node=~\"$node\",model=~\"$model\"}[$rate_interval])))",
+        "legendFormat": "{{ phase }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "s",
+        "decimals": 2,
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 13,
+    "type": "piechart",
+    "title": "推理流式与非流式占比(1h)",
+    "description": "流式请求占比",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 16,
+      "y": 21
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (stream) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h]))",
+        "legendFormat": "{{ stream }}",
+        "refId": "A",
+        "instant": true
+      }
+    ],
+    "options": {
+      "pieType": "donut",
+      "displayLabels": [
+        "percent"
+      ],
+      "legend": {
+        "displayMode": "list",
+        "placement": "right"
+      }
+    }
+  },
+  {
+    "id": 14,
+    "type": "piechart",
+    "title": "DIRECT vs TITO 模式占比(1h)",
+    "description": "直接转发模式（direct）与 Token 模式（tito）请求占比",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 20,
+      "y": 21
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (pipeline_mode) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h]))",
+        "legendFormat": "{{ pipeline_mode }}",
+        "refId": "A",
+        "instant": true
+      }
+    ],
+    "options": {
+      "pieType": "donut",
+      "displayLabels": [
+        "percent"
+      ],
+      "legend": {
+        "displayMode": "list",
+        "placement": "right"
+      }
+    }
+  },
+  {
+    "id": 139,
+    "type": "timeseries",
+    "title": "推理请求失败数量 - 按节点",
+    "description": "推理请求失败按节点聚合统计：左轴为请求级失败总数，右轴为轨迹写入 DB 失败数",
+    "gridPos": {
+      "h": 10,
+      "w": 8,
+      "x": 0,
+      "y": 45
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line",
+          "lineWidth": 2,
+          "pointSize": 5,
+          "showPoints": "auto",
+          "spanNulls": false
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byRegexp",
+            "options": "^写入.*"
+          },
+          "properties": [
+            {
+              "id": "custom.axisPlacement",
+              "value": "right"
+            },
+            {
+              "id": "color",
+              "value": {
+                "mode": "palette-classic"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "targets": [
+      {
+        "expr": "round(sum by (node) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[$rate_interval])))",
+        "legendFormat": "失败: {{ node }}",
+        "refId": "A"
+      },
+      {
+        "expr": "round(sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])))",
+        "legendFormat": "写入: {{ node }}",
+        "refId": "B"
+      }
+    ],
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 140,
+    "type": "timeseries",
+    "title": "推理请求失败数量 - 按作业",
+    "description": "推理请求失败按作业聚合统计：左轴为请求级失败总数，右轴为轨迹写入 DB 失败数",
+    "gridPos": {
+      "h": 10,
+      "w": 8,
+      "x": 8,
+      "y": 45
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line",
+          "lineWidth": 2,
+          "pointSize": 5,
+          "showPoints": "auto",
+          "spanNulls": false
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byRegexp",
+            "options": "^写入.*"
+          },
+          "properties": [
+            {
+              "id": "custom.axisPlacement",
+              "value": "right"
+            },
+            {
+              "id": "color",
+              "value": {
+                "mode": "palette-classic"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "targets": [
+      {
+        "expr": "round(sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[$rate_interval])))",
+        "legendFormat": "失败: {{ run_id }}",
+        "refId": "A"
+      },
+      {
+        "expr": "round(sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])))",
+        "legendFormat": "写入: {{ run_id }}",
+        "refId": "B"
+      }
+    ],
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 141,
+    "type": "timeseries",
+    "title": "推理请求错误细分（请选择 Run ID）",
+    "description": "展示所选 run_id 的推理请求所有错误（含客户端、内部、推理服务）按 outcome 拆分的时间分布，含中文友好名称。需先在顶端 Run ID 下拉框选择具体标识，选 All 时为所有标识的聚合。",
+    "gridPos": {
+      "h": 10,
+      "w": 8,
+      "x": 16,
+      "y": 45
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 50,
+          "stacking": {
+            "mode": "normal"
+          },
+          "drawStyle": "bars"
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_client"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "orange"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "客户端-请求不合法 (4xx Client Error)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_server"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "dark-red"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "内部-服务端错误 (5xx Server Error)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_rate_limit"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "purple"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理-请求被限流 (429 Too Many Requests)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_infer"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "blue"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理-服务异常（连接 / HTTP 错误）"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "timeout"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "red"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "推理-服务超时 (Timeout)"
+            }
+          ]
+        }
+      ]
+    },
+    "targets": [
+      {
+        "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout\"}[$rate_interval])))",
+        "legendFormat": "{{ outcome }}",
+        "refId": "A"
+      }
+    ],
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 160,
+    "type": "timeseries",
+    "title": "流完整性分布",
+    "description": "流式请求结果状态分布：full（完整送达）/ partial（中途断裂）/ empty（无内容），反映流式传输质量",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 6,
+      "y": 37
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$rate_interval]))",
+        "legendFormat": "{{ result }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 50,
+          "drawStyle": "bars",
+          "stacking": {
+            "mode": "normal"
+          }
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "full"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "green"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "完整送达 (full)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "partial"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "orange"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "中途断裂 (partial)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "empty"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "red"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "无内容 (empty)"
+            }
+          ]
+        }
+      ]
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "sum",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 161,
+    "type": "timeseries",
+    "title": "活跃作业数量",
+    "description": "有推理请求的活动 run_id 数量，反映当前同时运行的作业数",
+    "gridPos": {
+      "h": 8,
+      "w": 6,
+      "x": 0,
+      "y": 37
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "count(count by (run_id) (increase(trajproxy_requests_total{node=~\"$node\"}[$rate_interval]) > 0))",
+        "legendFormat": "活跃 Run ID 数量",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "custom": {
+          "fillOpacity": 20,
+          "drawStyle": "line",
+          "spanNulls": true
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "lastNotNull",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 162,
+    "type": "timeseries",
+    "title": "Prefill 吞吐量 (Tokens/s) - 按作业",
+    "description": "各作业每秒 Prompt Token 消耗速率（Prefill 阶段吞吐量），按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 12,
+      "y": 37
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (rate(trajproxy_tokens_total{node=~\"$node\",run_id=~\"$run_id\",type=\"prompt\"}[$rate_interval]))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 1,
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line",
+          "spanNulls": true
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  },
+  {
+    "id": 163,
+    "type": "timeseries",
+    "title": "Decode 吞吐量 (Tokens/s) - 按作业",
+    "description": "各作业每秒 Completion Token 产出速率（Decode 阶段吞吐量），按 run_id 分组",
+    "gridPos": {
+      "h": 8,
+      "w": 4,
+      "x": 16,
+      "y": 37
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "sum by (run_id) (rate(trajproxy_tokens_total{node=~\"$node\",run_id=~\"$run_id\",type=\"completion\"}[$rate_interval]))",
+        "legendFormat": "{{ run_id }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 1,
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line",
+          "spanNulls": true
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      },
+      "tooltip": {
+        "mode": "multi"
+      }
+    }
+  }
+]

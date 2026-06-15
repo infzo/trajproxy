@@ -11,6 +11,7 @@ from urllib3.util.retry import Retry
 from traj_proxy.exceptions import InferServiceError, InferTimeoutError
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.config import get_infer_client_config
+from traj_proxy.observability.decorators import observe_inference, observe_inference_stream
 
 logger = get_logger(__name__)
 
@@ -276,11 +277,13 @@ class InferClient:
 
     # --- OpenAI Completions 接口 ---
 
+    @observe_inference
     async def send_completion(self, prompt: PromptInput, model: str, extra_headers: Optional[Dict[str, str]] = None, request_id: str = None, **kwargs) -> Dict[str, Any]:
         url = f"{self.base_url}/completions"
         request_body = self._build_completion_body(prompt, model, stream=False, request_id=request_id, **kwargs)
         return await self._handle_request(url, request_body, extra_headers)
 
+    @observe_inference_stream
     async def send_completion_stream(self, prompt: PromptInput, model: str, extra_headers: Optional[Dict[str, str]] = None, request_id: str = None, **kwargs) -> AsyncIterator[Dict[str, Any]]:
         url = f"{self.base_url}/completions"
         request_body = self._build_completion_body(prompt, model, stream=True, request_id=request_id, **kwargs)
@@ -318,11 +321,13 @@ class InferClient:
 
     # --- OpenAI Chat Completions 接口 ---
 
+    @observe_inference
     async def send_chat_completion(self, messages: List[Dict[str, Any]], model: str, extra_headers: Optional[Dict[str, str]] = None, **kwargs) -> Dict[str, Any]:
         url = f"{self.base_url}/chat/completions"
         request_body = self._build_chat_body(messages, model, stream=False, **kwargs)
         return await self._handle_request(url, request_body, extra_headers)
 
+    @observe_inference_stream
     async def send_chat_completion_stream(self, messages: List[Dict[str, Any]], model: str, extra_headers: Optional[Dict[str, str]] = None, **kwargs) -> AsyncIterator[Dict[str, Any]]:
         url = f"{self.base_url}/chat/completions"
         request_body = self._build_chat_body(messages, model, stream=True, **kwargs)

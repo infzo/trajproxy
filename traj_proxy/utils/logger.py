@@ -10,6 +10,17 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
+class RequestIDFilter(logging.Filter):
+    """日志过滤器：注入 request_id 到记录中"""
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            from traj_proxy.observability.request_context import get_request_id
+            record.request_id = get_request_id("")
+        except Exception:
+            record.request_id = ""
+        return True
+
+
 def get_logger(
     name: str,
     log_level: str = None,
@@ -49,10 +60,15 @@ def get_logger(
 
     # 创建格式化器
     # 格式：时间戳 | 日志级别 | 模块名 | WorkerID | 消息
-    formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)s | %(module)s | %(worker_id)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    log_format = os.environ.get("LOG_FORMAT", "text")
+    if log_format == "json":
+        from traj_proxy.observability.json_formatter import JsonFormatter
+        formatter = JsonFormatter()
+    else:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)s | %(module)s | %(worker_id)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
 
     # 尝试创建日志目录并添加文件处理器
     log_path = Path(log_dir)
@@ -76,6 +92,7 @@ def get_logger(
             )
             file_handler.setLevel(level)
             file_handler.setFormatter(formatter)
+            file_handler.addFilter(RequestIDFilter())
             logger.addHandler(file_handler)
         except (OSError, PermissionError) as e:
             import warnings
@@ -85,6 +102,7 @@ def get_logger(
     console_handler = logging.StreamHandler()
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
+    console_handler.addFilter(RequestIDFilter())
     logger.addHandler(console_handler)
 
     # 添加 Worker ID 上下文过滤器

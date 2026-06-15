@@ -1,0 +1,136 @@
+{
+  "uid": "trajproxy-overview",
+  "title": "TrajProxy Overview",
+  "description": "TrajProxy 可观测性 Dashboard (Level 2) — 概览 / 负载 / 性能 / 错误 / 系统",
+  "tags": [
+    "trajproxy",
+    "observability"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 3,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "数据源",
+        "refresh": 1
+      },
+      {
+        "name": "node",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(up{job=\"trajproxy\"}, node)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "节点",
+        "allValue": ".*",
+        "current": {}
+      },
+      {
+        "name": "model",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(trajproxy_requests_total, model)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "模型",
+        "allValue": ".*",
+        "current": {}
+      },
+      {
+        "name": "run_id",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values({__name__=~\"trajproxy_requests_total|trajproxy_api_requests_total\"}, run_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "作业",
+        "allValue": ".*",
+        "current": {}
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(up{job=\"trajproxy\"}, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "label": "实例",
+        "allValue": ".*",
+        "current": {}
+      },
+      {
+        "name": "quantile",
+        "type": "custom",
+        "label": "分位数",
+        "query": "P50 : 0.5, P95 : 0.95, P99 : 0.99",
+        "current": {
+          "text": "P95",
+          "value": "0.95"
+        },
+        "options": [
+          { "text": "P50", "value": "0.5",  "selected": false },
+          { "text": "P95", "value": "0.95", "selected": true  },
+          { "text": "P99", "value": "0.99", "selected": false }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0,
+        "sort": 0
+      },
+      {
+        "name": "rate_interval",
+        "type": "interval",
+        "label": "统计窗口",
+        "query": "30s,1m,2m,5m,10m,15m",
+        "current": {
+          "text": "1m",
+          "value": "1m"
+        },
+        "options": [
+          { "text": "30s",  "value": "30s",  "selected": false },
+          { "text": "1m",   "value": "1m",   "selected": true  },
+          { "text": "2m",   "value": "2m",   "selected": false },
+          { "text": "5m",   "value": "5m",   "selected": false },
+          { "text": "10m",  "value": "10m",  "selected": false },
+          { "text": "15m",  "value": "15m",  "selected": false }
+        ],
+        "auto": false,
+        "auto_count": 30,
+        "auto_min": "10s",
+        "includeAll": false,
+        "multi": false,
+        "hide": 0,
+        "sort": 3
+      }
+    ]
+  },
+  "panels": []
+}

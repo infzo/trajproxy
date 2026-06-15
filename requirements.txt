@@ -9,6 +9,7 @@ psycopg[binary,pool]==3.1.18
 transformers>=5.0
 jinja2
 huggingface-hub>=0.20.0
+prometheus-client>=0.20.0
 
 # Parser dependencies (vllm parser compatibility)
 regex>=2024.0.0

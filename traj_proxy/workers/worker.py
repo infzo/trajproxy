@@ -20,6 +20,8 @@ from traj_proxy.proxy_core.provider import TrajectoryProvider
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.config import get_database_pool_config, get_max_concurrent_requests
 from traj_proxy.utils.validators import normalize_run_id
+from traj_proxy.observability import metrics_collector
+from traj_proxy.observability import setup as setup_observability
 
 logger = get_logger(__name__)
 
@@ -104,6 +106,21 @@ def _set_current_app(app: Optional[FastAPI]):
     _thread_local.app = app
 
 
+def classify_route(path: str) -> str:
+    """将请求路径分类为路由标签，用于指标打点"""
+    if "/v1/chat/completions" in path:
+        return "chat_completion"
+    if "/v1/completions" in path:
+        return "completion"
+    if "/v1/models" in path:
+        return "model_management"
+    if "/trajectory" in path or "/transcript" in path:
+        return "trajectory"
+    if "/health" in path:
+        return "health"
+    return "other"
+
+
 class ProxyWorker:
     """
     统一的代理 Worker
@@ -152,7 +169,39 @@ class ProxyWorker:
         self._setup_routes()
 
     def _setup_middleware(self):
-        """设置中间件：CORS 支持和请求日志"""
+        """设置中间件：CORS 支持、API 指标采集和请求日志"""
+        # 添加 API 指标中间件（最先添加 = 最外层 = 最后执行）
+        @self.app.middleware("http")
+        async def api_metrics_middleware_handler(request: Request, call_next):
+            """HTTP 中间件：API 请求耗时、计数、错误指标采集"""
+            import time as _time
+
+            t0 = _time.perf_counter()
+            route = classify_route(str(request.url.path))
+
+            try:
+                response = await call_next(request)
+                duration_ms = (_time.perf_counter() - t0) * 1000
+                # 从 request.state 获取 metric_run_id（routes.py 中设置，首次请求时可能为空）
+                run_id = getattr(request.state, "metric_run_id", "") or ""
+                if metrics_collector.API_REQUEST_DURATION is not None:
+                    metrics_collector.API_REQUEST_DURATION.labels(route=route, run_id=run_id).observe(duration_ms / 1000)
+                if metrics_collector.API_REQUESTS_TOTAL is not None:
+                    metrics_collector.API_REQUESTS_TOTAL.labels(
+                        route=route, method=request.method,
+                        status_code=str(response.status_code), run_id=run_id,
+                    ).inc()
+                return response
+            except Exception as exc:
+                duration_ms = (_time.perf_counter() - t0) * 1000
+                run_id = getattr(request.state, "metric_run_id", "") or ""
+                if metrics_collector.API_ERRORS is not None:
+                    metrics_collector.API_ERRORS.labels(
+                        route=route, run_id=run_id,
+                        error_category=type(exc).__name__,
+                    ).inc()
+                raise
+
         # 添加 CORS 中间件，允许本地开发工具访问
         self.app.add_middleware(
             CORSMiddleware,
@@ -166,6 +215,16 @@ class ProxyWorker:
             """请求日志中间件：记录请求详情和响应耗时"""
             start_time = time.time()
             request_id = str(uuid.uuid4())[:8]
+
+            # 可观测性：RequestID 传播
+            import uuid as _uuid
+            obs_request_id = request.headers.get("X-Request-ID", str(_uuid.uuid4()))[:32]
+            try:
+                from traj_proxy.observability.request_context import set_request_id
+                set_request_id(obs_request_id)
+            except Exception:
+                pass
+            request.state.request_id = obs_request_id
 
             # 记录请求详情
             url = str(request.url)
@@ -266,6 +325,9 @@ class ProxyWorker:
         self.processor_manager = ProcessorManager(self.db_manager)
         self.app.state.processor_manager = self.processor_manager
 
+        # 可观测性：将 db_manager 暴露到 app.state（供健康检查使用）
+        self.app.state.db_manager = self.db_manager
+
         # 创建 TranscriptProvider（共享 request_repository）
         self.transcript_provider = TrajectoryProvider(request_repository)
         self.app.state.transcript_provider = self.transcript_provider
@@ -306,6 +368,9 @@ class ProxyWorker:
 
         logger.info(f"ProxyWorker 初始化完成，预置模型: {self.processor_manager.config_processor_count}, "
                     f"动态模型: {self.processor_manager.dynamic_processor_count}")
+
+        # 初始化可观测性系统
+        setup_observability(self.app)
 
     async def shutdown(self):
         """关闭资源"""

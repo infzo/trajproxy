@@ -15,6 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
+from traj_proxy.observability import metrics_collector
 
 logger = get_logger(__name__)
 
@@ -65,6 +66,13 @@ class DatabaseManager:
             logger.info("DatabaseManager: 正在打开连接池...")
             await self.pool.open()
             logger.info("DatabaseManager: 连接池已打开，初始化完成")
+
+            # 可观测性：上报连接池使用量
+            if metrics_collector.DB_POOL_USAGE is not None:
+                pool_config = self.pool_config
+                metrics_collector.DB_POOL_USAGE.labels(state="peak").set(
+                    pool_config.get("max_size", 10)
+                )
 
             # 启动连接池监控任务
             self._monitor_task = asyncio.create_task(self._monitor_pool())

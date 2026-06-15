@@ -109,3 +109,7 @@ class ProcessContext:
     stream_logprobs: Optional[Dict[str, Any]] = None            # logprobs
     stream_stop_reason: Optional[Any] = None   # vLLM 扩展字段
     stream_token_ids: Optional[List[int]] = None                # vLLM 扩展字段
+
+    # ========== 可观测性字段 ==========
+    store_duration_ms: Optional[float] = None   # 轨迹存储耗时（毫秒）
+    pipeline_mode: str = "direct"               # 管道模式：direct / tito

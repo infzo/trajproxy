@@ -29,6 +29,9 @@ from traj_proxy.store.models import ModelConfig
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.config import get_models_dir, get_infer_client_config, get_processor_cache_max_size
+from traj_proxy.observability.event_bus import emit
+from traj_proxy.observability.events import EVENT_MODEL_LIFECYCLE
+from traj_proxy.observability.decorators import observe_model_lifecycle
 
 # API 数据模型已移至 schemas 模块
 from traj_proxy.serve.schemas import (
@@ -267,6 +270,7 @@ class ProcessorManager:
 
     # ========== ModelSynchronizer 回调接口 ==========
 
+    @observe_model_lifecycle("register", "dynamic")
     async def register_from_config(self, config: ModelConfig):
         """从配置注册模型（供 ModelSynchronizer 调用）
 
@@ -279,6 +283,7 @@ class ProcessorManager:
         self._dynamic_configs[key] = config
         logger.debug(f"配置已存储（同步回调）: {key}")
 
+    @observe_model_lifecycle("unregister", "dynamic")
     async def unregister_by_key(self, key: Tuple[str, str]):
         """根据 key 删除模型（供 ModelSynchronizer 调用）
 
@@ -387,6 +392,7 @@ class ProcessorManager:
             updated_at=utcnow()
         )
         self._config_configs[key] = config
+        emit(EVENT_MODEL_LIFECYCLE, action="register", model=model_name, run_id=run_id, model_type="static")
         logger.info(f"[{model_name}] 注册预置模型成功: run_id={run_id}")
 
     async def register_dynamic_processor(
@@ -474,6 +480,7 @@ class ProcessorManager:
                 logger.error(f"持久化模型到数据库失败: {e}\n{traceback.format_exc()}")
                 raise DatabaseError(f"注册模型失败（数据库错误）: {str(e)}")
 
+        emit(EVENT_MODEL_LIFECYCLE, action="register", model=model_name, run_id=run_id, model_type="dynamic")
         return config
 
     async def unregister_dynamic_processor(self, model_name: str, persist_to_db: bool = True, run_id: str = "") -> bool:
@@ -515,6 +522,9 @@ class ProcessorManager:
             except Exception as e:
                 logger.error(f"[{model_name}] 从数据库删除模型失败: {e}\n{traceback.format_exc()}")
                 raise DatabaseError(f"删除模型失败（数据库错误）: {str(e)}")
+
+        if deleted:
+            emit(EVENT_MODEL_LIFECYCLE, action="unregister", model=model_name, run_id=run_id, model_type="dynamic")
 
         return deleted
 

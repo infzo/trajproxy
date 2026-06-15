@@ -1,0 +1,249 @@
+[
+  {
+    "type": "row",
+    "title": "Row 4 — 系统资源",
+    "gridPos": {
+      "h": 1,
+      "w": 24,
+      "x": 0,
+      "y": 76
+    },
+    "collapsed": false
+  },
+  {
+    "id": 40,
+    "type": "stat",
+    "title": "Worker 存活状态",
+    "description": "up==1 为正常",
+    "gridPos": {
+      "h": 9,
+      "w": 4,
+      "x": 0,
+      "y": 77
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "up{job=\"trajproxy\",instance=~\"$instance\"}",
+        "legendFormat": "{{ instance }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {
+              "color": "red",
+              "value": null
+            },
+            {
+              "color": "green",
+              "value": 1
+            }
+          ]
+        },
+        "mappings": [
+          {
+            "type": "value",
+            "options": {
+              "0": {
+                "text": "DOWN",
+                "color": "red"
+              },
+              "1": {
+                "text": "UP",
+                "color": "green"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": 41,
+    "type": "timeseries",
+    "title": "Worker 内存 (RSS)",
+    "description": "各实例常驻内存",
+    "gridPos": {
+      "h": 9,
+      "w": 5,
+      "x": 4,
+      "y": 77
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "process_resident_memory_bytes{job=\"trajproxy\",instance=~\"$instance\"}",
+        "legendFormat": "{{ instance }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "bytes",
+        "custom": {
+          "fillOpacity": 15,
+          "drawStyle": "line",
+          "thresholdsStyle": {
+            "mode": "line"
+          }
+        },
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {
+              "color": "green",
+              "value": null
+            },
+            {
+              "color": "red",
+              "value": 2147483648
+            }
+          ]
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "last"
+        ]
+      }
+    }
+  },
+  {
+    "id": 42,
+    "type": "timeseries",
+    "title": "CPU 使用率",
+    "description": "各实例 CPU 占用 (rate of cpu seconds)",
+    "gridPos": {
+      "h": 9,
+      "w": 5,
+      "x": 9,
+      "y": 77
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "rate(process_cpu_seconds_total{job=\"trajproxy\",instance=~\"$instance\"}[$rate_interval]) * 100",
+        "legendFormat": "{{ instance }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "percent",
+        "custom": {
+          "fillOpacity": 15,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "mean",
+          "max"
+        ]
+      }
+    }
+  },
+  {
+    "id": 44,
+    "type": "timeseries",
+    "title": "DB 连接池使用率 - 按节点标识",
+    "description": "used / peak 比率 + 连接数趋势（按 node 区分）",
+    "gridPos": {
+      "h": 9,
+      "w": 5,
+      "x": 19,
+      "y": 77
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "trajproxy_db_pool_usage{node=~\"$node\",state=\"used\"}",
+        "legendFormat": "{{instance}} - used",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "max"
+        ]
+      }
+    }
+  },
+  {
+    "id": 45,
+    "type": "timeseries",
+    "title": "打开文件描述符",
+    "description": "进程打开 FD 数",
+    "gridPos": {
+      "h": 9,
+      "w": 5,
+      "x": 14,
+      "y": 77
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "process_open_fds{job=\"trajproxy\",instance=~\"$instance\"}",
+        "legendFormat": "{{ instance }}",
+        "refId": "A"
+      }
+    ],
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "custom": {
+          "fillOpacity": 10,
+          "drawStyle": "line"
+        }
+      }
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "last"
+        ]
+      }
+    }
+  }
+]

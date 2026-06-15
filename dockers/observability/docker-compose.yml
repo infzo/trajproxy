@@ -1,0 +1,140 @@
+# ============================================================
+# TrajProxy 可观测性栈（独立部署）
+# ============================================================
+# 通过 host.docker.internal 网络采集业务服务指标。
+# 前提：业务服务（TrajProxy、LiteLLM）已在宿主机运行。
+#
+# 数据持久化（bind mount 到宿主机，重新部署不会丢失）：
+#   Prometheus   → ./data/prometheus/
+#   Grafana      → ./data/grafana/
+#   AlertManager → ./data/alertmanager/
+#
+# 启动：
+#   docker compose -f dockers/observability/docker-compose.yml up -d
+#   或使用 Makefile: cd dockers/observability && make up
+#   或一键脚本: bash scripts/start_docker_observability.sh
+#
+# 访问（端口可通过 .env 配置）：
+#   Prometheus  → http://localhost:${PROMETHEUS_PORT:-19090}
+#   Grafana     → http://localhost:${GRAFANA_PORT:-3000}  (admin / trajproxy)
+#   AlertManager→ http://localhost:${ALERTMANAGER_PORT:-9093}
+#   Viewer      → http://localhost:${VIEWER_PORT:-8081}  (轨迹回放查看器)
+# ============================================================
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: observability-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-19090}:${PROMETHEUS_PORT:-19090}"
+    networks:
+      - observability-net
+    volumes:
+      - ./configs/prometheus:/etc/prometheus:ro
+      - ./data/prometheus:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}"
+      - "--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-50GB}"
+      - "--web.listen-address=:${PROMETHEUS_PORT:-19090}"
+      - "--web.enable-lifecycle"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:${PROMETHEUS_PORT:-19090}/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: observability-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:${GRAFANA_PORT:-3000}"
+    networks:
+      - observability-net
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-trajproxy}
+      - GF_SERVER_HTTP_PORT=${GRAFANA_PORT:-3000}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./data/grafana:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:${GRAFANA_PORT:-3000}/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: observability-alertmanager
+    restart: unless-stopped
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:${ALERTMANAGER_PORT:-9093}"
+    networks:
+      - observability-net
+    volumes:
+      - ./configs/alertmanager:/etc/alertmanager:ro
+      - ./data/alertmanager:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.listen-address=:${ALERTMANAGER_PORT:-9093}"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.2"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:${ALERTMANAGER_PORT:-9093}/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  trajectory-viewer:
+    image: nginx:alpine
+    container_name: observability-viewer
+    restart: unless-stopped
+    ports:
+      - "${VIEWER_PORT:-8081}:80"
+    networks:
+      - observability-net
+    volumes:
+      - ../../scripts/replay_trajectory_viewer.html:/usr/share/nginx/html/index.html:ro
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.1"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  observability-net:
+    driver: bridge

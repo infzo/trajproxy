@@ -42,6 +42,31 @@ from traj_proxy.utils.validators import (
 )
 from traj_proxy.serve.error_handler import build_error_response
 
+
+def _emit_api_error(route: str, error: str, error_category: str = "unknown", run_id: str = "") -> None:
+    """延迟导入 emit API 错误事件"""
+    try:
+        from traj_proxy.observability.event_bus import emit
+        from traj_proxy.observability.events import EVENT_API_ERROR
+        emit(EVENT_API_ERROR, route=route, run_id=run_id, error_category=error_category)
+    except Exception:
+        pass  # 观测失败不影响业务
+
+
+def _emit_trajectory_query_completed(route: str, run_id: str = "", record_count: int = 0, response_size_bytes: int = 0) -> None:
+    """延迟导入 emit 轨迹查询完成事件"""
+    try:
+        from traj_proxy.observability.event_bus import emit
+        from traj_proxy.observability.events import EVENT_TRAJECTORY_QUERY_COMPLETED
+        emit(
+            EVENT_TRAJECTORY_QUERY_COMPLETED,
+            route=route, run_id=run_id,
+            record_count=record_count, response_size_bytes=response_size_bytes,
+        )
+    except Exception:
+        pass
+
+
 # 路由定义
 chat_router = APIRouter()
 model_router = APIRouter()
@@ -168,13 +193,21 @@ async def chat_completions(
     acquired = False
     if semaphore:
         try:
+            _sem_t0 = time.perf_counter()
             await asyncio.wait_for(semaphore.acquire(), timeout=5.0)
             acquired = True
+            _wait_ms = (time.perf_counter() - _sem_t0) * 1000
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_SEMAPHORE_ACQUIRED
+            emit(EVENT_SEMAPHORE_ACQUIRED, wait_duration_ms=_wait_ms, model="unknown")
         except asyncio.TimeoutError:
             max_conc = getattr(request.app.state, "max_concurrent_requests", "?")
             logger.warning(
                 f"[{request_id}] 并发限流拒绝: max_concurrent={max_conc} 已达上限"
             )
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_CONCURRENCY_REJECTED
+            emit(EVENT_CONCURRENCY_REJECTED, model="unknown", run_id="", wait_duration_ms=5000.0)
             raise HTTPException(
                 status_code=429,
                 detail="服务繁忙，请稍后重试",
@@ -579,11 +612,17 @@ async def get_trajectory(
             f"{response_size_kb:.1f}KB, fields={fields or '全部'}, "
             f"DB查询={t_db_elapsed:.1f}ms, 序列化={t_ser_elapsed:.1f}ms, 总耗时={t_total:.1f}ms"
         )
+        _emit_trajectory_query_completed(
+            route="trajectory_legacy", run_id=session_id,
+            record_count=len(records), response_size_bytes=len(json_bytes),
+        )
         return Response(content=json_bytes, media_type="application/json")
     except asyncio.TimeoutError:
+        _emit_api_error(route="trajectory_legacy", error="timeout", error_category="timeout")
         raise HTTPException(status_code=504, detail="轨迹查询超时")
     except Exception as e:
         logger.exception(f"轨迹查询失败: {str(e)}")
+        _emit_api_error(route="trajectory_legacy", error=str(e), error_category="other")
         error_detail, status_code = build_error_response("trajectory_query", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     finally:
@@ -615,14 +654,21 @@ async def list_trajectories(
 
     try:
         provider = get_provider(request)
-        return await asyncio.wait_for(
+        result = await asyncio.wait_for(
             provider.list_trajectories(run_id),
             timeout=TRAJECTORY_DB_TIMEOUT
         )
+        _emit_trajectory_query_completed(
+            route="trajectory_list", run_id=run_id,
+            record_count=len(result) if isinstance(result, list) else 0, response_size_bytes=0,
+        )
+        return result
     except asyncio.TimeoutError:
+        _emit_api_error(route="trajectory_list", error="timeout", error_category="timeout")
         raise HTTPException(status_code=504, detail="轨迹列表查询超时")
     except Exception as e:
         logger.exception(f"查询轨迹列表失败: {str(e)}")
+        _emit_api_error(route="trajectory_list", error=str(e), error_category="other")
         error_detail, status_code = build_error_response("list_trajectories", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
 
@@ -707,11 +753,18 @@ async def get_trajectory_detail(
             f"{response_size_kb:.1f}KB, fields={fields or '全部'}, "
             f"DB查询={t_db_elapsed:.1f}ms, 序列化={t_ser_elapsed:.1f}ms, 总耗时={t_total:.1f}ms"
         )
+        _emit_trajectory_query_completed(
+            route="trajectory_detail", run_id=session_id,
+            record_count=min(record_count, limit) if limit else record_count,
+            response_size_bytes=len(json_bytes),
+        )
         return Response(content=json_bytes, media_type="application/json")
     except asyncio.TimeoutError:
+        _emit_api_error(route="trajectory_detail", error="timeout", error_category="timeout")
         raise HTTPException(status_code=504, detail="轨迹查询超时")
     except Exception as e:
         logger.exception(f"查询轨迹详情失败: {str(e)}")
+        _emit_api_error(route="trajectory_detail", error=str(e), error_category="other")
         error_detail, status_code = build_error_response("get_trajectory_detail", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     finally:

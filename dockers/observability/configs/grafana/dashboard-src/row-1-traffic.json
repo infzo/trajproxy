@@ -1,0 +1,394 @@
+[
+  {
+    "type": "row",
+    "title": "Row 1 — 流量概览",
+    "gridPos": {
+      "h": 1,
+      "w": 24,
+      "x": 0,
+      "y": 10
+    },
+    "collapsed": false
+  },
+  {
+    "id": 4,
+    "type": "stat",
+    "title": "推理请求概览",
+    "description": "推理流量综合概览：请求趋势、活跃请求数、1h成功率、1h平均耗时",
+    "gridPos": {
+      "h": 8,
+      "w": 8,
+      "x": 0,
+      "y": 11
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$rate_interval])))",
+        "legendFormat": "请求数",
+        "refId": "A"
+      },
+      {
+        "expr": "sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\",outcome=\"success\"}[1h])) / sum(rate(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[1h])) * 100",
+        "legendFormat": "成功率(1h)",
+        "refId": "C",
+        "instant": true
+      },
+      {
+        "expr": "sum(rate(trajproxy_request_duration_seconds_sum{node=~\"$node\",model=~\"$model\"}[1h])) / sum(rate(trajproxy_request_duration_seconds_count{node=~\"$node\",model=~\"$model\"}[1h]))",
+        "legendFormat": "平均耗时(1h)",
+        "refId": "D",
+        "instant": true
+      }
+    ],
+    "options": {
+      "graphMode": "area",
+      "textMode": "value_and_name",
+      "colorMode": "value",
+      "reduceOptions": {
+        "calcs": [
+          "lastNotNull"
+        ]
+      },
+      "orientation": "auto",
+      "justifyMode": "auto"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "成功率(1h)"
+          },
+          "properties": [
+            {
+              "id": "unit",
+              "value": "percent"
+            },
+            {
+              "id": "decimals",
+              "value": 1
+            },
+            {
+              "id": "thresholds",
+              "value": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 90
+                  },
+                  {
+                    "color": "green",
+                    "value": 99
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "平均耗时(1h)"
+          },
+          "properties": [
+            {
+              "id": "unit",
+              "value": "s"
+            },
+            {
+              "id": "decimals",
+              "value": 1
+            },
+            {
+              "id": "thresholds",
+              "value": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 10
+                  },
+                  {
+                    "color": "red",
+                    "value": 30
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": 110,
+    "type": "stat",
+    "title": "模型请求概览",
+    "description": "模型管理 API（注册/删除/列表）综合概览：请求趋势、1h成功率、1h平均耗时",
+    "gridPos": {
+      "h": 8,
+      "w": 8,
+      "x": 8,
+      "y": 11
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$rate_interval])))",
+        "legendFormat": "请求数",
+        "refId": "A"
+      },
+      {
+        "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\",status_code=~\"2..\"}[1h])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h])) * 100",
+        "legendFormat": "成功率(1h)",
+        "refId": "B",
+        "instant": true
+      },
+      {
+        "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[1h]))",
+        "legendFormat": "平均耗时(1h)",
+        "refId": "C",
+        "instant": true
+      }
+    ],
+    "options": {
+      "graphMode": "area",
+      "textMode": "value_and_name",
+      "colorMode": "value",
+      "reduceOptions": {
+        "calcs": [
+          "lastNotNull"
+        ]
+      },
+      "orientation": "auto",
+      "justifyMode": "auto"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "成功率(1h)"
+          },
+          "properties": [
+            {
+              "id": "unit",
+              "value": "percent"
+            },
+            {
+              "id": "decimals",
+              "value": 1
+            },
+            {
+              "id": "thresholds",
+              "value": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 90
+                  },
+                  {
+                    "color": "green",
+                    "value": 99
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "平均耗时(1h)"
+          },
+          "properties": [
+            {
+              "id": "unit",
+              "value": "s"
+            },
+            {
+              "id": "decimals",
+              "value": 1
+            },
+            {
+              "id": "thresholds",
+              "value": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "id": 111,
+    "type": "stat",
+    "title": "轨迹请求概览",
+    "description": "轨迹查询（列表 + 详情）综合概览：请求趋势、1h成功率、1h平均耗时",
+    "gridPos": {
+      "h": 8,
+      "w": 8,
+      "x": 16,
+      "y": 11
+    },
+    "datasource": {
+      "type": "prometheus",
+      "uid": "$datasource"
+    },
+    "targets": [
+      {
+        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$rate_interval])))",
+        "legendFormat": "请求数",
+        "refId": "A"
+      },
+      {
+        "expr": "sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\",status_code=~\"2..\"}[1h])) / sum(rate(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h])) * 100",
+        "legendFormat": "成功率(1h)",
+        "refId": "B",
+        "instant": true
+      },
+      {
+        "expr": "sum(rate(trajproxy_api_request_duration_seconds_sum{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h])) / sum(rate(trajproxy_api_request_duration_seconds_count{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[1h]))",
+        "legendFormat": "平均耗时(1h)",
+        "refId": "C",
+        "instant": true
+      }
+    ],
+    "options": {
+      "graphMode": "area",
+      "textMode": "value_and_name",
+      "colorMode": "value",
+      "reduceOptions": {
+        "calcs": [
+          "lastNotNull"
+        ]
+      },
+      "orientation": "auto",
+      "justifyMode": "auto"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "short",
+        "decimals": 0
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "成功率(1h)"
+          },
+          "properties": [
+            {
+              "id": "unit",
+              "value": "percent"
+            },
+            {
+              "id": "decimals",
+              "value": 1
+            },
+            {
+              "id": "thresholds",
+              "value": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "red",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 90
+                  },
+                  {
+                    "color": "green",
+                    "value": 99
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "平均耗时(1h)"
+          },
+          "properties": [
+            {
+              "id": "unit",
+              "value": "s"
+            },
+            {
+              "id": "decimals",
+              "value": 1
+            },
+            {
+              "id": "thresholds",
+              "value": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 5
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

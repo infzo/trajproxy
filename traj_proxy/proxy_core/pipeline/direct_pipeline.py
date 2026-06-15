@@ -107,6 +107,9 @@ class DirectPipeline(BasePipeline):
             f"model={self.model}, messages_count={len(messages)}"
         )
 
+        # 标记管道模式
+        context.pipeline_mode = "direct"
+
         try:
             # 直接转发到推理服务
             t0 = time.perf_counter()
@@ -147,6 +150,17 @@ class DirectPipeline(BasePipeline):
             self._handle_error(context, e)
             # 即使出错也尝试存储
             await self._store_trajectory(context, run_id=context.run_id)
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
+            model = getattr(context, 'model', 'unknown') if context else 'unknown'
+            run_id = getattr(context, 'run_id', '') if context else ''
+            emit(
+                EVENT_TRAJECTORY_STORE_ERROR,
+                model=model,
+                error_type=type(e).__name__,
+                error_message=str(e)[:200],
+                run_id=run_id or "",
+            )
             raise
 
     async def process_stream(
@@ -169,6 +183,9 @@ class DirectPipeline(BasePipeline):
             f"[{context.unique_id}] 开始流式处理请求（直接转发模式）: "
             f"model={self.model}, messages_count={len(messages)}"
         )
+
+        # 标记管道模式
+        context.pipeline_mode = "direct"
 
         try:
             # 直接转发到推理服务的流式接口
@@ -199,6 +216,17 @@ class DirectPipeline(BasePipeline):
 
         except Exception as e:
             self._handle_error(context, e)
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_STREAM_CLIENT_DISCONNECT
+            model_attr = getattr(context, 'model', 'unknown') if context else 'unknown'
+            chunk_count = getattr(context, 'stream_chunk_count', 0) if context else 0
+            duration_ms = getattr(context, 'processing_duration_ms', 0) or 0 if context else 0
+            emit(
+                EVENT_STREAM_CLIENT_DISCONNECT,
+                model=model_attr,
+                chunk_count=chunk_count,
+                duration_ms=duration_ms,
+            )
             raise
 
     def _accumulate_stream_fields(
