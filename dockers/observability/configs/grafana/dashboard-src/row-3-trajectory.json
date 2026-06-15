@@ -423,6 +423,63 @@
               "value": "内部-其他未知错误 (Other)"
             }
           ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "validation"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "yellow"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "客户端-参数校验失败 (422 Validation)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "client_error"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "orange"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "客户端-其他 4xx 错误 (Client Error)"
+            }
+          ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "server_error"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "dark-red"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "内部-其他 5xx 错误 (Server Error)"
+            }
+          ]
         }
       ]
     },

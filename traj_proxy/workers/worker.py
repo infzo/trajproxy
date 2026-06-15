@@ -94,6 +94,20 @@ def get_transcript_provider(request: Optional[Request] = None) -> TrajectoryProv
     return tp
 
 
+# 轨迹路由集合（用于中间件兜底错误上报）
+_TRAJECTORY_ROUTES = frozenset({"trajectory_list", "trajectory_detail", "trajectory_legacy"})
+
+
+def _emit_api_error_silently(route: str, run_id: str, error_category: str) -> None:
+    """fire-and-forget 上报 API 错误，仅用于中间件兜底，不影响主业务流"""
+    try:
+        from traj_proxy.observability.event_bus import emit
+        from traj_proxy.observability.events import EVENT_API_ERROR
+        emit(EVENT_API_ERROR, route=route, run_id=run_id, error_category=error_category)
+    except Exception:
+        pass
+
+
 # 线程本地存储，用于存储当前 Worker 的 app 实例
 _thread_local = threading.local()
 
@@ -281,6 +295,15 @@ class ProxyWorker:
             run_id 提取策略：
             - trajectory_list：从 query param `run_id` 提取（路由处理前）
             - trajectory_detail / trajectory_legacy：由路由 handler 写入 `request.state.metric_run_id`，调用后读取
+
+            错误上报兜底策略：
+            - FastAPI 框架在路由函数执行**之前**拦截的错误（如 422 参数校验）不会进入业务层
+              try/except，导致 trajproxy_api_errors_total 细分指标漏记。
+            - 本中间件在响应/异常路径末尾对轨迹路由做兜底上报：
+                * 422 → error_category="validation"
+                * 未捕获异常 → error_category="server_error"
+            - 与业务层 _emit_api_error 不冲突：业务层只产生 timeout/database/rate_limit/
+              serialize_timeout/other 分类，不会产生 validation/server_error。
             """
             from traj_proxy.observability.label_guards import safe_run_id_label
 
@@ -306,6 +329,9 @@ class ProxyWorker:
                 metrics_collector.API_REQUESTS_TOTAL.labels(
                     route=route, method=method, status_code="500", run_id=run_id_label
                 ).inc()
+                # 未捕获异常兜底上报（业务代码必然未执行 _emit_api_error，否则会被捕获为 HTTPException）
+                if route in _TRAJECTORY_ROUTES:
+                    _emit_api_error_silently(route, run_id_label, "server_error")
                 raise
             duration = time.perf_counter() - t0
             code = str(response.status_code)
@@ -314,6 +340,9 @@ class ProxyWorker:
             metrics_collector.API_REQUESTS_TOTAL.labels(
                 route=route, method=method, status_code=code, run_id=run_id_label
             ).inc()
+            # 框架层 422 兜底上报（业务代码在 422 场景下不会执行 _emit_api_error）
+            if route in _TRAJECTORY_ROUTES and code == "422":
+                _emit_api_error_silently(route, run_id_label, "validation")
             return response
 
     def _setup_routes(self):

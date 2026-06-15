@@ -32,7 +32,15 @@ EVENT_TRAJECTORY_STORE_ERROR = "trajectory.store_error"
 
 # ── API 请求错误（轨迹/模型接口的分类异常上报）──
 # kwargs: route: str, run_id: str, error_category: str
-# error_category 枚举: database / timeout / serialize_timeout / rate_limit / other
+# error_category 枚举:
+#   - database           : 数据库异常（业务层上报）
+#   - timeout            : DB 查询超时（业务层上报）
+#   - serialize_timeout  : JSON 序列化超时（业务层上报）
+#   - rate_limit         : 并发限流 429（业务层上报）
+#   - other              : 其他未知错误（业务层兜底）
+#   - validation         : 参数校验失败 422（中间件兜底上报）
+#   - client_error       : 其他 4xx 客户端错误（中间件兜底上报）
+#   - server_error       : 其他 5xx 服务端错误（中间件兜底上报）
 EVENT_API_ERROR = "api.error"
 
 # ── 流式客户端断连 ──
