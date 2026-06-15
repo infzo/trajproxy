@@ -61,7 +61,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m]))",
+        "expr": "round(sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m])))",
         "legendFormat": "{{ route }}",
         "refId": "A"
       }
@@ -69,6 +69,7 @@
     "fieldConfig": {
       "defaults": {
         "unit": "short",
+        "decimals": 0,
         "custom": {
           "fillOpacity": 10,
           "stacking": {
@@ -109,7 +110,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m]))",
+        "expr": "round(sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m])))",
         "legendFormat": "{{ node }}",
         "refId": "A"
       }
@@ -117,6 +118,7 @@
     "fieldConfig": {
       "defaults": {
         "unit": "short",
+        "decimals": 0,
         "custom": {
           "fillOpacity": 10,
           "stacking": {

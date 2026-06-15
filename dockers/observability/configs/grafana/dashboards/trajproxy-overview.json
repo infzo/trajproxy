@@ -182,7 +182,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m]))",
+          "expr": "round(sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m])))",
           "legendFormat": "{{ route }}",
           "refId": "A"
         }
@@ -190,6 +190,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 10,
             "stacking": {
@@ -230,7 +231,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m]))",
+          "expr": "round(sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m])))",
           "legendFormat": "{{ node }}",
           "refId": "A"
         }
@@ -238,6 +239,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 10,
             "stacking": {
@@ -372,7 +374,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[5m]))",
+          "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[5m])))",
           "legendFormat": "请求数(5min)",
           "refId": "A"
         },
@@ -403,7 +405,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": [
           {
@@ -498,7 +501,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[5m]))",
+          "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[5m])))",
           "legendFormat": "请求数(5min)",
           "refId": "A"
         },
@@ -529,7 +532,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": [
           {
@@ -624,7 +628,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[5m]))",
+          "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[5m])))",
           "legendFormat": "请求数(5min)",
           "refId": "A"
         },
@@ -655,7 +659,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "decimals": 0
         },
         "overrides": [
           {
@@ -751,7 +756,7 @@
       "description": "各作业每 5 分钟请求数量趋势",
       "gridPos": {
         "h": 8,
-        "w": 6,
+        "w": 4,
         "x": 0,
         "y": 21
       },
@@ -761,7 +766,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\"}[5m])))",
           "legendFormat": "{{ run_id }}",
           "refId": "A"
         }
@@ -769,6 +774,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 10,
             "stacking": {
@@ -798,8 +804,8 @@
       "description": "每 5 分钟请求数量按结果分类",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 6,
+        "w": 4,
+        "x": 4,
         "y": 21
       },
       "datasource": {
@@ -808,7 +814,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[5m]))",
+          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[5m])))",
           "legendFormat": "{{ outcome }}",
           "refId": "A"
         }
@@ -816,6 +822,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 20,
             "drawStyle": "line"
@@ -963,6 +970,54 @@
           "placement": "bottom",
           "calcs": [
             "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 142,
+      "type": "timeseries",
+      "title": "推理内部重试次数 (5min) - 按节点",
+      "description": "下游推理服务重试计数，按节点分组，展示每 5 分钟重试次数趋势",
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 8,
+        "y": 21
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "targets": [
+        {
+          "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[5m]))",
+          "legendFormat": "{{ node }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20,
+            "drawStyle": "bars",
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "sum",
+            "max"
           ]
         },
         "tooltip": {
@@ -1287,6 +1342,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 10,
             "drawStyle": "line",
@@ -1319,12 +1375,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (node) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[5m]))",
+          "expr": "round(sum by (node) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[5m])))",
           "legendFormat": "失败: {{ node }}",
           "refId": "A"
         },
         {
-          "expr": "sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+          "expr": "round(sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m])))",
           "legendFormat": "写入: {{ node }}",
           "refId": "B"
         }
@@ -1361,6 +1417,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 10,
             "drawStyle": "line",
@@ -1393,12 +1450,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[5m]))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server\"}[5m])))",
           "legendFormat": "失败: {{ run_id }}",
           "refId": "A"
         },
         {
-          "expr": "sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m])))",
           "legendFormat": "写入: {{ run_id }}",
           "refId": "B"
         }
@@ -1435,6 +1492,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 50,
             "stacking": {
@@ -1543,7 +1601,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout\"}[5m]))",
+          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout\"}[5m])))",
           "legendFormat": "{{ outcome }}",
           "refId": "A"
         }
@@ -1638,7 +1696,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[5m]))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[5m])))",
           "legendFormat": "{{ run_id }}",
           "refId": "A"
         }
@@ -1646,6 +1704,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 10,
             "drawStyle": "bars"
@@ -1829,6 +1888,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 10,
             "drawStyle": "line",
@@ -1861,12 +1921,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[5m]))",
+          "expr": "round(sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[5m])))",
           "legendFormat": "失败: {{ node }}",
           "refId": "A"
         },
         {
-          "expr": "sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+          "expr": "round(sum by (node) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m])))",
           "legendFormat": "写入: {{ node }}",
           "refId": "B"
         }
@@ -1903,6 +1963,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 10,
             "drawStyle": "line",
@@ -1935,12 +1996,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[5m]))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",run_id=~\"$run_id\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",status_code=~\"5..\"}[5m])))",
           "legendFormat": "失败: {{ run_id }}",
           "refId": "A"
         },
         {
-          "expr": "sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m]))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_trajectory_store_errors_total{node=~\"$node\",run_id=~\"$run_id\"}[5m])))",
           "legendFormat": "写入: {{ run_id }}",
           "refId": "B"
         }
@@ -1977,6 +2038,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "custom": {
             "fillOpacity": 50,
             "stacking": {
@@ -2085,7 +2147,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (error_category) (increase(trajproxy_api_errors_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",run_id=~\"$run_id\"}[5m]))",
+          "expr": "round(sum by (error_category) (increase(trajproxy_api_errors_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",run_id=~\"$run_id\"}[5m])))",
           "legendFormat": "{{ error_category }}",
           "refId": "A"
         }

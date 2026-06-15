@@ -27,7 +27,7 @@
     },
     "targets": [
       {
-        "expr": "sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[5m]))",
+        "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[5m])))",
         "legendFormat": "请求数(5min)",
         "refId": "A"
       },
@@ -58,7 +58,8 @@
     },
     "fieldConfig": {
       "defaults": {
-        "unit": "short"
+        "unit": "short",
+        "decimals": 0
       },
       "overrides": [
         {
@@ -153,7 +154,7 @@
     },
     "targets": [
       {
-        "expr": "sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[5m]))",
+        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[5m])))",
         "legendFormat": "请求数(5min)",
         "refId": "A"
       },
@@ -184,7 +185,8 @@
     },
     "fieldConfig": {
       "defaults": {
-        "unit": "short"
+        "unit": "short",
+        "decimals": 0
       },
       "overrides": [
         {
@@ -279,7 +281,7 @@
     },
     "targets": [
       {
-        "expr": "sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[5m]))",
+        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[5m])))",
         "legendFormat": "请求数(5min)",
         "refId": "A"
       },
@@ -310,7 +312,8 @@
     },
     "fieldConfig": {
       "defaults": {
-        "unit": "short"
+        "unit": "short",
+        "decimals": 0
       },
       "overrides": [
         {

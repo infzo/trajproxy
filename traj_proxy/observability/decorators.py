@@ -85,7 +85,11 @@ def observe_inference(func: Callable) -> Callable:
 
 
 def observe_inference_stream(func: Callable) -> Callable:
-    """装饰 InferClient 的流式请求方法（async generator）"""
+    """装饰 InferClient 的流式请求方法（async generator）
+
+    契约：
+    - InferClient._last_retry_count：重试循环末尾需设置为 attempt
+    """
 
     @functools.wraps(func)
     async def wrapper(self, *args, **kwargs):
@@ -100,11 +104,12 @@ def observe_inference_stream(func: Callable) -> Callable:
             raise
         finally:
             duration_ms = (time.perf_counter() - t0) * 1000
+            retry_count = getattr(self, "_last_retry_count", 0)
             emit(
                 EVENT_INFERENCE_COMPLETED,
                 model=model,
                 duration_ms=duration_ms,
-                retry_count=0,
+                retry_count=retry_count,
                 error=error,
                 error_type=classify_infer_error(error) if error else None,
             )
