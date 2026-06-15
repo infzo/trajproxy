@@ -6,7 +6,7 @@
       "h": 1,
       "w": 24,
       "x": 0,
-      "y": 68
+      "y": 76
     },
     "collapsed": false
   },
@@ -19,7 +19,7 @@
       "h": 9,
       "w": 4,
       "x": 0,
-      "y": 69
+      "y": 77
     },
     "datasource": {
       "type": "prometheus",
@@ -74,7 +74,7 @@
       "h": 9,
       "w": 5,
       "x": 4,
-      "y": 69
+      "y": 77
     },
     "datasource": {
       "type": "prometheus",
@@ -131,7 +131,7 @@
       "h": 9,
       "w": 5,
       "x": 9,
-      "y": 69
+      "y": 77
     },
     "datasource": {
       "type": "prometheus",
@@ -139,7 +139,7 @@
     },
     "targets": [
       {
-        "expr": "rate(process_cpu_seconds_total{job=\"trajproxy\",instance=~\"$instance\"}[5m]) * 100",
+        "expr": "rate(process_cpu_seconds_total{job=\"trajproxy\",instance=~\"$instance\"}[$rate_interval]) * 100",
         "legendFormat": "{{ instance }}",
         "refId": "A"
       }
@@ -173,7 +173,7 @@
       "h": 9,
       "w": 5,
       "x": 19,
-      "y": 69
+      "y": 77
     },
     "datasource": {
       "type": "prometheus",
@@ -214,7 +214,7 @@
       "h": 9,
       "w": 5,
       "x": 14,
-      "y": 69
+      "y": 77
     },
     "datasource": {
       "type": "prometheus",

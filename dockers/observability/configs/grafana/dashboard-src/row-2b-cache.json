@@ -2,7 +2,7 @@
   {
     "id": 150,
     "type": "timeseries",
-    "title": "TITO模式缓存命中率 - 按运行标识（1h）",
+    "title": "TITO模式缓存命中率 - 按作业（1h）",
     "description": "前缀缓存 1h 滚动窗口命中率 = 近1h内hits / 近1h内(hits + misses) × 100，按 run_id 分组。使用 increase() 计算最近 1 小时增量，不受进程重启影响。仅 TITO 模式有数据。",
     "gridPos": {
       "h": 8,

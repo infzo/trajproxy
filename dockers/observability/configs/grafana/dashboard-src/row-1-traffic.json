@@ -14,7 +14,7 @@
     "id": 4,
     "type": "stat",
     "title": "推理请求概览",
-    "description": "推理流量综合概览：请求趋势(5min)、活跃请求数、1h成功率、1h平均耗时",
+    "description": "推理流量综合概览：请求趋势、活跃请求数、1h成功率、1h平均耗时",
     "gridPos": {
       "h": 8,
       "w": 8,
@@ -27,8 +27,8 @@
     },
     "targets": [
       {
-        "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[5m])))",
-        "legendFormat": "请求数(5min)",
+        "expr": "round(sum(increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$rate_interval])))",
+        "legendFormat": "请求数",
         "refId": "A"
       },
       {
@@ -141,7 +141,7 @@
     "id": 110,
     "type": "stat",
     "title": "模型请求概览",
-    "description": "模型管理 API（注册/删除/列表）综合概览：请求趋势(5min)、1h成功率、1h平均耗时",
+    "description": "模型管理 API（注册/删除/列表）综合概览：请求趋势、1h成功率、1h平均耗时",
     "gridPos": {
       "h": 8,
       "w": 8,
@@ -154,8 +154,8 @@
     },
     "targets": [
       {
-        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[5m])))",
-        "legendFormat": "请求数(5min)",
+        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"model_register|model_delete|model_list\"}[$rate_interval])))",
+        "legendFormat": "请求数",
         "refId": "A"
       },
       {
@@ -268,7 +268,7 @@
     "id": 111,
     "type": "stat",
     "title": "轨迹请求概览",
-    "description": "轨迹查询（列表 + 详情）综合概览：请求趋势(5min)、1h成功率、1h平均耗时",
+    "description": "轨迹查询（列表 + 详情）综合概览：请求趋势、1h成功率、1h平均耗时",
     "gridPos": {
       "h": 8,
       "w": 8,
@@ -281,8 +281,8 @@
     },
     "targets": [
       {
-        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[5m])))",
-        "legendFormat": "请求数(5min)",
+        "expr": "round(sum(increase(trajproxy_api_requests_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail\"}[$rate_interval])))",
+        "legendFormat": "请求数",
         "refId": "A"
       },
       {

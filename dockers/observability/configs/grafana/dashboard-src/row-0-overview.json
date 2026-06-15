@@ -47,8 +47,8 @@
   {
     "id": 101,
     "type": "timeseries",
-    "title": "全站请求数 (5min) - 按请求类型",
-    "description": "各请求类型每 5 分钟请求数量趋势",
+    "title": "全站请求数 - 按请求类型",
+    "description": "各请求类型请求数量趋势",
     "gridPos": {
       "h": 8,
       "w": 5,
@@ -61,7 +61,7 @@
     },
     "targets": [
       {
-        "expr": "round(sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m])))",
+        "expr": "round(sum by (route) (increase(trajproxy_api_requests_total{node=~\"$node\"}[$rate_interval])))",
         "legendFormat": "{{ route }}",
         "refId": "A"
       }
@@ -96,8 +96,8 @@
   {
     "id": 103,
     "type": "timeseries",
-    "title": "全站请求数 (5min) - 按节点",
-    "description": "各节点每 5 分钟请求数量趋势",
+    "title": "全站请求数 - 按节点",
+    "description": "各节点请求数量趋势",
     "gridPos": {
       "h": 8,
       "w": 6,
@@ -110,7 +110,7 @@
     },
     "targets": [
       {
-        "expr": "round(sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\"}[5m])))",
+        "expr": "round(sum by (node) (increase(trajproxy_api_requests_total{node=~\"$node\"}[$rate_interval])))",
         "legendFormat": "{{ node }}",
         "refId": "A"
       }
@@ -159,7 +159,7 @@
     },
     "targets": [
       {
-        "expr": "histogram_quantile($quantile, sum by (le, route) (rate(trajproxy_api_request_duration_seconds_bucket{node=~\"$node\"}[5m])))",
+        "expr": "histogram_quantile($quantile, sum by (le, route) (rate(trajproxy_api_request_duration_seconds_bucket{node=~\"$node\"}[$rate_interval])))",
         "legendFormat": "{{ route }}",
         "refId": "A"
       }
@@ -205,7 +205,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[5m]))",
+        "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[$rate_interval]))",
         "legendFormat": "{{ action }}:{{ type }}",
         "refId": "A"
       }
