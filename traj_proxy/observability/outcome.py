@@ -11,16 +11,21 @@ from typing import Optional
 def determine_outcome(context, exception: Optional[Exception] = None) -> str:
     """从 ProcessContext 状态 + 异常类型 推导 outcome
 
-    outcome 枚举（7 种）：
+    outcome 枚举（8 种）：
     - success: 正常完成
     - stream_partial: 流式中途崩溃
     - error_client: 客户端错误（HTTP 4xx）
     - error_server: TrajProxy 内部错误
     - error_infer: 推理服务错误
+    - error_database: 数据库错误
     - error_rate_limit: 并发限流（429）
     - timeout: 推理超时
     """
-    from traj_proxy.exceptions import InferTimeoutError, InferServiceError
+    from traj_proxy.exceptions import (
+        DatabaseError,
+        InferServiceError,
+        InferTimeoutError,
+    )
 
     # ── 异常驱动 ──
     # 注意：InferTimeoutError 继承自 InferServiceError，
@@ -30,6 +35,8 @@ def determine_outcome(context, exception: Optional[Exception] = None) -> str:
             return "timeout"
         if isinstance(exception, InferServiceError):
             return "error_infer"
+        if isinstance(exception, DatabaseError):
+            return "error_database"
         status = getattr(exception, "status_code", None)
         if status == 429:
             return "error_rate_limit"
