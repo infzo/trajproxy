@@ -8,6 +8,7 @@ RequestRepository - 请求轨迹记录操作
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
 import traceback
+import json
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
@@ -15,6 +16,52 @@ from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _diagnose_nul_bytes(context: "ProcessContext") -> str:
+    """诊断 NUL 字节来源，返回诊断信息字符串
+
+    仅在 INSERT 失败时调用，正常路径零开销。
+
+    Args:
+        context: 处理上下文
+
+    Returns:
+        包含 NUL 字节的字段列表描述
+    """
+    found = []
+
+    def _check(value: Any, name: str) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            if "\x00" in value:
+                found.append(f"{name}(TEXT, len={len(value)}, nul_count={value.count(chr(0))})")
+        elif isinstance(value, (dict, list, tuple)):
+            try:
+                s = json.dumps(value, ensure_ascii=False, default=str)
+                if "\x00" in s:
+                    found.append(f"{name}(JSON, len={len(s)}, nul_count={s.count(chr(0))})")
+            except (TypeError, ValueError):
+                pass
+
+    _check(context.error, "metadata.error")
+    _check(context.prompt_text, "prompt_text")
+    _check(context.response_text, "response_text")
+    _check(context.full_conversation_text, "full_conversation_text")
+    _check(context.error_traceback, "error_traceback")
+    _check(context.messages, "messages")
+    _check(context.raw_request, "raw_request")
+    _check(context.raw_response, "raw_response")
+    _check(context.text_request, "text_request")
+    _check(context.text_response, "text_response")
+    _check(context.token_request, "token_request")
+    _check(context.token_response, "token_response")
+
+    if found:
+        return "; ".join(found)
+    return "（未检测到 NUL 字节，错误可能由其他原因引起）"
+
 
 # 延迟导入以避免循环导入
 if TYPE_CHECKING:
@@ -208,6 +255,10 @@ class RequestRepository:
                         context.error_traceback
                     ))
         except Exception as e:
+            # NUL 字节诊断：仅在 INSERT 失败且错误与 NUL 相关时检测，正常路径零开销
+            if "NUL" in str(e) or "0x00" in str(e):
+                diag = _diagnose_nul_bytes(context)
+                logger.warning(f"[{context.unique_id}] NUL 字节检测 → {diag}")
             raise DatabaseError(f"插入轨迹记录失败: {str(e)}\n{traceback.format_exc()}")
 
     async def get_prefix_candidates(
