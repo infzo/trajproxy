@@ -599,6 +599,7 @@ async def get_trajectory(
             acquired = True
         except asyncio.TimeoutError:
             _emit_api_error("trajectory_legacy", request.state.metric_run_id, "rate_limit")
+            request.state._api_error_emitted = True
             raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
 
     try:
@@ -614,6 +615,7 @@ async def get_trajectory(
             t_db_elapsed = (time.perf_counter() - t_db_start) * 1000
             logger.warning(f"[{session_id}] DB查询超时 ({TRAJECTORY_DB_TIMEOUT}s), 已耗时={t_db_elapsed:.1f}ms")
             _emit_api_error("trajectory_legacy", request.state.metric_run_id, "timeout")
+            request.state._api_error_emitted = True
             raise
         t_db_end = time.perf_counter()
 
@@ -641,6 +643,7 @@ async def get_trajectory(
             t_ser_elapsed = (time.perf_counter() - t_ser_start) * 1000
             logger.warning(f"[{session_id}] 序列化超时 ({TRAJECTORY_SERIALIZE_TIMEOUT}s), 已耗时={t_ser_elapsed:.1f}ms")
             _emit_api_error("trajectory_legacy", request.state.metric_run_id, "serialize_timeout")
+            request.state._api_error_emitted = True
             raise
         t_end = time.perf_counter()
 
@@ -663,11 +666,13 @@ async def get_trajectory(
         raise HTTPException(status_code=504, detail="轨迹查询超时")
     except DatabaseError as e:
         _emit_api_error("trajectory_legacy", request.state.metric_run_id, "database")
+        request.state._api_error_emitted = True
         logger.exception(f"轨迹查询数据库错误: {str(e)}")
         error_detail, status_code = build_error_response("trajectory_query", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
         _emit_api_error("trajectory_legacy", request.state.metric_run_id, "other")
+        request.state._api_error_emitted = True
         logger.exception(f"轨迹查询失败: {str(e)}")
         error_detail, status_code = build_error_response("trajectory_query", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
@@ -707,14 +712,17 @@ async def list_trajectories(
         )
     except asyncio.TimeoutError:
         _emit_api_error("trajectory_list", safe_rid, "timeout")
+        request.state._api_error_emitted = True
         raise HTTPException(status_code=504, detail="轨迹列表查询超时")
     except DatabaseError as e:
         _emit_api_error("trajectory_list", safe_rid, "database")
+        request.state._api_error_emitted = True
         logger.exception(f"查询轨迹列表数据库错误: {str(e)}")
         error_detail, status_code = build_error_response("list_trajectories", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
         _emit_api_error("trajectory_list", safe_rid, "other")
+        request.state._api_error_emitted = True
         logger.exception(f"查询轨迹列表失败: {str(e)}")
         error_detail, status_code = build_error_response("list_trajectories", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
@@ -758,6 +766,7 @@ async def get_trajectory_detail(
             acquired = True
         except asyncio.TimeoutError:
             _emit_api_error("trajectory_detail", request.state.metric_run_id, "rate_limit")
+            request.state._api_error_emitted = True
             raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
 
     try:
@@ -773,6 +782,7 @@ async def get_trajectory_detail(
             t_db_elapsed = (time.perf_counter() - t_db_start) * 1000
             logger.warning(f"[{session_id}] DB查询超时 ({TRAJECTORY_DB_TIMEOUT}s), 已耗时={t_db_elapsed:.1f}ms")
             _emit_api_error("trajectory_detail", request.state.metric_run_id, "timeout")
+            request.state._api_error_emitted = True
             raise
         t_db_end = time.perf_counter()
 
@@ -797,6 +807,7 @@ async def get_trajectory_detail(
             t_ser_elapsed = (time.perf_counter() - t_ser_start) * 1000
             logger.warning(f"[{session_id}] 序列化超时 ({TRAJECTORY_SERIALIZE_TIMEOUT}s), 已耗时={t_ser_elapsed:.1f}ms")
             _emit_api_error("trajectory_detail", request.state.metric_run_id, "serialize_timeout")
+            request.state._api_error_emitted = True
             raise
         t_end = time.perf_counter()
 
@@ -820,11 +831,13 @@ async def get_trajectory_detail(
         raise HTTPException(status_code=504, detail="轨迹查询超时")
     except DatabaseError as e:
         _emit_api_error("trajectory_detail", request.state.metric_run_id, "database")
+        request.state._api_error_emitted = True
         logger.exception(f"查询轨迹详情数据库错误: {str(e)}")
         error_detail, status_code = build_error_response("get_trajectory_detail", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
         _emit_api_error("trajectory_detail", request.state.metric_run_id, "other")
+        request.state._api_error_emitted = True
         logger.exception(f"查询轨迹详情失败: {str(e)}")
         error_detail, status_code = build_error_response("get_trajectory_detail", e)
         raise HTTPException(status_code=status_code, detail=error_detail)

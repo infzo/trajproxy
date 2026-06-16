@@ -22,12 +22,13 @@ def classify_infer_error(exc: Exception) -> str:
     通过回溯 exc.__cause__（原始 httpx 异常）精确分类，
     不依赖错误消息字符串匹配。
 
-    error_type 枚举（6 种）：
+    error_type 枚举（7 种）：
     - connect_timeout: 连接超时（默认 60s）
     - read_timeout: 读取超时（默认 600s，模型处理太慢）
     - connection: 连接失败（DNS 解析 / 拒绝连接 / 网络中断）
     - rate_limited: 推理服务返回 429
     - http_error: 推理服务返回其他 HTTP 错误
+    - deserialization: 推理响应反序列化失败（JSON 解析错误等）
     - unknown: 兜底
     """
     cause = exc.__cause__
@@ -42,8 +43,10 @@ def classify_infer_error(exc: Exception) -> str:
             if cause.response.status_code == 429:
                 return "rate_limited"
             return "http_error"
-        # RequestError / ConnectError 等网络层错误
-        return "connection"
+        if isinstance(cause, (httpx.ConnectError, httpx.ConnectTimeout, httpx.RequestError)):
+            return "connection"
+        # 非 httpx 异常作为 cause（如 json.JSONDecodeError、UnicodeDecodeError 等）
+        return "deserialization"
 
     return "unknown"
 

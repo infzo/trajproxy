@@ -133,7 +133,7 @@ class DatabaseManager:
                         f"errors={requests_errors}"
                     )
             except asyncio.CancelledError:
-                break
+                raise
             except Exception as e:
                 logger.error(f"连接池监控异常: {e}")
 

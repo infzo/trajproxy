@@ -32,6 +32,30 @@ from traj_proxy.observability.label_guards import (
 
 logger = logging.getLogger(__name__)
 
+# ── LRU 淘汰清理：记录哪些指标包含 run_id 及其在 label_tuple 中的位置 ──
+_METRICS_WITH_RUN_ID: list = []  # [(metric_object, run_id_index_in_label_tuple), ...]
+
+
+def cleanup_evicted_run_id(run_id: str) -> None:
+    """清理被淘汰 run_id 的所有 Prometheus 子指标
+
+    prometheus_client 的 remove() 需要完整的 label tuple，
+    因此必须遍历 _metrics 找到匹配的子指标。
+    """
+    for metric, run_id_idx in _METRICS_WITH_RUN_ID:
+        if metric is None:
+            continue
+        try:
+            # 找到所有在预期位置包含该 run_id 的 label tuple
+            to_remove = [
+                label_tuple for label_tuple in list(metric._metrics.keys())
+                if label_tuple[run_id_idx] == run_id
+            ]
+            for label_tuple in to_remove:
+                metric.remove(*label_tuple)
+        except Exception as exc:
+            logger.warning(f"Failed to cleanup run_id={run_id} from metric: {exc}")
+
 # ── 指标实例（惰性初始化，由 register_all() 填充）──
 # A. 请求核心 (5个)
 REQUEST_TOTAL: Optional[Counter] = None
@@ -440,6 +464,27 @@ def _create_metrics() -> None:
         labelnames=["model", "run_id", "result"],
     )
 
+    # 注册包含 run_id 的指标，用于 LRU 淘汰时清理对应的子指标
+    # 格式：(指标变量, run_id 在 label_tuple 中的索引位置)
+    _METRICS_WITH_RUN_ID.extend([
+        (REQUEST_TOTAL, 4),           # ["method","model","stream","outcome","run_id","pipeline_mode"]
+        (REQUEST_DURATION, 2),        # ["model","stream","run_id"]
+        (TTFT_SECONDS, 1),            # ["model","run_id"]
+        (STREAM_COMPLETION, 1),       # ["model","run_id","result"]
+        (PHASE_DURATION, 2),          # ["model","phase","run_id"]
+        (TOKENS_TOTAL, 1),            # ["model","run_id","type"]
+        (SEQUENCE_LENGTH_TOKENS, 1),  # ["model","run_id"]
+        (TRAJECTORY_STORE_ERRORS, 2), # ["model","error_type","run_id"]
+        (TRAJECTORY_STORE_DURATION, 1),  # ["model","run_id"]
+        (API_REQUESTS_TOTAL, 3),      # ["route","method","status_code","run_id"]
+        (API_REQUEST_DURATION, 1),    # ["route","run_id"]
+        (API_ERRORS, 1),              # ["route","run_id","error_category"]
+        (REQUEST_INFER_ERRORS, 2),    # ["model","error_type","run_id"]
+        (TRAJECTORY_RECORD_COUNT, 1), # ["route","run_id"]
+        (TRAJECTORY_RESPONSE_SIZE_BYTES, 1),  # ["route","run_id"]
+        (CACHE_LOOKUPS, 1),           # ["model","run_id","result"]
+    ])
+
 
 def register_all() -> None:
     """注册所有 EventBus 订阅者（幂等，多次调用安全）
@@ -454,6 +499,10 @@ def register_all() -> None:
 
     # 创建 Prometheus 指标
     _create_metrics()
+
+    # 注册 LRU 淘汰清理钩子，当 run_id 被淘汰时自动清理对应的子指标
+    from traj_proxy.observability.label_guards import register_cleanup_hook
+    register_cleanup_hook(cleanup_evicted_run_id)
 
     # 注册 ProcessCollector（零侵入进程级指标，容错重复注册）
     try:

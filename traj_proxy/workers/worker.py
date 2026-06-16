@@ -318,6 +318,12 @@ class ProxyWorker:
             t0 = time.perf_counter()
             # 必须通过模块属性访问——register_all() 才创建真正指标，值导入会拿到初始 None
             if metrics_collector.API_REQUEST_DURATION is None or metrics_collector.API_REQUESTS_TOTAL is None:
+                if not getattr(request.app.state, "_metrics_none_warned", False):
+                    logger.warning(
+                        "API metrics 指标未初始化（register_all() 未执行？），指标采集已跳过。"
+                        "这可能是启动阶段的正常行为（如健康检查请求），请观察后续是否恢复正常。"
+                    )
+                    request.app.state._metrics_none_warned = True
                 return await call_next(request)
             try:
                 response = await call_next(request)
@@ -341,8 +347,10 @@ class ProxyWorker:
                 route=route, method=method, status_code=code, run_id=run_id_label
             ).inc()
             # 框架层 422 兜底上报（业务代码在 422 场景下不会执行 _emit_api_error）
+            # 通过 request.state 标志防止与业务层重复上报
             if route in _TRAJECTORY_ROUTES and code == "422":
-                _emit_api_error_silently(route, run_id_label, "validation")
+                if not getattr(request.state, "_api_error_emitted", False):
+                    _emit_api_error_silently(route, run_id_label, "validation")
             return response
 
     def _setup_routes(self):
