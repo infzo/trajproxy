@@ -231,6 +231,7 @@ class Processor:
 
         self._warn_unsupported_params(context, request_params)
 
+        context.base_url = getattr(self.infer_client, 'base_url', 'unknown') or 'unknown'
         emit(EVENT_REQUEST_STARTED, model=self.model, is_stream=False,
              max_concurrent=get_max_concurrent_requests())
         exception = None
@@ -297,6 +298,7 @@ class Processor:
 
         self._warn_unsupported_params(context, request_params)
 
+        context.base_url = getattr(self.infer_client, 'base_url', 'unknown') or 'unknown'
         emit(EVENT_REQUEST_STARTED, model=self.model, is_stream=True,
              max_concurrent=get_max_concurrent_requests())
         exception = None

@@ -867,8 +867,8 @@
     {
       "id": 12,
       "type": "timeseries",
-      "title": "推理请求数 - 按结果",
-      "description": "请求数量按结果分类",
+      "title": "推理请求数 - 按推理地址",
+      "description": "请求数量按推理服务地址(base_url)分类",
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -881,8 +881,8 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$rate_interval])))",
-          "legendFormat": "{{ outcome }}",
+          "expr": "round(sum by (base_url, outcome) (increase(trajproxy_requests_total{node=~\"$node\",model=~\"$model\"}[$rate_interval])))",
+          "legendFormat": "{{ base_url }} / {{ outcome }}",
           "refId": "A"
         }
       ],
@@ -894,142 +894,7 @@
             "fillOpacity": 20,
             "drawStyle": "line"
           }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "success"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "green"
-                }
-              },
-              {
-                "id": "displayName",
-                "value": "请求成功 (Success)"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "stream_partial"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "light-green"
-                }
-              },
-              {
-                "id": "displayName",
-                "value": "流式传输部分完成 (Stream Partial)"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "error_client"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "orange"
-                }
-              },
-              {
-                "id": "displayName",
-                "value": "客户端-请求不合法 (4xx Client Error)"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "error_server"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "dark-red"
-                }
-              },
-              {
-                "id": "displayName",
-                "value": "内部-服务端错误 (5xx Server Error)"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "error_rate_limit"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "purple"
-                }
-              },
-              {
-                "id": "displayName",
-                "value": "推理-请求被限流 (429 Too Many Requests)"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "error_infer"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "blue"
-                }
-              },
-              {
-                "id": "displayName",
-                "value": "推理-服务异常（连接 / HTTP 错误）"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "timeout"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
-                }
-              },
-              {
-                "id": "displayName",
-                "value": "推理-服务超时 (Timeout)"
-              }
-            ]
-          }
-        ]
+        }
       },
       "options": {
         "legend": {

@@ -162,7 +162,8 @@ def _on_request_completed(context: Any, exception: Optional[Exception]) -> None:
     duration_s = (getattr(context, "processing_duration_ms", 0) or 0) / 1000
 
     pipeline_mode = getattr(context, "pipeline_mode", "direct") or "direct"
-    REQUEST_TOTAL.labels("POST", model, stream, outcome, run_id, pipeline_mode).inc()  # type: ignore[union-attr]
+    base_url = getattr(context, "base_url", "unknown") or "unknown"
+    REQUEST_TOTAL.labels("POST", model, stream, outcome, run_id, pipeline_mode, base_url).inc()  # type: ignore[union-attr]
     # 请求级推理错误细分打点（仅当 outcome 为推理服务错误或超时）
     if outcome in ("error_infer", "timeout") and exception is not None:
         err_type = classify_infer_error(exception)
@@ -236,7 +237,7 @@ def _on_concurrency_rejected(
     safe_run_id = safe_run_id_label(run_id or "")
     SEMAPHORE_REJECTED.labels(safe_model).inc()  # type: ignore[union-attr]
     REQUEST_TOTAL.labels(  # type: ignore[union-attr]
-        "POST", safe_model, "false", "error_rate_limit", safe_run_id, "direct"
+        "POST", safe_model, "false", "error_rate_limit", safe_run_id, "direct", "unknown"
     ).inc()
 
 
@@ -307,7 +308,7 @@ def _create_metrics() -> None:
     REQUEST_TOTAL = Counter(
         "trajproxy_requests_total",
         "Total request count",
-        ["method", "model", "stream", "outcome", "run_id", "pipeline_mode"],
+        ["method", "model", "stream", "outcome", "run_id", "pipeline_mode", "base_url"],
     )
     REQUEST_DURATION = Histogram(
         "trajproxy_request_duration_seconds",
@@ -467,7 +468,7 @@ def _create_metrics() -> None:
     # 注册包含 run_id 的指标，用于 LRU 淘汰时清理对应的子指标
     # 格式：(指标变量, run_id 在 label_tuple 中的索引位置)
     _METRICS_WITH_RUN_ID.extend([
-        (REQUEST_TOTAL, 4),           # ["method","model","stream","outcome","run_id","pipeline_mode"]
+        (REQUEST_TOTAL, 4),           # ["method","model","stream","outcome","run_id","pipeline_mode","base_url"]
         (REQUEST_DURATION, 2),        # ["model","stream","run_id"]
         (TTFT_SECONDS, 1),            # ["model","run_id"]
         (STREAM_COMPLETION, 1),       # ["model","run_id","result"]
