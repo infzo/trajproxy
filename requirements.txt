@@ -13,6 +13,7 @@ huggingface-hub>=0.20.0
 # Parser dependencies (vllm parser compatibility)
 regex>=2024.0.0
 partial-json-parser>=0.0.4
+openai>=1.0.0
 
 # Archive storage dependencies
 boto3>=1.34.0

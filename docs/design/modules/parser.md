@@ -91,18 +91,8 @@ class Parser:
         self._tool_parser = tool_parser
         self._reasoning_parser = reasoning_parser
 
-    # 流式状态管理
-    def reset_streaming_state(self):
-        """重置流式解析状态"""
-        pass
-
-    def __enter__(self):
-        """进入上下文管理器，自动重置流式状态"""
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """退出上下文管理器"""
-        pass
+    # 流式状态由 per-request 实例自动管理（对齐 vLLM）
+    # 无需 reset 或上下文管理器，每个请求创建全新的 Parser 实例
 ```
 
 ### 2.2 使用示例
@@ -117,10 +107,10 @@ parser = ParserManager.create_parser(
     tokenizer=tokenizer
 )
 
-# 使用上下文管理器自动管理流式状态
-with parser:
-    async for chunk in stream:
-        delta = parser.extract_tool_calls_streaming(...)
+# 流式和非流式均使用 per-request Parser 实例（对齐 vLLM）
+# parser_cls(tokenizer, tools, **kwargs) 创建全新实例，无需上下文管理器
+async for chunk in stream:
+    delta = parser.extract_tool_calls_streaming(...)
 ```
 
 ---
@@ -681,9 +671,8 @@ if content:
 ### 10.3 流式解析
 
 ```python
-# 使用上下文管理器自动重置流式状态
-with parser:
-    for chunk in stream:
+# 流式解析使用 per-request Parser 实例（对齐 vLLM）
+for chunk in stream:
         delta_text = chunk.choices[0].delta.content or ""
         
         # 工具调用流式解析

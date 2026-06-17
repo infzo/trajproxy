@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/entrypoints/openai/engine/protocol.py
 
 """
 vLLM 协议类适配器

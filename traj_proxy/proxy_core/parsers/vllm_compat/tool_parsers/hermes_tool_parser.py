@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/tool_parsers/hermes_tool_parser.py
 
 import json
 from collections.abc import Sequence

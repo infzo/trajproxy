@@ -1,33 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/reasoning/abs_reasoning_parsers.py
 
-"""
-vLLM ReasoningParser 基类适配器
-
-对齐 vllm 最新版本接口，保留 proxy 上下文的简化实现。
-"""
 import importlib
 import os
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from functools import cached_property
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
+from vllm.entrypoints.mcp.tool_server import ToolServer
 from vllm.logger import init_logger
 from vllm.utils.collection_utils import is_list_of
 from vllm.utils.import_utils import import_from_path
 
 if TYPE_CHECKING:
+    from vllm.config import ModelConfig
     from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
     from vllm.entrypoints.openai.engine.protocol import DeltaMessage
     from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
     from vllm.tokenizers import TokenizerLike
-else:
-    ChatCompletionRequest = Any
-    DeltaMessage = Any
-    ResponsesRequest = Any
-    TokenizerLike = Any
 
 logger = init_logger(__name__)
 
@@ -35,17 +26,16 @@ logger = init_logger(__name__)
 class ReasoningParser:
     """
     Abstract reasoning parser class that should not be used directly.
-    Provided methods should be used in derived classes.
+    Provided and methods should be used in derived classes.
 
     It is used to extract reasoning content from the model output.
     """
 
-    def __init__(self, tokenizer: TokenizerLike, *args, **kwargs):
+    def __init__(self, tokenizer: "TokenizerLike", *args, **kwargs):
         self.model_tokenizer = tokenizer
         # Optional vLLM ModelConfig from the server. Use get (not pop) so composite
         # parsers can forward **kwargs to nested parsers.
-        # NOTE: In proxy context, model_config is always None.
-        self._model_config: Any | None = kwargs.get("model_config")
+        self._model_config: ModelConfig | None = kwargs.get("model_config")
 
     @cached_property
     def vocab(self) -> dict[str, int]:
@@ -56,14 +46,14 @@ class ReasoningParser:
     @property
     def reasoning_start_str(self) -> str | None:
         """Set `reasoning_start_str` to the strings that delimit
-        the reasoning block (e.g. `"<seed:think>"` and `"索索"`).
+        the reasoning block (e.g. `""<seed:think>""` and `"<think>"`).
         """
         return None
 
     @property
     def reasoning_end_str(self) -> str | None:
         """Set `reasoning_end_str` to the strings that delimit
-        the reasoning block (e.g. `"</seed:think>"` and `"最终答案"`).
+        the reasoning block (e.g. `""</seed:think>""` and `"</think>"`).
         """
         return None
 
@@ -125,7 +115,7 @@ class ReasoningParser:
         """Count the number of reasoning tokens in a sequence.
 
         Text-based reasoning models typically wrap their chain-of-thought
-        between special start/end tokens (e.g., ``索索 ... 最终答案``).
+        between special start/end tokens (e.g., ``<think> ... </think>``).
         Implementations that support reasoning token counting should override
         this method. The default implementation returns ``0`` so existing
         parsers remain unchanged unless they explicitly opt in.
@@ -144,7 +134,7 @@ class ReasoningParser:
     def extract_reasoning(
         self,
         model_output: str,
-        request: ChatCompletionRequest | ResponsesRequest,
+        request: "ChatCompletionRequest | ResponsesRequest",
     ) -> tuple[str | None, str | None]:
         """
         Extract reasoning content from a complete model-generated string.
@@ -169,7 +159,7 @@ class ReasoningParser:
         previous_token_ids: Sequence[int],
         current_token_ids: Sequence[int],
         delta_token_ids: Sequence[int],
-    ) -> DeltaMessage | None:
+    ) -> "DeltaMessage | None":
         """
         Instance method that should be implemented for extracting reasoning
         from an incomplete response; for use when handling reasoning calls and
@@ -179,20 +169,19 @@ class ReasoningParser:
         """
 
     def adjust_request(
-        self, request: ChatCompletionRequest | ResponsesRequest
-    ) -> ChatCompletionRequest | ResponsesRequest:
+        self, request: "ChatCompletionRequest | ResponsesRequest"
+    ) -> "ChatCompletionRequest | ResponsesRequest":
         """Adjust request parameters; override in subclasses as needed."""
         return request
 
     def prepare_structured_tag(
         self,
         original_tag: str | None,
-        tool_server: Any | None,
+        tool_server: ToolServer | None,
     ) -> str | None:
         """
-        Instance method that is implemented for preparing the structural tag.
-        Otherwise, None is returned.
-        NOTE: In proxy context, tool_server is always None.
+        Instance method that is implemented for preparing the structured tag
+        Otherwise, None is returned
         """
         return None
 
@@ -333,7 +322,7 @@ class ReasoningParserManager:
             if isinstance(name, str):
                 names = [name]
             elif is_list_of(name, str):
-                names = name
+                names = cast(list[str], name)
             else:
                 names = [class_name]
 
@@ -359,17 +348,3 @@ class ReasoningParserManager:
                 "Failed to load module '%s' from %s.", module_name, plugin_path
             )
             return
-
-
-# Convenience aliases
-get_reasoning_parser = ReasoningParserManager.get_reasoning_parser
-register_reasoning_parser = ReasoningParserManager.register_module
-list_reasoning_parsers = ReasoningParserManager.list_registered
-
-__all__ = [
-    "ReasoningParser",
-    "ReasoningParserManager",
-    "get_reasoning_parser",
-    "register_reasoning_parser",
-    "list_reasoning_parsers",
-]

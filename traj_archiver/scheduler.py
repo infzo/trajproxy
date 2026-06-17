@@ -38,6 +38,7 @@ class ArchiveScheduler:
         self.local_temp_path = local_temp_path
 
         self._running = False
+        self._executing = False  # 防止 trigger_now 与 _run_loop 并发执行
         self._task: Optional[asyncio.Task] = None
         self._started_at: Optional[datetime] = None
         self._last_run: Optional[datetime] = None
@@ -71,6 +72,9 @@ class ArchiveScheduler:
     async def trigger_now(self) -> Dict[str, Any]:
         logger.info("手动触发归档任务...")
         result = await self._execute_archive()
+        # 跳过时（已在执行中）不更新运行计数和时间戳
+        if result.get("skipped"):
+            return result
         self._last_run = _utcnow()
         self._total_runs += 1
         self._last_result = result
@@ -92,9 +96,11 @@ class ArchiveScheduler:
     async def _run_loop(self):
         while self._running:
             try:
-                await self._execute_archive()
-                self._last_run = _utcnow()
-                self._total_runs += 1
+                result = await self._execute_archive()
+                # 跳过时（与 trigger_now 并发）不更新运行计数
+                if not result.get("skipped"):
+                    self._last_run = _utcnow()
+                    self._total_runs += 1
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -114,31 +120,48 @@ class ArchiveScheduler:
                     break
 
     async def _execute_archive(self) -> Dict[str, Any]:
-        logger.info("=" * 50)
-        logger.info("开始执行归档任务...")
+        # 防止 trigger_now 与 _run_loop 并发执行导致 workers 列表竞争
+        if self._executing:
+            logger.warning("归档任务已在执行中, 跳过本次触发")
+            return {"skipped": True, "reason": "already_executing"}
+        self._executing = True
+        try:
+            logger.info("=" * 50)
+            logger.info("开始执行归档任务...")
 
-        result = await archive_details(
-            pool=self.pool,
-            workers=self.workers,
-            storage=self.storage,
-            local_temp_path=self.local_temp_path,
-            retention_days=self.retention_days,
-        )
+            updated_workers, result = await archive_details(
+                pool=self.pool,
+                workers=self.workers,
+                storage=self.storage,
+                local_temp_path=self.local_temp_path,
+                retention_days=self.retention_days,
+            )
 
-        records_archived = result.get("records_archived", 0)
-        self._total_records_archived += records_archived
+            # 如果 Worker 在归档过程中被重建，更新 scheduler 的 Worker 列表
+            if updated_workers != self.workers:
+                old_count = len(self.workers)
+                self.workers = updated_workers
+                logger.warning(
+                    f"Worker 列表已更新（原 {old_count} → 新 {len(self.workers)} 个 Actor），"
+                    f"后续归档轮次将使用新列表"
+                )
 
-        logger.info(f"归档完成: {result.get('runs_processed', 0)} runs, "
-                     f"{result.get('sessions_archived', 0)} sessions, "
-                     f"{records_archived} records")
+            records_archived = result.get("records_archived", 0)
+            self._total_records_archived += records_archived
 
-        for d in result.get("details", []):
-            logger.info(f"  run_id={d['run_id']}: {d['sessions']} sessions, {d['records']} records")
+            logger.info(f"归档完成: {result.get('runs_processed', 0)} runs, "
+                         f"{result.get('sessions_archived', 0)} sessions, "
+                         f"{records_archived} records")
 
-        if result.get("errors"):
-            for err in result["errors"]:
-                logger.warning(f"  错误: {err}")
+            for d in result.get("details", []):
+                logger.info(f"  run_id={d['run_id']}: {d['sessions']} sessions, {d['records']} records")
 
-        logger.info("=" * 50)
-        self._last_result = result
-        return result
+            if result.get("errors"):
+                for err in result["errors"]:
+                    logger.warning(f"  错误: {err}")
+
+            logger.info("=" * 50)
+            self._last_result = result
+            return result
+        finally:
+            self._executing = False

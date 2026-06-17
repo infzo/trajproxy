@@ -110,8 +110,13 @@ class Processor:
         # 推断 TITO 模板路径
         tito_template_path = self._get_tito_template_path()
 
-        # 创建 Parser
-        parser = ParserManager.create_parser(
+        # 创建 Parser（对齐 vllm serving_chat.py 的 parser_cls 设计）
+        # ParserManager.create_parser 返回 (parser_cls, parser_instance)：
+        # - parser_cls: 动态子类（类引用），供流式路径 per-request 实例化
+        # - parser_instance: 共享 Parser 实例，供非流式路径使用
+        # 对齐 vllm serving_chat.py: self.parser_cls = ParserManager.get_parser(...)
+        # 然后 self.parser_cls(tokenizer, request.tools, chat_template_kwargs=...)
+        parser_cls, parser = ParserManager.create_parser(
             tool_parser_name=self.tool_parser_name,
             reasoning_parser_name=self.reasoning_parser_name,
             tokenizer=tokenizer
@@ -137,7 +142,8 @@ class Processor:
             response_builder=response_builder,
             stream_builder=stream_builder,
             parser=parser,
-            tokenizer_path=self.tokenizer_path
+            parser_cls=parser_cls,
+            tokenizer_path=self.tokenizer_path,
         )
 
     def _get_tito_template_path(self) -> Optional[str]:

@@ -1,19 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/tool_parsers/abstract_tool_parser.py
 
-"""
-vLLM ToolParser 基类适配器
-
-对齐 vllm 最新版本接口，保留 proxy 上下文的简化实现。
-"""
 import importlib
 import json
 import os
-from abc import abstractmethod
 from collections.abc import Callable, Sequence
 from functools import cached_property
-from typing import Any, Optional
+
+from openai.types.responses import (
+    ResponseFormatTextJSONSchemaConfig,
+    ResponseTextConfig,
+)
+from openai.types.responses.function_tool import FunctionTool
 
 from vllm.entrypoints.openai.chat_completion.protocol import (
     ChatCompletionNamedToolChoiceParam,
@@ -26,21 +24,16 @@ from vllm.entrypoints.openai.engine.protocol import (
 )
 from vllm.entrypoints.openai.responses.protocol import (
     ResponsesRequest,
-    ResponseFormatTextJSONSchemaConfig,
-    ResponseTextConfig,
 )
 from vllm.envs import VLLM_ENFORCE_STRICT_TOOL_CALLING
 from vllm.logger import init_logger
-from vllm.sampling_params import StructuredOutputsParams
+from vllm.sampling_params import (
+    StructuredOutputsParams,
+)
 from vllm.tokenizers import TokenizerLike
 from vllm.tool_parsers.utils import Tool, get_json_schema_from_tools
 from vllm.utils.collection_utils import is_list_of
 from vllm.utils.import_utils import import_from_path
-
-from vllm.tool_parsers.structural_tag_registry import (
-    get_enable_structured_outputs_in_reasoning,
-    get_model_structural_tag,
-)
 
 __all__ = ["Tool"]
 
@@ -56,7 +49,7 @@ class ToolParser:
 
     # When True (default), the serving layer uses the standard JSON-based
     # parsing for tool_choice="required" and named function tool_choice,
-    # which models where guided decoding produces well-formed
+    # which works for models where guided decoding produces well-formed
     # JSON output (e.g. Hermes).
     # Subclasses set False when the standard parsing does not work for
     # their model's output format (e.g. GLM models that use XML).  When
@@ -78,10 +71,10 @@ class ToolParser:
 
         self.model_tokenizer = tokenizer
         if tools:
-            self.tools: list[ChatCompletionToolsParam] = [
+            self.tools: list[ChatCompletionToolsParam | FunctionTool] = [
                 tool
                 for tool in tools
-                if isinstance(tool, ChatCompletionToolsParam)
+                if isinstance(tool, (ChatCompletionToolsParam, FunctionTool))
             ]
         else:
             self.tools = []
@@ -102,8 +95,6 @@ class ToolParser:
 
         # Step 1 (highest priority for ChatCompletionRequest): apply
         # vLLM-owned structural tag support for model-specific tool formats.
-        # NOTE: In proxy context, VLLM_ENFORCE_STRICT_TOOL_CALLING is always False,
-        # so this step is skipped. We keep the code for alignment with vllm upstream.
         if (
             isinstance(request, ChatCompletionRequest)
             and VLLM_ENFORCE_STRICT_TOOL_CALLING
@@ -142,7 +133,12 @@ class ToolParser:
                 request.response_format = None
             if isinstance(request, ResponsesRequest):
                 # Single-shot construction so Pydantic v2 tracks `format`
-                # in __fields_set__
+                # in __fields_set__ — assigning to `.format` after the bare
+                # `ResponseTextConfig()` constructor does not, which can
+                # drop the nested config from `model_dump`. Also drop the
+                # `description` kwarg: it is not a field on
+                # ResponseFormatTextJSONSchemaConfig and was being silently
+                # passed through as extra.
                 request.text = ResponseTextConfig(
                     format=ResponseFormatTextJSONSchemaConfig(
                         type="json_schema",
@@ -155,7 +151,6 @@ class ToolParser:
         return request
 
     def get_structural_tag(self, request: ChatCompletionRequest):
-        """Default implementation returns None. Subclasses can override."""
         return None
 
     def extract_tool_calls(
@@ -350,18 +345,3 @@ class ToolParserManager:
             logger.exception(
                 "Failed to load module '%s' from %s.", module_name, plugin_path
             )
-
-
-# Convenience aliases
-get_tool_parser = ToolParserManager.get_tool_parser
-register_tool_parser = ToolParserManager.register_module
-list_tool_parsers = ToolParserManager.list_registered
-
-__all__ = [
-    "Tool",
-    "ToolParser",
-    "ToolParserManager",
-    "get_tool_parser",
-    "register_tool_parser",
-    "list_tool_parsers",
-]

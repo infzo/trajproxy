@@ -299,14 +299,15 @@ class InferClient:
         client = await get_shared_client()
         headers = self._build_headers(extra_headers)
 
-        # 流式请求的重试：仅在建立连接阶段重试
+        # 流式请求的重试：仅在建立连接阶段（未 yield 数据时）重试
+        has_yielded = False  # 跟踪是否已 yield 过数据，避免重试导致数据重复
         last_error = None
         for attempt in range(self._max_retries + 1):
             try:
                 logger.debug(f"Infer 流式请求: {url}")
                 async with client.stream("POST", url, json=request_body, headers=headers) as response:
                     if response.status_code in _RETRY_STATUS_CODES:
-                        if attempt < self._max_retries:
+                        if not has_yielded and attempt < self._max_retries:
                             wait = 2 ** attempt
                             logger.warning(
                                 f"Infer 流式请求返回 {response.status_code}，"
@@ -316,6 +317,8 @@ class InferClient:
                             await response.aread()
                             await asyncio.sleep(wait)
                             continue
+                        # 已 yield 数据或重试次数耗尽：不重试，直接抛出
+                        response.raise_for_status()
 
                     response.raise_for_status()
 
@@ -327,7 +330,9 @@ class InferClient:
                             if content == "[DONE]":
                                 return
                             try:
-                                yield json.loads(content)
+                                parsed = json.loads(content)
+                                has_yielded = True  # 标记已 yield，后续出错不再重试
+                                yield parsed
                             except json.JSONDecodeError:
                                 continue
                     return
@@ -338,7 +343,7 @@ class InferClient:
                 raise self._wrap_request_error(e)
             except httpx.RequestError as e:
                 last_error = e
-                if attempt < self._max_retries:
+                if not has_yielded and attempt < self._max_retries:
                     wait = 2 ** attempt
                     logger.warning(
                         f"Infer 流式请求异常: {e}，"
@@ -346,6 +351,12 @@ class InferClient:
                     )
                     await asyncio.sleep(wait)
                     continue
+                # 已 yield 数据则不重试，避免数据重复
+                if has_yielded:
+                    logger.error(
+                        f"Infer 流式请求中途异常且已部分传输数据，"
+                        f"放弃重试以避免数据重复: {e}"
+                    )
                 self._last_retry_count = attempt
                 raise self._wrap_request_error(e)
 

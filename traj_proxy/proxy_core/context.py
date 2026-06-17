@@ -101,6 +101,7 @@ class ProcessContext:
     reasoning_ended: bool = False              # 推理阶段是否已结束（三阶段状态机）
     stream_buffer_text: str = ""               # 流式累积的响应文本
     stream_buffer_ids: List[int] = field(default_factory=list)  # 流式累积的 token ids
+    stream_decode_checkpoint_len: int = 0      # 已全量 decode 对齐的 token 数量（增量 decode 优化）
     stream_chunk_count: int = 0                # 已发送的 chunk 数量
     stream_finished: bool = False              # 流式是否结束
 

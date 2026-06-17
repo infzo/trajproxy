@@ -1,6 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-
 """
 Parser 管理器
 
@@ -68,20 +65,60 @@ class Parser:
     对外提供统一接口，对内适配 vLLM parser。
     支持 vLLM 原始 parser 无需修改即可使用。
 
+    对齐 vllm _WrappedParser 设计：
+    - reasoning_parser_cls / tool_parser_cls 作为类属性存储 parser 类引用，
+      所有实例共享同一个类引用（对齐 vllm _WrappedParser.reasoning_parser_cls /
+      _WrappedParser.tool_parser_cls 的类属性设计）
+    - ParserManager.create_parser() 通过 type() 动态创建子类并设置类属性，
+      与 vllm ParserManager.get_parser() 的动态子类化模式一致
+    - __init__ 中从类属性 self.__class__.reasoning_parser_cls /
+      self.__class__.tool_parser_cls 实例化子 parser，
+      与 vllm _WrappedParser.__init__ 完全一致
+    - 流式路径和非流式路径均使用 parser_cls(tokenizer, tools, **kwargs)
+      创建独立实例，与 vllm serving_chat.py 中
+      self.parser_cls(tokenizer, request.tools) 的 per-request 实例化模式一致
+
     使用示例：
-        parser = ParserManager.create_parser(...)
-        with parser:  # 自动重置流式状态
-            async for chunk in ...:
-                delta = parser.extract_tool_calls_streaming(...)
+        # ParserManager.create_parser 返回 (parser_cls, parser_instance)
+        parser_cls, parser = ParserManager.create_parser(...)
+        # 流式和非流式：均使用 parser_cls 创建 per-request parser
+        request_parser = parser_cls(tokenizer, request.tools, **kwargs)
     """
+
+    # 类属性，默认 None（对齐 vllm _WrappedParser）
+    # 动态子类通过 type() 设置这些类属性
+    reasoning_parser_cls: Optional[type] = None
+    tool_parser_cls: Optional[type] = None
 
     def __init__(
         self,
-        tool_parser: Optional[ToolParser],
-        reasoning_parser: Optional[ReasoningParser],
+        tokenizer: Any,
+        tools: Optional[list] = None,
+        **kwargs,
     ):
-        self._tool_parser = tool_parser
-        self._reasoning_parser = reasoning_parser
+        """初始化 Parser（对齐 vllm _WrappedParser.__init__）
+
+        从类属性 self.__class__.reasoning_parser_cls /
+        self.__class__.tool_parser_cls 实例化子 parser，
+        与 vllm _WrappedParser.__init__ 的做法完全一致。
+
+        Args:
+            tokenizer: Tokenizer 实例
+            tools: 工具列表（传给 tool_parser）
+            **kwargs: 额外参数（如 chat_template_kwargs，传给 reasoning_parser）
+        """
+        self.model_tokenizer = tokenizer
+        # 从类属性实例化子 parser（对齐 vllm _WrappedParser.__init__）
+        self._reasoning_parser: Optional[ReasoningParser] = None
+        if self.__class__.reasoning_parser_cls is not None:
+            self._reasoning_parser = self.__class__.reasoning_parser_cls(
+                tokenizer, **kwargs
+            )
+        self._tool_parser: Optional[ToolParser] = None
+        if self.__class__.tool_parser_cls is not None:
+            self._tool_parser = self.__class__.tool_parser_cls(
+                tokenizer, tools
+            )
         self._stream_state = StreamState()
 
     @staticmethod
@@ -119,86 +156,6 @@ class Parser:
             tools=tools,
             tool_choice=request.get("tool_choice", "auto"),
         )
-
-    # ==================== 按请求更新 parser 状态 ====================
-
-    def update_for_request(self, request: Union[Dict[str, Any], ChatCompletionRequest]):
-        """根据请求参数更新 parser 内部状态
-
-        对齐 vllm DelegatingParser 的行为：reasoning parser 的
-        thinking_enabled 应反映请求的 enable_thinking 参数，
-        而不是在 Processor 创建时硬编码为 True。
-
-        Qwen3ReasoningParser 在 __init__ 中通过
-        chat_template_kwargs.get("enable_thinking", True) 设置
-        thinking_enabled，但 Parser 实例在 Processor 初始化时
-        一次性创建，创建时无 chat_template_kwargs，
-        导致 thinking_enabled 恸为 True。此方法在每次请求
-        处理前调用，修正该状态。
-
-        Args:
-            request: dict 格式的请求或 ChatCompletionRequest 对象
-        """
-        # 从请求中提取 chat_template_kwargs
-        chat_kwargs = {}
-        if isinstance(request, dict):
-            chat_kwargs = request.get("chat_template_kwargs", {}) or {}
-        elif hasattr(request, 'chat_template_kwargs') and request.chat_template_kwargs:
-            chat_kwargs = request.chat_template_kwargs
-
-        # 更新 reasoning parser 的 thinking_enabled
-        if (self._reasoning_parser is not None
-                and hasattr(self._reasoning_parser, 'thinking_enabled')):
-            self._reasoning_parser.thinking_enabled = chat_kwargs.get(
-                "enable_thinking", True
-            )
-
-        # 更新 tool parser 的 tools 列表（按请求的 tools 参数）
-        if self._tool_parser is not None and hasattr(self._tool_parser, 'tools'):
-            raw_tools = None
-            if isinstance(request, dict):
-                raw_tools = request.get("tools")
-            elif hasattr(request, 'tools') and request.tools:
-                raw_tools = request.tools
-            if raw_tools:
-                from vllm.tool_parsers.abstract_tool_parser import Tool
-                tools = []
-                for tool in raw_tools:
-                    func_dict = (tool.get("function", {})
-                                 if isinstance(tool, dict) else None)
-                    if func_dict is None and hasattr(tool, 'function'):
-                        func_dict = {
-                            "name": tool.function.name,
-                            "description": tool.function.description,
-                            "parameters": tool.function.parameters,
-                        }
-                    if func_dict:
-                        from vllm.entrypoints.openai.chat_completion.protocol import (
-                            ChatCompletionToolsParam,
-                            FunctionDefinition,
-                        )
-                        tools.append(ChatCompletionToolsParam(
-                            type=tool.get("type", "function")
-                            if isinstance(tool, dict) else "function",
-                            function=FunctionDefinition(
-                                name=func_dict.get("name", ""),
-                                description=func_dict.get("description"),
-                                parameters=func_dict.get("parameters"),
-                            )
-                        ))
-                if tools:
-                    self._tool_parser.tools = tools
-
-    # ==================== 流式状态管理 ====================
-
-    def reset_streaming_state(self):
-        """重置流式解析状态"""
-        self._stream_state = StreamState()
-        # 兼容 vLLM 原始 parser 的内部状态
-        if self._tool_parser and hasattr(self._tool_parser, 'reset_streaming_state'):
-            self._tool_parser.reset_streaming_state()
-        if self._reasoning_parser and hasattr(self._reasoning_parser, 'reset_streaming_state'):
-            self._reasoning_parser.reset_streaming_state()
 
     # ==================== 推理阶段判断（对齐 vllm DelegatingParser 接口） ====================
 
@@ -285,6 +242,10 @@ class Parser:
 
         状态管理完全在 Parser 内部，按 reasoning → tool → pass-through
         三阶段处理。每次调用后自动更新 previous_text/previous_token_ids。
+
+        对齐 vLLM：parse_delta 不接受外部 state 参数，
+        直接使用 self._stream_state（per-request 实例自带，
+        无并发竞态风险）。
 
         Args:
             delta_text: 增量文本
@@ -464,15 +425,6 @@ class Parser:
             request=req,  # type: ignore[arg-type]
         ), function_name_returned
 
-    def __enter__(self):
-        """进入上下文管理器，自动重置流式状态"""
-        self.reset_streaming_state()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """退出上下文管理器"""
-        return False
-
     # ==================== Tool Parser 接口 ====================
 
     def extract_tool_calls(
@@ -553,9 +505,14 @@ class Parser:
         current_token_ids: Sequence[int],
         delta_token_ids: Sequence[int],
     ) -> DeltaMessage | None:
-        """提取推理内容（流式）"""
-        if not self._reasoning_parser:
-            return None
+        """提取推理内容（流式）
+
+        对齐 vllm DelegatingParser.extract_reasoning_streaming():
+        无 reasoning parser 时，透传为 content（返回 DeltaMessage(content=delta_text)),
+        不返回 None，避免流式场景下 content 丢失。
+        """
+        if self._reasoning_parser is None:
+            return DeltaMessage(content=delta_text)
         return self._reasoning_parser.extract_reasoning_streaming(
             previous_text=previous_text,
             current_text=current_text,
@@ -699,10 +656,21 @@ class ParserManager:
         tool_parser_name: Optional[str],
         reasoning_parser_name: Optional[str],
         tokenizer: Any,
-    ) -> Parser:
-        """创建 Parser 实例（统一接口）
+    ) -> Tuple[type, Parser]:
+        """创建动态子类和共享 Parser 实例（对齐 vllm ParserManager.get_parser）
 
-        支持按需发现：如果 parser 不在默认注册表中，会从自定义目录查找。
+        对齐 vllm ParserManager.get_parser() 的动态子类化模式：
+        通过 type() 创建 Parser 子类，将 reasoning_parser_cls 和
+        tool_parser_cls 设置为子类的类属性，与 vllm 的做法完全一致：
+        - vllm: _WrappedParser.reasoning_parser_cls = reasoning_parser_cls
+        - vllm: _WrappedParser.tool_parser_cls = tool_parser_cls
+        TrajProxy 使用 type() 创建子类，每个模型配置有独立的子类，
+        避免多个模型共享同一 Parser 基类导致类属性冲突。
+
+        返回 (parser_cls, parser_instance)：
+        - parser_cls: 动态创建的 Parser 子类（类引用），供流式路径
+          parser_cls(tokenizer, tools, **kwargs) 创建 per-request 实例
+        - parser_instance: 共享 Parser 实例，供非流式路径使用
 
         Args:
             tool_parser_name: Tool Parser 名称（None 或空字符串表示不使用）
@@ -710,27 +678,47 @@ class ParserManager:
             tokenizer: Tokenizer 实例（transformers.PreTrainedTokenizerBase）
 
         Returns:
-            Parser 实例（统一接口，适配 vLLM parser）
+            (parser_cls, parser_instance) 元组：
+            - parser_cls: Parser 子类（类引用，含 reasoning_parser_cls /
+              tool_parser_cls 类属性）
+            - parser_instance: 共享 Parser 实例（非流式路径使用）
         """
         # 确保兼容层已初始化（自动发现和注册）
         ensure_initialized()
 
-        tool_parser = None
-        reasoning_parser = None
+        tool_parser_cls = None
+        reasoning_parser_cls = None
 
         if tool_parser_name:
             # 使用 get_tool_parser_cls 以支持按需发现
-            parser_cls = cls.get_tool_parser_cls(tool_parser_name)
-            if parser_cls:
-                tool_parser = parser_cls(tokenizer=tokenizer)
+            tool_parser_cls = cls.get_tool_parser_cls(tool_parser_name)
 
         if reasoning_parser_name:
             # 使用 get_reasoning_parser_cls 以支持按需发现
-            parser_cls = cls.get_reasoning_parser_cls(reasoning_parser_name)
-            if parser_cls:
-                reasoning_parser = parser_cls(tokenizer=tokenizer)
+            reasoning_parser_cls = cls.get_reasoning_parser_cls(reasoning_parser_name)
 
-        return Parser(tool_parser, reasoning_parser)
+        if tool_parser_cls is None and reasoning_parser_cls is None:
+            # 无 parser 配置：返回 Parser 基类和空实例
+            return Parser, Parser(tokenizer=tokenizer, tools=None)
+
+        # 对齐 vllm ParserManager.get_parser(): 动态创建子类
+        # vllm 在 _WrappedParser 上设置类属性（全局共享）
+        # TrajProxy 使用 type() 创建子类（每个模型配置独立）
+        # 这确保不同模型配置的 parser_cls 不会互相干扰
+        reasoning_name = reasoning_parser_name or "NoReasoning"
+        tool_name = tool_parser_name or "NoTool"
+        class_name = f"{reasoning_name}_{tool_name}_Parser"
+
+        parser_cls = type(class_name, (Parser,), {
+            "reasoning_parser_cls": reasoning_parser_cls,
+            "tool_parser_cls": tool_parser_cls,
+        })
+
+        # 创建共享 Parser 实例（非流式路径使用）
+        # __init__ 会从类属性自动实例化子 parser
+        parser_instance = parser_cls(tokenizer=tokenizer, tools=None)
+
+        return parser_cls, parser_instance
 
     @classmethod
     def create_parsers(
@@ -751,7 +739,7 @@ class ParserManager:
         Returns:
             (tool_parser, reasoning_parser) 元组
         """
-        parser = cls.create_parser(tool_parser_name, reasoning_parser_name, tokenizer)
+        _, parser = cls.create_parser(tool_parser_name, reasoning_parser_name, tokenizer)
         return parser.tool_parser, parser.reasoning_parser
 
     @classmethod

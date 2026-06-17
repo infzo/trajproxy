@@ -239,6 +239,17 @@ TrajProxy/
 | 12300+ | ProxyWorkers | TrajProxy 服务 |
 | 5432 | PostgreSQL | 数据库 |
 
+## Parser Implementation Source
+
+TrajProxy 的 Parser 实现（tool parser 和 reasoning parser）从 vLLM v0.16.0 fork 并移植。
+通过零侵入式兼容层（`vllm_compat/`），vLLM parser 代码可直接复制使用而无需修改。
+
+| 信息 | 说明 |
+|------|------|
+| vLLM 对齐版本 | v0.16.0 |
+| 项目兼容层 | `traj_proxy/proxy_core/parsers/vllm_compat/` |
+| 对齐原则 | 详见 `.opencode/instructions/vllm-alignment.md` |
+
 ## 许可证
 
 MIT License

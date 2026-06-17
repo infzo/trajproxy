@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/tool_parsers/structural_tag_registry.py
 
 """
 vLLM Structural Tag Registry 兼容层（stub）

@@ -225,12 +225,15 @@ class ProcessorManager:
         """异步加载 Processor 到 LRU 缓存（带锁保护）
 
         防止并发请求同一未加载模型时重复创建。
+        同时防止 register/unregister 并发操作导致的 TOCTOU 竞态：
+        在 _build_processor 的 await 期间，config 可能被回滚或注销，
+        因此在写入 cache 前必须二次校验 config 是否仍然存在。
 
         Args:
             key: (run_id, model_name) 元组
 
         Returns:
-            已加载的 Processor，或 None（如果 config 不存在）
+            已加载的 Processor，或 None（如果 config 不存在或已被并发删除）
         """
         # 快速路径：已经在缓存中
         if key in self._processor_cache:
@@ -257,6 +260,30 @@ class ProcessorManager:
                 processor = await self._build_processor(config)
             except Exception as e:
                 logger.error(f"创建 Processor 失败 [{key}]: {e}\n{traceback.format_exc()}")
+                return None
+
+            # TOCTOU 防护：_build_processor 包含 await 点，期间 config 可能被并发删除
+            # （register_dynamic_processor DB 回滚、unregister_dynamic_processor 等）
+            # 如果 config 已不存在，说明该模型已被撤销，必须放弃刚创建的 Processor
+            # 否则它会成为永久孤儿：cache 有 Processor 但 configs 无对应条目
+            current_config = self._config_configs.get(key) or self._dynamic_configs.get(key)
+            if current_config is None:
+                logger.warning(
+                    f"TOCTOU 防护: Processor 创建期间 config 已被删除 [{key}], "
+                    f"放弃刚构建的 Processor 以避免孤儿缓存"
+                )
+                # 释放 Processor 持有的资源（tokenizer 等），防止资源泄漏
+                await self._release_processor_async(processor)
+                return None
+
+            # 二次校验 config 内容一致性：如果 config 在构建期间被替换（而非删除），
+            # 应使用新 config 而非旧 config 对应的 Processor
+            if current_config is not config:
+                logger.warning(
+                    f"TOCTOU 防护: Processor 创建期间 config 已被替换 [{key}], "
+                    f"放弃旧 config 对应的 Processor，下次请求将使用新 config 重建"
+                )
+                await self._release_processor_async(processor)
                 return None
 
             self._processor_cache[key] = processor
@@ -488,6 +515,15 @@ class ProcessorManager:
             except Exception as e:
                 # 数据库失败时，回滚本地注册
                 del self._dynamic_configs[key]
+                # 清理可能因并发加载而驻留缓存的孤儿 Processor
+                orphaned = self._processor_cache.pop(key, None)
+                self._last_access_time.pop(key, None)
+                if orphaned:
+                    await self._release_processor_async(orphaned)
+                    logger.warning(
+                        f"[{model_name}] DB 回滚: 清理了缓存中的孤儿 Processor, "
+                        f"run_id={run_id}"
+                    )
                 logger.error(f"持久化模型到数据库失败: {e}\n{traceback.format_exc()}")
                 raise DatabaseError(f"注册模型失败（数据库错误）: {str(e)}")
 

@@ -47,7 +47,7 @@ def _safe_path(segment: str) -> str:
     return segment.replace(",", "_").replace("/", "_")
 
 
-@ray.remote
+@ray.remote(max_restarts=3, max_task_retries=1)
 class SessionArchiveWorker:
     """Session 粒度归档 Worker
 
@@ -72,6 +72,10 @@ class SessionArchiveWorker:
             f"SessionArchiveWorker-{worker_id} 初始化: "
             f"temp={temp_root}, compress={compress}"
         )
+
+    def ping(self) -> str:
+        """轻量存活检查，供协调器验证 Worker Actor 是否存活"""
+        return f"Worker-{self.worker_id}:alive"
 
     def archive(self, run_id: str, session_id: Optional[str],
                 session_idx: int = 0, session_total: int = 0) -> Dict[str, Any]:
@@ -206,7 +210,7 @@ class SessionArchiveWorker:
                     if now - last_log_time >= 60:
                         logger.info(
                             f"Worker-{self.worker_id}: "
-                            f"session '{display or _NULL_SESSION_DIR}' "
+                            f"session '{session_id or _NULL_SESSION_DIR}' "
                             f"已导出 {record_count} 条..."
                         )
                         last_log_time = now

@@ -188,6 +188,36 @@ python tests/test_parser_integration.py
 # ============================================================
 ```
 
+## MD5 一致性校验
+
+### 校验范围（强制 MD5 一致）
+
+仅 `tool_parsers/` 与 `reasoning_parsers/` 下从 vLLM 复制的 parser 文件：
+
+| 本目录 | 对应上游 |
+|--------|---------|
+| `tool_parsers/*.py`（除 `__init__.py`） | `../vllm/vllm/tool_parsers/*.py` |
+| `reasoning_parsers/*.py`（除 `__init__.py`） | `../vllm/vllm/reasoning/*.py` |
+
+```bash
+# 校验示例
+md5 tool_parsers/qwen3coder_tool_parser.py
+md5 /Users/liujiang/Workspace/Code/vllm/vllm/tool_parsers/qwen3coder_tool_parser.py
+# 两者输出必须相同
+```
+
+### 适配层（豁免 MD5）
+
+以下属于项目自有的 stub 化或注册代码，**不要求** MD5 一致：
+
+- `vllm/` 子目录下所有文件（为减轻依赖而简化的协议类、工具函数、tokenizers stub）
+- 所有 `__init__.py`（自动发现/注册配置）
+
+### 禁止操作
+
+禁止对校验范围内的 parser 文件做任何本地修改——代码格式化、变量重命名、
+删除注释、调整导入顺序等任何会导致 MD5 变化的操作均视为违规。
+
 ## 实现原理
 
 ### 兼容层设计

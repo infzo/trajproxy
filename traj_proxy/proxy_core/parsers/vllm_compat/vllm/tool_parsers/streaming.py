@@ -1,17 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/tool_parsers/streaming.py
-
-"""
-流式工具调用提取函数
-
-对齐 vLLM 最新版 vllm/tool_parsers/streaming.py 接口，
-提供 extract_named_tool_call_streaming 和 extract_required_tool_call_streaming。
-
-旧版 vLLM 中这两个函数位于 vllm.parser.utils，
-新版已迁移到 vllm.tool_parsers.streaming。
-本兼容层使用新路径。
-"""
 
 import json
 from typing import TYPE_CHECKING
@@ -37,7 +25,7 @@ else:
 
 
 def _bracket_level(s: str, opening: str = "{", closing: str = "}") -> int:
-    """计算字符串中嵌套括号的当前层级"""
+    """Calculate the current level of nested brackets in a string."""
     level = 0
     for char in s:
         if char == opening:
@@ -81,23 +69,7 @@ def extract_named_tool_call_streaming(
     tokenizer: "TokenizerLike",
     tool_call_array_index: int = 0,
 ) -> tuple[DeltaMessage | None, bool]:
-    """Build a streaming tool-call delta for forced named tool choice.
-
-    对齐 vLLM DelegatingParser._extract_tool_calls_streaming() 中
-    Named tool choice 分支（tool_choice={"function": {"name": ...}}）。
-
-    Args:
-        delta_text: 当前增量文本
-        function_name: 强制调用的函数名
-        function_name_returned: 函数名是否已返回
-        tool_call_idx: 工具调用索引
-        tool_call_id_type: 工具调用 ID 类型
-        tokenizer: tokenizer 实例（用于 Mistral 模型判断）
-        tool_call_array_index: 工具调用在数组中的索引
-
-    Returns:
-        (DeltaMessage, function_name_returned) 元组
-    """
+    """Build a streaming tool-call delta for forced named tool choice."""
     if function_name_returned:
         delta_tool_call = DeltaToolCall(
             function=DeltaFunctionCall(arguments=delta_text),
@@ -137,23 +109,8 @@ def extract_required_tool_call_streaming(
     tool_call_idx: int | None,
     tool_call_id_type: str,
 ) -> tuple[DeltaMessage | None, bool]:
-    """Build a streaming tool-call delta for required tool choice.
-
-    对齐 vLLM DelegatingParser._extract_tool_calls_streaming() 中
-    Required tool choice 分支（tool_choice="required"）。
-
-    Args:
-        previous_text: 之前累积的完整文本
-        current_text: 当前累积的完整文本（含本次 delta）
-        delta_text: 本次增量文本
-        function_name_returned: 函数名是否已返回
-        tool_call_idx: 工具调用索引
-        tool_call_id_type: 工具调用 ID 类型
-
-    Returns:
-        (DeltaMessage, function_name_returned) 元组
-    """
     if current_text is None or current_text == "":
+        # if the current text is empty, we cannot parse it
         return None, function_name_returned
     try:
         flags = Allow.ALL
@@ -164,16 +121,18 @@ def extract_required_tool_call_streaming(
     ):
         obj = None
 
-    # 检查当前文本是否是包含部分工具调用对象的合法数组
+    # check if the current text is a valid array
+    # containing a partial tool calling object
+    # if not repeat
     if obj is None or not isinstance(obj, list) or not len(obj) > 0:
         function_name_returned = False
         delta_message = None
     else:
         _, finishes_previous_tool = filter_delta_text(delta_text, previous_text)
-        # 取最后一个工具调用
+        # take the last tool call from the generated list
         current_tool_call = obj[-1]
 
-        # 一旦生成了 parameters，name 也已完成
+        # once parameters have been generated the name is complete as well
         if not finishes_previous_tool and (
             "name" not in current_tool_call or "parameters" not in current_tool_call
         ):
@@ -181,15 +140,16 @@ def extract_required_tool_call_streaming(
             delta_message = None
         else:
             if not function_name_returned:
-                # 从最新的工具调用中获取部分生成的参数
+                # get partly generated arguments from the latest tool call
                 param_match = re.search(
                     r'.*"parameters":\s*(.*)', current_text, re.DOTALL
                 )
                 arguments = param_match.group(1) if param_match else ""
                 arguments, _ = filter_delta_text(arguments, previous_text)
 
-                # 如果本次迭代完成了前一个工具调用但新的不完整工具已生成，
-                # 取列表中的倒数第二个
+                # if this iteration finishes a previous tool call but a
+                # new incomplete tool is already generated, take the
+                # previous from the list
                 if finishes_previous_tool and "parameters" not in current_tool_call:
                     current_tool_call = obj[-2]
 
@@ -220,6 +180,8 @@ def extract_required_tool_call_streaming(
                         tool_calls=[
                             DeltaToolCall(
                                 function=DeltaFunctionCall(
+                                    # OpenAI API returns None
+                                    # instead of name every time
                                     name=None,
                                     arguments=delta_text,
                                 ),
@@ -231,10 +193,3 @@ def extract_required_tool_call_streaming(
                     delta_message = None
 
     return delta_message, function_name_returned
-
-
-__all__ = [
-    "extract_named_tool_call_streaming",
-    "extract_required_tool_call_streaming",
-    "filter_delta_text",
-]

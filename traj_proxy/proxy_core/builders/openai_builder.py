@@ -41,17 +41,22 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
     def build(
         self,
         content: str,
-        context: "ProcessContext"
+        context: "ProcessContext",
+        parser: "Parser" = None,
     ) -> Dict[str, Any]:
         """构建 OpenAI 格式的完整响应
 
         Args:
             content: 响应内容
             context: 处理上下文
+            parser: per-request Parser 实例（优先使用，回退到 self.parser）
 
         Returns:
             OpenAI 格式的响应字典
         """
+        # 使用 per-request Parser（非流式路径传入），回退到共享 Parser
+        active_parser = parser or self.parser
+
         tool_calls = None
         reasoning = None
         final_content = content
@@ -85,7 +90,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         try:
             include_reasoning = context.request_params.get("include_reasoning", True)
             if include_reasoning:
-                extracted_reasoning, extracted_content = self.parser.extract_reasoning(
+                extracted_reasoning, extracted_content = active_parser.extract_reasoning(
                     content, context.raw_request
                 )
                 if extracted_reasoning:
@@ -110,7 +115,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
         tool_choice = raw_request.get("tool_choice", "auto")
         is_named_choice = isinstance(tool_choice, dict) and tool_choice.get("type") == "function"
         supports_required_and_named = getattr(
-            self.parser._tool_parser, 'supports_required_and_named', True
+            active_parser._tool_parser, 'supports_required_and_named', True
         )
 
         if not tool_calls:
@@ -125,7 +130,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                 if func_name and final_content:
                     parser_result = None
                     try:
-                        parser_result = self.parser.extract_tool_calls(
+                        parser_result = active_parser.extract_tool_calls(
                             final_content, context.raw_request
                         )
                     except Exception as e:
@@ -199,7 +204,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
             # 对齐 vLLM 分支 C: 自动工具调用解析（也作为 named/required 的降级分支）
             if not tool_calls:
                 try:
-                    result = self.parser.extract_tool_calls(
+                    result = active_parser.extract_tool_calls(
                         final_content, context.raw_request
                     )
                     if result.tools_called and result.tool_calls:

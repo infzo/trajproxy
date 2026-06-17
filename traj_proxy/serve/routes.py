@@ -213,13 +213,22 @@ async def chat_completions(
     # 并发限流：获取信号量，超时 5s 返回 429
     semaphore = getattr(request.app.state, "request_semaphore", None)
     acquired = False
+    streaming_handled = False  # 标记流式路径是否已接管信号量管理
     if semaphore:
         t_wait = time.perf_counter()
         try:
             await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
             acquired = True
         except asyncio.TimeoutError:
-            # 注意：actual_model 尚未提取，此处 emit 在下方 actual_model 提取后执行
+            # 信号量获取超时 → 并发限流拒绝
+            # 此时 actual_model 尚未从请求体提取，使用 "unknown" 作为指标标记
+            # run_id 优先级：路径参数 > x-run-id header（model 参数中的 run_id 无法提取）
+            wait_ms = (time.perf_counter() - t_wait) * 1000
+            rejected_run_id = run_id or request.headers.get("x-run-id") or ""
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_CONCURRENCY_REJECTED
+            emit(EVENT_CONCURRENCY_REJECTED, model="unknown",
+                 run_id=rejected_run_id, wait_duration_ms=wait_ms)
             max_conc = getattr(request.app.state, "max_concurrent_requests", "?")
             logger.warning(
                 f"[{request_id}] 并发限流拒绝: max_concurrent={max_conc} 已达上限"
@@ -270,13 +279,6 @@ async def chat_completions(
             from traj_proxy.observability.event_bus import emit
             from traj_proxy.observability.events import EVENT_SEMAPHORE_ACQUIRED
             emit(EVENT_SEMAPHORE_ACQUIRED, wait_duration_ms=wait_ms, model=actual_model)
-        elif semaphore and not acquired:
-            wait_ms = (time.perf_counter() - t_wait) * 1000
-            from traj_proxy.observability.event_bus import emit
-            from traj_proxy.observability.events import EVENT_CONCURRENCY_REJECTED
-            emit(EVENT_CONCURRENCY_REJECTED, model=actual_model,
-                 run_id=_extract_run_id(model, request.headers.get("x-run-id"), run_id) or "",
-                 wait_duration_ms=wait_ms)
 
         # 提取需要转发到推理服务的 header（黑名单模式）
         forward_headers = _extract_forward_headers(request)
@@ -313,9 +315,10 @@ async def chat_completions(
             # 流式处理 - 使用 Processor.process_stream
             # 上下文容器，流式完成后用于后台存储
             context_holder = {}
+            streaming_handled = True  # 流式路径接管信号量管理
 
             async def generate_stream():
-                """流式生成器，捕获异常并发送错误 SSE 事件"""
+                """流式生成器，捕获异常并发送错误 SSE 事件；信号量在流结束后释放"""
                 try:
                     async for chunk in processor.process_stream(
                         messages=messages,
@@ -338,6 +341,10 @@ async def chat_completions(
                     error_body, _ = build_error_response(request_id, stream_err)
                     yield f"data: {json.dumps({'error': error_body}, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
+                finally:
+                    # 流式信号量在此处释放，确保在整个 SSE 流生命周期内持有
+                    if acquired:
+                        semaphore.release()
 
             # 注意：存储已在 processor._finalize_stream() 中完成，无需后台任务
 
@@ -371,7 +378,8 @@ async def chat_completions(
         error_detail, status_code = build_error_response(request_id, e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     finally:
-        if acquired:
+        # 仅在非流式路径（或流式创建前异常）释放信号量
+        if acquired and not streaming_handled:
             semaphore.release()
 
 

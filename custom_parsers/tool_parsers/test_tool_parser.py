@@ -1,6 +1,3 @@
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/tool_parsers/qwen3coder_tool_parser.py
 import json
 import uuid
 from collections.abc import Sequence

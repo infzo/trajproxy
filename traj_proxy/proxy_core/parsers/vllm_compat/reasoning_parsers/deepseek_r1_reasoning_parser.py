@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-# Adapted from vllm/reasoning/deepseek_r1_reasoning_parser.py
 
 from collections.abc import Sequence
 

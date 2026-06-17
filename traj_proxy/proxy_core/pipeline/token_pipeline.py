@@ -5,6 +5,7 @@ TokenPipeline - Token 模式管道
 支持前缀匹配缓存优化。
 """
 
+import asyncio
 import time
 from typing import AsyncIterator, Dict, Any, Optional, TYPE_CHECKING
 
@@ -51,7 +52,8 @@ class TokenPipeline(BasePipeline):
         response_builder: "OpenAIResponseBuilder" = None,
         stream_builder: "StreamChunkBuilder" = None,
         parser: "Parser" = None,
-        tokenizer_path: str = ""
+        parser_cls: type = None,
+        tokenizer_path: str = "",
     ):
         """初始化 TokenPipeline
 
@@ -63,7 +65,8 @@ class TokenPipeline(BasePipeline):
             token_converter: Token 转换器
             response_builder: 响应构建器
             stream_builder: 流式响应构建器
-            parser: Parser 实例
+            parser: 共享 Parser 实例（非流式路径使用）
+            parser_cls: Parser 子类（类引用，流式路径 per-request 实例化使用）
             tokenizer_path: Tokenizer 路径
         """
         super().__init__(model, infer_client, request_repository)
@@ -72,6 +75,7 @@ class TokenPipeline(BasePipeline):
         self.response_builder = response_builder
         self.stream_builder = stream_builder
         self.parser = parser
+        self.parser_cls = parser_cls
         self.tokenizer_path = tokenizer_path
 
     def _create_context(
@@ -129,13 +133,30 @@ class TokenPipeline(BasePipeline):
             # 更新统计信息（必须在 _build_response 之前，因为 builder 需要 usage 信息）
             self._update_stats(context)
 
-            # 更新 parser 状态（确保 thinking_enabled 反映当前请求的 enable_thinking 参数）
-            # 对齐 vllm DelegatingParser：reasoning parser 的 thinking_enabled
-            # 应根据请求的 chat_template_kwargs 动态设置，而非硬编码为 True
-            self.parser.update_for_request(context.raw_request)
+            # 对齐 vLLM：非流式路径也创建 per-request Parser 实例
+            # vLLM serving_chat.py 的非流式路径（chat_completion_full_generator）：
+            #   - reasoning_parser: 每次请求新建实例（serving.py:253-258）
+            #     reasoning_parser = self.reasoning_parser_cls(
+            #         tokenizer, chat_template_kwargs=chat_template_kwargs)
+            #   - tool_parser: 在 _parse_tool_calls_from_content 中每次请求新建实例（serving.py:544-545）
+            #     tool_parser = tool_parser_cls(tokenizer, request.tools)
+            # TrajProxy 采用相同策略：使用 parser_cls 创建 per-request 实例，
+            # 确保并发请求之间状态完全隔离。
+            from traj_proxy.proxy_core.parsers.parser_manager import Parser
+            req = Parser._build_request(context.raw_request) if isinstance(context.raw_request, dict) else context.raw_request
+            chat_kwargs = {}
+            if isinstance(context.raw_request, dict):
+                chat_kwargs = context.raw_request.get("chat_template_kwargs", {}) or {}
+            elif hasattr(context.raw_request, 'chat_template_kwargs') and context.raw_request.chat_template_kwargs:
+                chat_kwargs = context.raw_request.chat_template_kwargs
+            request_parser = self.parser_cls(
+                tokenizer=self.token_converter.tokenizer,
+                tools=req.tools if req.tools else None,
+                **chat_kwargs,
+            )
 
-            # 阶段 5: 构建响应
-            context = self._build_response(context)
+            # 阶段 5: 构建响应（使用 per-request Parser）
+            context = self._build_response(context, parser=request_parser)
 
             self._update_timing(context)
 
@@ -205,8 +226,32 @@ class TokenPipeline(BasePipeline):
             context.encode_duration_ms = (time.perf_counter() - t0) * 1000
             prompt_input = context.token_ids
 
-            # 更新 parser 状态（确保 thinking_enabled 反映当前请求参数）
-            self.parser.update_for_request(context.raw_request)
+            # 对齐 vLLM：每个流式请求创建全新的 Parser 实例
+            # vLLM serving_chat.py:467-478 为每个请求新建 Parser，
+            # 传入 request.tools 和 chat_template_kwargs：
+            #   self.parser_cls(tokenizer, request.tools, chat_template_kwargs=...)
+            # TrajProxy 采用相同策略：使用 parser_cls（动态子类）创建
+            # per-request 实例，确保并发流式请求之间状态完全隔离。
+            # Parser.__init__ 从类属性 reasoning_parser_cls / tool_parser_cls
+            # 自动实例化子 parser，与 vLLM _WrappedParser.__init__ 一致。
+            # 提取 chat_template_kwargs
+            from traj_proxy.proxy_core.parsers.parser_manager import Parser
+            req = Parser._build_request(context.raw_request) if isinstance(context.raw_request, dict) else context.raw_request
+            chat_kwargs = {}
+            if isinstance(context.raw_request, dict):
+                chat_kwargs = context.raw_request.get("chat_template_kwargs", {}) or {}
+            elif hasattr(context.raw_request, 'chat_template_kwargs') and context.raw_request.chat_template_kwargs:
+                chat_kwargs = context.raw_request.chat_template_kwargs
+            request_parser = self.parser_cls(
+                tokenizer=self.token_converter.tokenizer,
+                tools=req.tools if req.tools else None,
+                **chat_kwargs,
+            )
+
+            # per-request Parser 实例在创建时已传入请求的 tools 和
+            # chat_template_kwargs，与 vLLM _WrappedParser.__init__ 一致，
+            # 无需额外调用 update_for_request 或 reset_streaming_state
+            # （update_for_request 已移除，vLLM 中不存在此方法）
 
             # 流式状态
             first_chunk_received = False
@@ -216,41 +261,44 @@ class TokenPipeline(BasePipeline):
             # 对齐 vLLM DelegatingParser.parse_delta() 的 prompt reasoning check：
             # 如果没有 reasoning parser，或 prompt token_ids 中已包含 reasoning
             # 结束标记，则 reasoning_ended 立即为 True，使 tool parser 可以工作。
-            if not self.parser.has_reasoning_parser:
+            if not request_parser.has_reasoning_parser:
                 context.reasoning_ended = True
-            elif context.token_ids and self.parser.is_reasoning_end(context.token_ids):
+            elif context.token_ids and request_parser.is_reasoning_end(context.token_ids):
                 context.reasoning_ended = True
             else:
                 context.reasoning_ended = False
 
-            # 使用上下文管理器自动管理流式状态
-            with self.parser:
-                # 阶段 3-5: 流式推理和响应
-                async for infer_chunk in self.infer_client.send_completion_stream(
-                    prompt=prompt_input,
-                    model=self.model,
-                    extra_headers=context.forward_headers,
-                    request_id=context.unique_id,
-                    **context.request_params
-                ):
-                    # 处理单个响应块（状态管理在 parser 内部）
-                    chunk = await self._process_stream_chunk(
-                        infer_chunk,
-                        context,
-                    )
+            # per-request Parser 实例自带 _stream_state（在 Parser.__init__ 中创建），
+            # 对齐 vLLM：parse_delta() 直接使用 self._stream_state，
+            # 无需额外创建 StreamState 对象或传入 state 参数
 
-                    if chunk:
-                        # 记录TTFT（首Token时间）
-                        if not first_chunk_received:
-                            context.ttft_ms = (time.perf_counter() - infer_start_time) * 1000
-                            first_chunk_received = True
+            # 阶段 3-5: 流式推理和响应
+            async for infer_chunk in self.infer_client.send_completion_stream(
+                prompt=prompt_input,
+                model=self.model,
+                extra_headers=context.forward_headers,
+                request_id=context.unique_id,
+                **context.request_params
+            ):
+                # 处理单个响应块（状态管理在 per-request parser 内部）
+                chunk = await self._process_stream_chunk(
+                    infer_chunk,
+                    context,
+                    request_parser=request_parser,
+                )
 
-                        context.stream_chunk_count += 1
-                        yield chunk
+                if chunk:
+                    # 记录TTFT（首Token时间）
+                    if not first_chunk_received:
+                        context.ttft_ms = (time.perf_counter() - infer_start_time) * 1000
+                        first_chunk_received = True
 
-                    # 如果是最后一个 chunk，结束流
-                    if context.stream_finished:
-                        break
+                    context.stream_chunk_count += 1
+                    yield chunk
+
+                # 如果是最后一个 chunk，结束流
+                if context.stream_finished:
+                    break
 
             # 记录推理总耗时（从开始推理到流结束）
             context.inference_duration_ms = (time.perf_counter() - infer_start_time) * 1000
@@ -276,6 +324,24 @@ class TokenPipeline(BasePipeline):
                 }
                 yield usage_chunk
 
+        except asyncio.CancelledError:
+            # 客户端断连或任务取消：确保轨迹数据被存储
+            logger.warning(
+                f"[{context.unique_id}] 流式处理被取消（客户端可能已断连）"
+            )
+            try:
+                await self._finalize_stream(context)
+            except Exception as finalize_err:
+                logger.error(
+                    f"[{context.unique_id}] CancelledError 场景下轨迹存储失败: {finalize_err}"
+                )
+            from traj_proxy.observability.event_bus import emit
+            from traj_proxy.observability.events import EVENT_STREAM_CLIENT_DISCONNECT
+            emit(EVENT_STREAM_CLIENT_DISCONNECT, model=context.model,
+                 chunk_count=context.stream_chunk_count,
+                 duration_ms=(time.perf_counter() - context.start_time.timestamp()) * 1000
+                 if context.start_time else 0)
+            raise
         except Exception as e:
             self._handle_error(context, e)
             from traj_proxy.observability.event_bus import emit
@@ -389,8 +455,18 @@ class TokenPipeline(BasePipeline):
 
         return context
 
-    def _build_response(self, context: ProcessContext) -> ProcessContext:
-        """阶段 5: 构建响应"""
+    def _build_response(
+        self,
+        context: ProcessContext,
+        parser: "Parser" = None,
+    ) -> ProcessContext:
+        """阶段 5: 构建响应
+
+        Args:
+            context: 处理上下文
+            parser: per-request Parser 实例（非流式路径使用，
+                流式路径不需要此参数）
+        """
         # 1. 构建用户可见响应（skip_special_tokens=True，不含 EOS 等特殊 token）
         if context.response_ids:
             clean_response_text = self.token_converter.tokenizer.decode(
@@ -398,8 +474,9 @@ class TokenPipeline(BasePipeline):
             )
         else:
             clean_response_text = context.response_text or ""
+        # 传入 per-request Parser，确保 builder 使用请求专属的 parser 实例
         context.raw_response = self.response_builder.build(
-            clean_response_text, context
+            clean_response_text, context, parser=parser
         )
 
         # 2. re-decode response，保留 EOS，与 response_ids 一致（用于存储和前缀缓存）
@@ -446,15 +523,19 @@ class TokenPipeline(BasePipeline):
         self,
         infer_chunk: Dict[str, Any],
         context: ProcessContext,
+        request_parser: "Parser" = None,
     ) -> Optional[Dict[str, Any]]:
         """处理单个流式响应块
 
         对齐 vLLM DelegatingParser.parse_delta() 设计：
-        状态管理完全在 parser 内部，pipeline 层只负责解码和转发。
+        状态管理完全在 parser 内部（self._stream_state），
+        pipeline 层只负责解码和转发，不传入外部 state。
 
         Args:
             infer_chunk: Infer 响应块
             context: 处理上下文
+            request_parser: per-request 的 Parser 实例（流式请求使用，
+                非流式路径不需要此参数）
 
         Returns:
             OpenAI 格式的 chunk 字典，或 None
@@ -471,9 +552,12 @@ class TokenPipeline(BasePipeline):
 
         delta_token_ids = chunk_token_ids or []
 
-        # 使用 Parser.parse_delta() 进行流式解析（状态管理在 parser 内部）
+        # 使用 per-request Parser.parse_delta() 进行流式解析
         # 对齐 vLLM DelegatingParser.parse_delta() 的推理→工具→内容三段式
-        delta_msg = self.parser.parse_delta(
+        # 流式请求使用 request_parser（per-request 实例），避免并发竞态；
+        # 若未提供 request_parser（非流式路径），回退到共享 Parser
+        parser = request_parser or self.parser
+        delta_msg = parser.parse_delta(
             delta_text=chunk_content or "",
             delta_token_ids=delta_token_ids,
             request=context.raw_request,
@@ -513,8 +597,9 @@ class TokenPipeline(BasePipeline):
             parsed_tool_calls = None
 
         effective_tool_calls = parsed_tool_calls or tool_calls_delta
-        # 同步 parser 内部状态到 context（供 pipeline 层判断）
-        context.reasoning_ended = self.parser._stream_state.reasoning_ended
+        # 同步 per-request parser 内部状态到 context（供 pipeline 层判断）
+        # 对齐 vLLM：parse_delta 使用 parser 自带的 _stream_state
+        context.reasoning_ended = parser._stream_state.reasoning_ended
 
         # 累积 logprobs（每个 chunk 的 choice 中可能携带，需合并数组）
         if "choices" in infer_chunk and infer_chunk["choices"]:
@@ -534,8 +619,8 @@ class TokenPipeline(BasePipeline):
         # 检查是否结束
         finish_reason = None
         if InferResponseParser.is_stream_finished(infer_chunk):
-            # 尝试从 Parser 获取结束原因
-            parser_finish = self._get_finish_reason_from_parser(context)
+            # 尝试从 per-request Parser 获取结束原因
+            parser_finish = self._get_finish_reason_from_parser(context, parser)
             finish_reason = parser_finish or InferResponseParser.get_finish_reason(infer_chunk)
             context.stream_finished = True
             # 保存 usage 信息（如果有）
@@ -562,11 +647,22 @@ class TokenPipeline(BasePipeline):
 
         return openai_chunk
 
-    def _get_finish_reason_from_parser(self, context: ProcessContext) -> Optional[str]:
-        """从 Parser 获取结束原因"""
-        if self.parser.has_tool_parser:
+    def _get_finish_reason_from_parser(
+        self,
+        context: ProcessContext,
+        parser: "Parser" = None,
+    ) -> Optional[str]:
+        """从 Parser 获取结束原因
+
+        Args:
+            context: 处理上下文
+            parser: Parser 实例（流式请求使用 per-request 实例，
+                非流式路径使用共享 Parser）
+        """
+        parser = parser or self.parser
+        if parser.has_tool_parser:
             # 检查是否有工具调用
-            tool_parser = self.parser.tool_parser
+            tool_parser = parser.tool_parser
             if hasattr(tool_parser, 'prev_tool_call_arr'):
                 if tool_parser.prev_tool_call_arr:
                     return "tool_calls"
