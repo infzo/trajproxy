@@ -9,6 +9,7 @@ import asyncio
 import json
 import traceback
 from typing import Optional, Callable, Awaitable
+from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 
 import psycopg
 
@@ -71,7 +72,16 @@ class NotificationListener:
             try:
                 # 创建独立的异步连接（autocommit 模式，LISTEN 不需要事务块）
                 # 启用 TCP keepalive 防止云环境防火墙/NAT 静默丢弃空闲连接
-                conninfo = f"{self._db_url} keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3"
+                keepalive_params = {
+                    "keepalives": "1",
+                    "keepalives_idle": "30",
+                    "keepalives_interval": "10",
+                    "keepalives_count": "3",
+                }
+                parsed = urlparse(self._db_url)
+                existing = parse_qs(parsed.query)
+                existing.update(keepalive_params)
+                conninfo = urlunparse(parsed._replace(query=urlencode(existing, doseq=True)))
                 self._conn = await psycopg.AsyncConnection.connect(
                     conninfo, autocommit=True
                 )
