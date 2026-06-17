@@ -125,16 +125,24 @@ Body:
 
 ### 参数说明
 
+> 完整参数规范（含 Direct/TITO 两种模式的支持情况和详细说明）参见 [OpenAI 兼容接口规范](openai-compat.md)。
+
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | model | string | 是 | - | 模型名称。可带 run_id：`model_name,run_id` |
 | messages | array | 是 | - | 消息列表 |
 | max_tokens | integer | 否 | - | 最大生成 token 数 |
-| temperature | number | 否 | - | 采样温度 (0-2) |
-| top_p | number | 否 | - | nucleus sampling 参数 |
+| temperature | float | 否 | - | 采样温度 [0, 2) |
+| top_p | float | 否 | - | 核采样概率阈值 (0, 1) |
+| seed | integer | 否 | - | 随机数种子 |
+| presence_penalty | float | 否 | - | 重复度控制 [-2.0, 2.0] |
+| stop | string/array | 否 | - | 停止生成条件 |
 | stream | boolean | 否 | false | 是否流式输出 |
+| stream_options | object | 否 | - | 流式输出配置 |
 | tools | array | 否 | - | 工具定义列表 |
 | tool_choice | string/object | 否 | - | 工具选择策略 |
+| ~~n~~ | integer | 否 | - | ❌ 不支持（固定返回 1 条响应） |
+| ~~enable_search~~ | boolean | 否 | - | ❌ 不支持（非标准扩展参数） |
 
 ### 响应（非流式）
 

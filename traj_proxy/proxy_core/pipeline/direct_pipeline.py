@@ -4,6 +4,7 @@ DirectPipeline - 直接转发管道
 直接将请求转发到推理服务，不经过 token 编码/解码流程。
 """
 
+from datetime import datetime, timezone
 from typing import AsyncIterator, Dict, Any, Optional, List, TYPE_CHECKING
 import time
 
@@ -270,7 +271,7 @@ class DirectPipeline(BasePipeline):
             from traj_proxy.observability.events import EVENT_STREAM_CLIENT_DISCONNECT
             emit(EVENT_STREAM_CLIENT_DISCONNECT, model=context.model,
                  chunk_count=context.stream_chunk_count,
-                 duration_ms=(time.perf_counter() - context.start_time.timestamp()) * 1000
+                 duration_ms=(datetime.now(timezone.utc) - context.start_time).total_seconds() * 1000
                  if context.start_time else 0)
             raise
 

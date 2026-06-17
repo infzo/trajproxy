@@ -145,7 +145,7 @@ class SessionArchiveWorker:
         """从 DB 读取 session 数据并写入文件，返回记录数"""
         cursor_name = f"arch_{safe_run}_{safe_session}"
 
-        with psycopg.connect(self.db_url) as conn:
+        with psycopg.connect(self.db_url, connect_timeout=10) as conn:
             with conn.cursor() as cur:
                 # NULL session_id 需要 IS NULL 比较
                 if session_id is None:

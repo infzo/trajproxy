@@ -70,8 +70,10 @@ class NotificationListener:
         while self._running:
             try:
                 # 创建独立的异步连接（autocommit 模式，LISTEN 不需要事务块）
+                # 启用 TCP keepalive 防止云环境防火墙/NAT 静默丢弃空闲连接
+                conninfo = f"{self._db_url} keepalives=1 keepalives_idle=30 keepalives_interval=10 keepalives_count=3"
                 self._conn = await psycopg.AsyncConnection.connect(
-                    self._db_url, autocommit=True
+                    conninfo, autocommit=True
                 )
                 await self._conn.execute(f"LISTEN {CHANNEL}")
                 logger.info(f"LISTEN 已激活，通道: {CHANNEL}")

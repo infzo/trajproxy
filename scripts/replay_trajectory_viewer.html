@@ -2619,6 +2619,7 @@ function countDiffMessages(msgsA, msgsB) {
 
 /**
  * 比较两条消息
+ * system 消息会先归一化（剥离 cch 等易变字段）再比较，避免因每次对话变化的字段产生假差异
  * 返回 { type: 'same'|'modified'|'added'|'removed', preview: string }
  */
 function compareMessages(mA, mB) {
@@ -2634,8 +2635,12 @@ function compareMessages(mA, mB) {
         return { type: 'removed', preview: preview.substring(0, 80) };
     }
 
-    const contentA = formatMessageContent(mA.content) || '';
-    const contentB = formatMessageContent(mB.content) || '';
+    // system 消息归一化：剥离 cch 等易变字段后再比较
+    const isSystem = (mA.role === 'system' || mB.role === 'system');
+    const rawA = formatMessageContent(mA.content) || '';
+    const rawB = formatMessageContent(mB.content) || '';
+    const contentA = isSystem ? normalizeSystemContent(rawA) : rawA;
+    const contentB = isSystem ? normalizeSystemContent(rawB) : rawB;
 
     if (contentA === contentB) {
         return { type: 'same', preview: contentA.substring(0, 80) || '[\u5de5\u5177\u8c03\u7528]' };
@@ -2903,16 +2908,32 @@ function getRecordMessages(record) {
 }
 
 /**
+ * 归一化 system 消息内容：剥离每次对话都会变化的易变字段，
+ * 使配置指纹、消息对比不受其干扰。
+ *
+ * 目前处理：
+ * - x-anthropic-billing-header 中的 cch=<hex> 值（每次对话随机）
+ *
+ * 后续如有新的易变字段，只需在此函数中追加替换规则。
+ */
+function normalizeSystemContent(content) {
+    if (!content || typeof content !== 'string') return content;
+    // 将 cch=<任意非分号字符> 替换为固定占位符，忽略每次对话的随机值
+    return content.replace(/cch=[^;\s]*/g, 'cch=<normalized>');
+}
+
+/**
  * 计算请求配置指纹（system 消息 + tools 参数）
  * 用于区分不同配置的推理请求
  */
 function computeConfigFingerprint(record) {
     const msgs = getRecordMessages(record);
-    // 提取 system 消息内容
+    // 提取 system 消息内容并归一化（剥离易变字段）
     const systemMsg = msgs.find(m => m.role === 'system');
-    const systemContent = systemMsg
+    const rawSystemContent = systemMsg
         ? (typeof systemMsg.content === 'string' ? systemMsg.content : JSON.stringify(systemMsg.content))
         : '';
+    const systemContent = normalizeSystemContent(rawSystemContent);
 
     // 提取 tools 参数（取工具名称列表排序后拼接）
     const tools = record.tools
@@ -3004,12 +3025,19 @@ function buildRelationGraph(records) {
 
 /**
  * 比较两条消息是否相等（用于前后轮对话检测）
+ * system 消息会先归一化（剥离 cch 等易变字段）再比较
  */
 function messagesEqual(a, b) {
     if (a.role !== b.role) return false;
 
-    const contentA = typeof a.content === 'string' ? a.content : JSON.stringify(a.content || '');
-    const contentB = typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '');
+    let contentA = typeof a.content === 'string' ? a.content : JSON.stringify(a.content || '');
+    let contentB = typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '');
+
+    // system 消息包含 billing header 中的易变字段，需归一化后再比较
+    if (a.role === 'system') {
+        contentA = normalizeSystemContent(contentA);
+        contentB = normalizeSystemContent(contentB);
+    }
 
     if (contentA !== contentB) return false;
 

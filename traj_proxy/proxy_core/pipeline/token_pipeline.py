@@ -7,6 +7,7 @@ TokenPipeline - Token 模式管道
 
 import asyncio
 import time
+from datetime import datetime, timezone
 from typing import AsyncIterator, Dict, Any, Optional, TYPE_CHECKING
 
 from traj_proxy.proxy_core.pipeline.base import BasePipeline
@@ -338,18 +339,18 @@ class TokenPipeline(BasePipeline):
             from traj_proxy.observability.event_bus import emit
             from traj_proxy.observability.events import EVENT_STREAM_CLIENT_DISCONNECT
             emit(EVENT_STREAM_CLIENT_DISCONNECT, model=context.model,
-                 chunk_count=context.stream_chunk_count,
-                 duration_ms=(time.perf_counter() - context.start_time.timestamp()) * 1000
-                 if context.start_time else 0)
+                  chunk_count=context.stream_chunk_count,
+                  duration_ms=(datetime.now(timezone.utc) - context.start_time).total_seconds() * 1000
+                  if context.start_time else 0)
             raise
         except Exception as e:
             self._handle_error(context, e)
             from traj_proxy.observability.event_bus import emit
             from traj_proxy.observability.events import EVENT_STREAM_CLIENT_DISCONNECT
             emit(EVENT_STREAM_CLIENT_DISCONNECT, model=context.model,
-                 chunk_count=context.stream_chunk_count,
-                 duration_ms=(time.perf_counter() - context.start_time.timestamp()) * 1000
-                 if context.start_time else 0)
+                  chunk_count=context.stream_chunk_count,
+                  duration_ms=(datetime.now(timezone.utc) - context.start_time).total_seconds() * 1000
+                  if context.start_time else 0)
             raise
 
     # ==================== 非流式处理阶段 ====================

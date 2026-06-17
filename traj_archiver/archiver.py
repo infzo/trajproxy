@@ -432,6 +432,7 @@ async def _archive_run(
     active: Dict = {}  # future -> (worker, session_id, idx)
     raw_results = []
     failed_sessions = []  # 因业务错误或超出重试上限而失败的 session
+    successful_session_ids: List[Optional[str]] = []  # 成功归档的 session_id 列表，用于精确清理
 
     # 可用 Worker 列表（可能因重建而变化）
     available_workers = list(workers)
@@ -558,6 +559,7 @@ async def _archive_run(
             try:
                 result = await asyncio.to_thread(ray.get, f, timeout=10)
                 raw_results.append(result)
+                successful_session_ids.append(session_id)
             except (RayActorError, GetTimeoutError) as e:
                 # Worker 进程已死亡或结果获取超时 — 不取消其他 Worker 的任务
                 consecutive_rebuilds += 1
@@ -747,10 +749,10 @@ async def _archive_run(
         if r["file"] is not None:
             files.append(r["file"])
 
-    # 4. run 级 DELETE + UPDATE（协调器连接）
+    # 4. 仅清理成功归档的 session（避免部分失败时数据丢失）
     archive_location = f"{storage.location_prefix}{safe_run}/"
     async with pool.connection() as conn:
-        await _cleanup_run(conn, run_id, archive_location)
+        await _cleanup_run(conn, run_id, archive_location, successful_session_ids)
 
     t_done = time.monotonic()
     logger.info(
@@ -766,22 +768,65 @@ async def _archive_run(
     }
 
 
-async def _cleanup_run(conn, run_id: str, archive_location: str):
-    """按 run_id 粒度清理：DELETE details + UPDATE metadata"""
+async def _cleanup_run(
+    conn,
+    run_id: str,
+    archive_location: str,
+    successful_session_ids: List[Optional[str]],
+) -> None:
+    """按成功归档的 session 列表清理：DELETE details + UPDATE metadata
+
+    仅清理 successful_session_ids 中记录的成功 session，
+    失败 session 的记录保留，等待下次归档周期重试。
+
+    Args:
+        conn: 数据库连接
+        run_id: 待归档的 run ID
+        archive_location: 归档位置前缀
+        successful_session_ids: 成功归档的 session_id 列表（含 None 表示 NULL session_id）
+    """
+    if not successful_session_ids:
+        logger.warning(f"run_id={run_id}: 无成功 archive 的 session，跳过清理")
+        return
+
+    # 构建 session_id 过滤条件，处理 NULL session_id 情况
+    has_null = None in successful_session_ids
+    non_null_ids = [sid for sid in successful_session_ids if sid is not None]
+
+    if has_null and non_null_ids:
+        placeholders = ",".join(["%s"] * len(non_null_ids))
+        session_filter = f"(session_id IS NULL OR session_id IN ({placeholders}))"
+        subquery_params: Tuple = (run_id, *non_null_ids)
+    elif has_null:
+        session_filter = "session_id IS NULL"
+        subquery_params = (run_id,)
+    else:
+        placeholders = ",".join(["%s"] * len(non_null_ids))
+        session_filter = f"session_id IN ({placeholders})"
+        subquery_params = (run_id, *non_null_ids)
+
     async with conn.transaction():
+        # 1. DELETE 成功归档 session 的 details
         await conn.execute(
-            "DELETE FROM request_details_active "
-            "WHERE unique_id IN ("
-            "  SELECT unique_id FROM request_metadata WHERE run_id = %s"
-            ")",
-            (run_id,),
+            f"DELETE FROM request_details_active "
+            f"WHERE unique_id IN ("
+            f"  SELECT unique_id FROM request_metadata "
+            f"  WHERE run_id = %s AND {session_filter}"
+            f")",
+            subquery_params,
         )
+        # 2. UPDATE 成功归档 session 的 metadata（标记 archive_location）
         await conn.execute(
-            "UPDATE request_metadata "
-            "SET archive_location = %s, archived_at = NOW() "
-            "WHERE run_id = %s AND archive_location IS NULL",
-            (archive_location, run_id),
+            f"UPDATE request_metadata "
+            f"SET archive_location = %s, archived_at = NOW() "
+            f"WHERE run_id = %s AND {session_filter} AND archive_location IS NULL",
+            (archive_location, *subquery_params),
         )
+
+    logger.info(
+        f"  run '{run_id}': {len(successful_session_ids)} 个 session 已归档清理 "
+        f"(has_null_session={has_null}, non_null_count={len(non_null_ids)})"
+    )
 
 
 async def _cleanup_empty_partitions(conn) -> int:

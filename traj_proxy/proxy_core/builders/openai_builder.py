@@ -205,7 +205,8 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
             if not tool_calls:
                 try:
                     result = active_parser.extract_tool_calls(
-                        final_content, context.raw_request
+                        final_content if final_content is not None else "",
+                        context.raw_request
                     )
                     if result.tools_called and result.tool_calls:
                         tool_calls = [

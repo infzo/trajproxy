@@ -27,6 +27,15 @@ TrajProxy 提供两种 API 访问方式：
 
 **推荐场景**：开发调试、内部服务调用
 
+### [OpenAI 兼容接口规范](openai-compat.md)
+
+聊天补全接口的完整参数规范，包含：
+- 所有输入/输出参数的支持情况（Direct 模式 vs TITO 模式）
+- 不支持的参数说明（`n`、`enable_search`）
+- Proxy 行为说明（透传机制、两种模式差异）
+
+**推荐场景**：了解参数兼容性、接入评估
+
 ---
 
 ## 快速参考
@@ -35,6 +44,7 @@ TrajProxy 提供两种 API 访问方式：
 |------|------|------|
 | 生产环境 | 12345 | [Nginx 入口 API](nginx.md) |
 | 开发调试 | 12300+ | [TrajProxy API](proxy.md) |
+| 参数规范 | - | [OpenAI 兼容接口规范](openai-compat.md) |
 
 ## ID 设计规范
 

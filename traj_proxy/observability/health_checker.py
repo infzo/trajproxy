@@ -31,17 +31,8 @@ async def deep_check(
     """
     result: Dict[str, Any] = {"status": "healthy", "checks": {}}
 
-    # DB 检查
-    db_manager = getattr(app_state, "db_manager", None)
-    if db_manager and db_manager.pool:
-        try:
-            # 仅做连接存活检查，不执行查询
-            result["checks"]["database"] = "ok"
-        except Exception as exc:
-            result["checks"]["database"] = f"error: {str(exc)[:80]}"
-            result["status"] = "degraded"
-    else:
-        result["checks"]["database"] = "not_configured"
+    # DB 健康检查不做（设计上跳过）
+    result["checks"]["database"] = "skipped"
 
     # 推理服务检查（按 base_url 去重）
     processor_manager = getattr(app_state, "processor_manager", None)
