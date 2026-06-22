@@ -245,19 +245,19 @@ class WorkerManager:
             # ValueError: name is already used，导致所有 Worker 创建失败。
             #
             # 放弃命名 Actor 的可行性分析：
-            # 1. Ray max_restarts=3 配置下，Actor OOM/panic 后 Ray 会自动重启，
+            # 1. Ray max_restarts=-1 配置下，Actor OOM/panic 后 Ray 会无限自动重启，
             #    并保持原有 handle 有效（__init__ 重执行，但 initialize() 不会自动调用）。
             # 2. _health_monitor_loop 已能检测 _initialized=False 并重新调用 initialize()，
             #    因此不需要命名 Actor 来"找回" handle。
-            # 3. 当 max_restarts 耗尽后，handle 失效，无论是否使用命名 Actor 都无法恢复，
-            #    此时应由外部监控重建整个 WorkerManager 进程。
             #
             # 结论：命名 Actor 唯一的价值是 _recover_dead_worker 中 ray.get_actor()，
-            # 但在 max_restarts 机制下 handle 不会失效，命名 Actor 反而引入了
+            # 但在 max_restarts=-1 机制下 handle 不会失效，命名 Actor 反而引入了
             # 非优雅重启后的冲突风险。因此移除 name 参数。
+            max_restarts = proxy_config.get("max_restarts", -1)
+            max_task_retries = proxy_config.get("max_task_retries", 2)
             worker = RemoteWorker.options(
-                max_restarts=3,       # Actor OOM/panic 后最多自动重启 3 次
-                max_task_retries=2,   # Worker 方法调用失败后最多重试 2 次
+                max_restarts=max_restarts,
+                max_task_retries=max_task_retries,
             ).remote(ProxyWorker, i, port, db_url)
 
             # 重试 initialize 调用，防止首次初始化偶发失败

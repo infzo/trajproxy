@@ -222,3 +222,21 @@ def get_infer_client_config() -> Dict:
         "max_connections": 1000,
         "max_retries": 2
     })
+
+
+def get_storage_mode() -> str:
+    """获取轨迹存储模式
+
+    - "full": 全量模式，存储所有详情字段（默认）
+    - "compact": 精简模式，跳过冗余字段存储（messages、text_request、text_response、
+      token_ids、response_ids、token_request），这些字段可从其他字段导出
+
+    Returns:
+        存储模式字符串，默认 "full"
+    """
+    mode = get_database_config().get("storage_mode", "full")
+    # 环境变量可覆盖
+    env_mode = os.getenv("STORAGE_MODE")
+    if env_mode:
+        return env_mode
+    return mode

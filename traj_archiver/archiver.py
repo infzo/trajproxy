@@ -187,7 +187,10 @@ async def _check_worker_health(
             except Exception as kill_err:
                 # Actor 可能已死亡或无响应，kill 失败可忽略
                 logger.debug(f"Kill Worker-{i} 失败（可忽略）: {kill_err}")
-            new_worker = SessionArchiveWorker.remote(
+            new_worker = SessionArchiveWorker.options(
+                max_restarts=worker_factory_params["max_restarts"],
+                max_task_retries=worker_factory_params["max_task_retries"],
+            ).remote(
                 worker_id=i,
                 db_url=worker_factory_params["db_url"],
                 storage_config=worker_factory_params["storage_config"],
@@ -241,7 +244,10 @@ def _rebuild_worker_in_list(
         # Actor 可能已死亡或无响应，kill 失败可忽略
         logger.debug(f"Kill Worker-{dead_idx} 失败（可忽略）: {kill_err}")
 
-    new_worker = SessionArchiveWorker.remote(
+    new_worker = SessionArchiveWorker.options(
+        max_restarts=worker_factory_params["max_restarts"],
+        max_task_retries=worker_factory_params["max_task_retries"],
+    ).remote(
         worker_id=dead_idx,
         db_url=worker_factory_params["db_url"],
         storage_config=worker_factory_params["storage_config"],
@@ -335,6 +341,8 @@ async def archive_details(
         "storage_config": archive_config,
         "temp_root": local_temp_path,
         "compress": archive_config.get("compress", True),
+        "max_restarts": archive_config.get("max_restarts", -1),
+        "max_task_retries": archive_config.get("max_task_retries", 2),
     }
 
     # 阶段 0: 健康检查 — 确保所有 Worker 存活再开始

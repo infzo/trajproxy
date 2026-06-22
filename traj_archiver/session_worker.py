@@ -42,12 +42,16 @@ _ARCHIVE_COLUMNS = [
 # session_id 为 NULL 时使用的占位名
 _NULL_SESSION_DIR = "_null_session"
 
+# 精简存储模式指标字段：compact 模式下这些字段在 DB 中为 NULL
+# 如果首批数据中这些字段全为 NULL，视为 compact 模式并输出告警
+_COMPACT_INDICATOR_FIELDS = ("messages", "text_request", "text_response", "token_ids", "response_ids", "token_request")
+
 
 def _safe_path(segment: str) -> str:
     return segment.replace(",", "_").replace("/", "_")
 
 
-@ray.remote(max_restarts=3, max_task_retries=1)
+@ray.remote
 class SessionArchiveWorker:
     """Session 粒度归档 Worker
 
@@ -188,6 +192,7 @@ class SessionArchiveWorker:
             )
             record_count = 0
             last_log_time = time.monotonic()
+            compact_warned = False
 
             try:
                 while True:
@@ -196,6 +201,22 @@ class SessionArchiveWorker:
                         batch = cur.fetchall()
                     if not batch:
                         break
+
+                    # 首批数据检测：如果精简存储模式指标字段全为 NULL，输出告警
+                    if not compact_warned and batch:
+                        first_row = dict(zip(_ARCHIVE_COLUMNS, batch[0]))
+                        null_count = sum(
+                            1 for f in _COMPACT_INDICATOR_FIELDS
+                            if first_row.get(f) is None
+                        )
+                        if null_count == len(_COMPACT_INDICATOR_FIELDS):
+                            logger.warning(
+                                f"Worker-{self.worker_id}: 检测到精简存储模式（compact）数据 — "
+                                f"run_id='{run_id}', session_id='{session_id or _NULL_SESSION_DIR}'，"
+                                f"归档文件中 {_COMPACT_INDICATOR_FIELDS} 字段将为 null。"
+                                f"如需完整归档，请将 storage_mode 切换为 full 后重新采集数据。"
+                            )
+                            compact_warned = True
 
                     for row in batch:
                         rec = dict(zip(_ARCHIVE_COLUMNS, row))

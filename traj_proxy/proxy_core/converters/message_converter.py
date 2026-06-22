@@ -2,6 +2,14 @@
 MessageConverter - 消息转换器
 
 负责将 OpenAI Messages 转换为模型特定的 PromptText。
+
+可选注入 ContentSanitizer（仅 TITO 模式），在 deep copy 循环中
+对 system message 的 content 执行动态字段归一化，保障前缀缓存命中率。
+
+依赖关系：
+  - ContentSanitizer: traj_proxy.proxy_core.filters（可选注入）
+  - ProcessContext: traj_proxy.proxy_core.context
+  - BaseConverter: traj_proxy.proxy_core.converters.base
 """
 
 from typing import List, Dict, Any, Optional
@@ -31,7 +39,8 @@ class MessageConverter(BaseConverter):
     def __init__(
         self,
         tokenizer,
-        tito_template_path: Optional[str] = None
+        tito_template_path: Optional[str] = None,
+        content_sanitizer=None,
     ):
         """初始化 MessageConverter
 
@@ -39,10 +48,15 @@ class MessageConverter(BaseConverter):
             tokenizer: transformers.PreTrainedTokenizerBase 实例
             tito_template_path: TITO 模式使用的 jinja 模板路径，
                 用于确保多轮对话一致性。如果提供，将优先使用此模板。
+            content_sanitizer: ContentSanitizer 实例（可选）。
+                TITO 模式下由 Processor 注入，用于在 deep copy 循环中
+                归一化 system message 的动态字段（如 cch），保障前缀缓存命中率。
+                DirectPipeline 不注入此参数。
         """
         self.tokenizer = tokenizer
         self.tito_template_path = tito_template_path
         self._tito_template = None
+        self._content_sanitizer = content_sanitizer
 
         # 加载 TITO 模板（如果提供）
         if tito_template_path:
@@ -187,9 +201,16 @@ class MessageConverter(BaseConverter):
         """预处理消息列表
 
         解决 OpenAI 格式与 tokenizer chat template 的兼容性问题：
-        1. 将 tool_call.function.arguments 从 JSON 字符串解析为字典
+        1. 内容净化（可选，ContentSanitizer）：归一化 system message 中的
+           动态变化字段（如 Anthropic billing header 的 cch），保障前缀缓存命中率
+        2. 将 tool_call.function.arguments 从 JSON 字符串解析为字典
            OpenAI API 中 arguments 是 JSON 字符串，但某些模型的 chat template
            期望它已经是字典对象（如 Qwen 模板会调用 |items 过滤器）
+
+        顺序说明：
+            内容净化放在 tool_calls JSON 解析**之前**，因为 sanitizer
+            仅操作 message["content"]（str 类型），不触碰 tool_calls 结构，
+            两者互不影响。
 
         Args:
             messages: 原始消息列表
@@ -201,6 +222,11 @@ class MessageConverter(BaseConverter):
 
         for message in messages:
             msg = copy.deepcopy(message)
+
+            # 内容净化：仅在 deep copy 后的消息上执行，原始数据不受影响
+            # 仅对 role == "system" 的 content（str）生效，不触碰其他字段
+            if self._content_sanitizer:
+                self._content_sanitizer.apply(msg)
 
             # 处理 assistant 消息中的 tool_calls
             if msg.get('role') == 'assistant' and msg.get('tool_calls'):

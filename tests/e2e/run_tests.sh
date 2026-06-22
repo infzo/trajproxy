@@ -12,8 +12,8 @@
 #
 # 默认行为:
 #   - 直接访问真实推理服务
-#   - 跳过性能测试（T 开头）和归档测试（A 开头）用例
-#   - --all 运行全部用例（含 T*/A*）
+#   - 跳过性能测试（T 开头）、归档测试（A 开头）和精简存储模式测试（S 开头）用例
+#   - --all 运行全部用例（含 T*/A*/S*）
 #   - 显式指定场景编号时不过滤（如 ./run_tests.sh T101 会正常执行）
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,16 +34,17 @@ FAILED_SCENARIOS=0
 TIMING_LOG=""
 FAILURE_LOG=""
 
-# 默认跳过的场景前缀（T=性能测试, A=归档测试），显式指定场景编号时不过滤
+# 默认跳过的场景前缀（T=性能测试, A=归档测试, S=精简存储模式测试），显式指定场景编号时不过滤
 # 可通过 --all 清除此过滤，或通过 --skip / --only / SKIP_PREFIXES 环境变量自定义
-SKIP_PREFIXES="${SKIP_PREFIXES:-T,A}"
+# 注意：S 系列需要服务以 storage_mode=compact 部署，与全量模式（默认）互斥，不能同环境运行
+SKIP_PREFIXES="${SKIP_PREFIXES:-T,A,S}"
 ONLY_PREFIXES=""
 
 # 打印帮助
 print_usage() {
     echo "用法:"
-    echo "  $0                          运行全部五层（默认跳过 T*/A* 场景）"
-    echo "  $0 --all                    运行全部五层（包含 T*/A* 所有场景）"
+    echo "  $0                          运行全部五层（默认跳过 T*/A*/S* 场景）"
+    echo "  $0 --all                    运行全部五层（包含 T*/A*/S* 所有场景）"
     echo "  $0 --layer nginx            仅运行 Nginx 层 (port 12345)"
     echo "  $0 --layer proxy            仅运行 Proxy 层 (port 12300)"
     echo "  $0 --layer archive          仅运行 Archive 层"

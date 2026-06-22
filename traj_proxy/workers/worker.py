@@ -22,7 +22,7 @@ from traj_proxy.proxy_core.provider import TrajectoryProvider
 from traj_proxy.store.database_manager import DatabaseManager
 from traj_proxy.store.model_synchronizer import ModelSynchronizer
 from traj_proxy.store.request_repository import RequestRepository
-from traj_proxy.utils.config import get_database_pool_config, get_max_concurrent_requests
+from traj_proxy.utils.config import get_database_pool_config, get_max_concurrent_requests, get_storage_mode
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.validators import normalize_run_id
 
@@ -382,7 +382,7 @@ class ProxyWorker:
         await self.db_manager.initialize()
 
         # 初始化 RequestRepository（共享）
-        request_repository = RequestRepository(self.db_manager.pool)
+        request_repository = RequestRepository(self.db_manager.pool, get_storage_mode())
 
         # 创建 ProcessorManager
         self.processor_manager = ProcessorManager(self.db_manager)

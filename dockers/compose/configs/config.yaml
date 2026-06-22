@@ -17,6 +17,8 @@ proxy_workers:
   count: 2                    # Worker 数量
   base_port: 12300            # 起始端口（12300, 12301）
   max_concurrent_requests: 4096  # 单 Worker 最大并发请求数（超限返回 429）
+  max_restarts: -1              # Actor 异常重启次数：-1 = 无限重启，0 = 不重启，N = 最多 N 次
+  max_task_retries: 2           # Actor 方法调用失败后重试次数
   models:                     # 预置模型配置
     - model_name: Qwen/Qwen3-0.6B
       url: http://host.docker.internal:8080/v1
@@ -64,6 +66,8 @@ database:
     min_size: 10               # 最小连接数
     max_size: 30             # 最大连接数
     timeout: 60                # 连接超时时间（秒）
+  # 轨迹存储模式：full（全量，存储所有详情字段）| compact（精简，跳过冗余字段，节省 30-50% 存储）
+  storage_mode: full
 
 # ProcessorManager 配置
 processor_manager:

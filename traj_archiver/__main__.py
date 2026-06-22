@@ -82,9 +82,15 @@ async def main():
     )
     logger.info(f"Ray 已初始化: {num_workers} 个 Worker")
 
+    max_restarts = archive_config.get("max_restarts", -1)
+    max_task_retries = archive_config.get("max_task_retries", 2)
+
     workers = []
     for i in range(num_workers):
-        w = SessionArchiveWorker.remote(
+        w = SessionArchiveWorker.options(
+            max_restarts=max_restarts,
+            max_task_retries=max_task_retries,
+        ).remote(
             worker_id=i,
             db_url=db_url,
             storage_config=archive_config,

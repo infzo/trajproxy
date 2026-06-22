@@ -36,6 +36,11 @@ database:
     min_size: 50               # 最小连接数
     max_size: 100             # 最大连接数
     timeout: 60                # 连接超时时间（秒）
+  # 轨迹存储模式
+  # full: 全量存储所有详情字段（默认）
+  # compact: 精简存储，跳过冗余字段（messages、text_request、text_response、
+  #          token_ids、response_ids、token_request），节省 30-50% 存储
+  storage_mode: full
 
 # ProcessorManager 配置
 processor_manager:

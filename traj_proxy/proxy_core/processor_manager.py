@@ -30,7 +30,7 @@ from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.store.models import ModelConfig
 from traj_proxy.exceptions import DatabaseError
 from traj_proxy.utils.logger import get_logger
-from traj_proxy.utils.config import get_models_dir, get_processor_cache_max_size, get_processor_idle_timeout
+from traj_proxy.utils.config import get_models_dir, get_processor_cache_max_size, get_processor_idle_timeout, get_storage_mode
 from traj_proxy.observability.event_bus import emit
 from traj_proxy.observability.events import EVENT_MODEL_LIFECYCLE
 from traj_proxy.observability.decorators import observe_model_lifecycle
@@ -92,7 +92,7 @@ class ProcessorManager:
 
         # 模型注册表（供 ModelSynchronizer 使用）
         self.model_registry = ModelRepository(db_manager.pool)
-        self.request_repository = RequestRepository(db_manager.pool)
+        self.request_repository = RequestRepository(db_manager.pool, get_storage_mode())
 
         logger.info(f"ProcessorManager 初始化完成，LRU 缓存上限: {self._cache_max_size}")
 

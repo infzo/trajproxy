@@ -18,6 +18,8 @@ archive:
   compress: true                 # 是否 gzip 压缩，false 则直接上传 jsonl
   storage_path: "/data/archives" # 本地模式：归档文件保存目录
   local_temp_path: "/tmp/archives"  # S3 模式：本地临时导出目录
+  max_restarts: -1              # Actor 异常重启次数：-1 = 无限重启，0 = 不重启，N = 最多 N 次
+  max_task_retries: 2           # Actor 方法调用失败后重试次数
 
   # S3 存储配置（设为 null 或不设则使用本地文件系统模式）
   # 启用 S3 时取消注释并填写 bucket：

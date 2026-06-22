@@ -18,6 +18,17 @@ from traj_proxy.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+# 精简模式下不存储的冗余字段（可从其他字段导出）
+COMPACT_SKIP_FIELDS = frozenset({
+    "messages",          # raw_request 中已包含
+    "text_request",      # 可从 prompt_text + raw_request 导出
+    "text_response",     # 可从 response_text + response_ids 导出
+    "token_ids",         # full_conversation_token_ids[:prompt_tokens] 可恢复
+    "response_ids",      # full_conversation_token_ids[prompt_tokens:] 可恢复
+    "token_request",     # 可从 token_ids + raw_request 导出
+})
+
+
 def _diagnose_nul_bytes(context: "ProcessContext") -> str:
     """诊断 NUL 字节来源，返回诊断信息字符串
 
@@ -174,15 +185,25 @@ class RequestRepository:
     提供 request_metadata + request_details_active 双表的持久化和查询功能。
     元数据表长期保留统计信息，详情表只存近期大字段，过期后归档到外部存储。
     对外接口保持不变，业务代码零修改。
+
+    支持两种存储模式：
+    - full: 全量模式，存储所有详情字段
+    - compact: 精简模式，跳过冗余字段存储
     """
 
-    def __init__(self, pool):
+    def __init__(self, pool, storage_mode: str = "full"):
         """初始化 RequestRepository
 
         Args:
             pool: PostgreSQL 连接池
+            storage_mode: 存储模式，"full"（全量）或 "compact"（精简），默认 "full"
         """
         self.pool = pool
+        self.storage_mode = storage_mode
+        if storage_mode not in ("full", "compact"):
+            logger.warning(f"未知的 storage_mode '{storage_mode}'，回退到 'full'")
+            self.storage_mode = "full"
+        logger.info(f"RequestRepository 初始化: storage_mode={self.storage_mode}")
 
     async def insert(self, context: "ProcessContext", tokenizer_path: Optional[str] = None, run_id: Optional[str] = None):
         """插入轨迹记录（事务双写）
@@ -224,7 +245,9 @@ class RequestRepository:
                         context.error,
                     ))
 
-                    # 2. 写入详情表（大字段，近期保留，按月分区）
+                    # 精简模式下跳过冗余字段（这些字段可从其他字段导出）
+                    is_compact = self.storage_mode == "compact"
+
                     await conn.execute("""
                         INSERT INTO public.request_details_active (
                             unique_id, created_at, tokenizer_path, messages,
@@ -239,17 +262,17 @@ class RequestRepository:
                     """, (
                         context.unique_id,
                         tokenizer_path or "",
-                        Json(context.messages),
+                        Json(context.messages) if not is_compact else None,
                         Json(context.raw_request) if context.raw_request else None,
                         Json(context.raw_response) if context.raw_response else None,
-                        Json(context.text_request) if context.text_request else None,
-                        Json(context.text_response) if context.text_response else None,
+                        Json(context.text_request) if (context.text_request and not is_compact) else None,
+                        Json(context.text_response) if (context.text_response and not is_compact) else None,
                         context.prompt_text or "",
-                        context.token_ids or [],
-                        Json(context.token_request) if context.token_request else None,
+                        (context.token_ids or []) if not is_compact else None,
+                        Json(context.token_request) if (context.token_request and not is_compact) else None,
                         Json(context.token_response) if context.token_response else None,
                         context.response_text,
-                        context.response_ids,
+                        context.response_ids if not is_compact else None,
                         context.full_conversation_text,
                         context.full_conversation_token_ids,
                         context.error_traceback

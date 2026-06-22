@@ -19,6 +19,7 @@ from traj_proxy.proxy_core.converters.token_converter import TokenConverter
 from traj_proxy.proxy_core.builders.openai_builder import OpenAIResponseBuilder
 from traj_proxy.proxy_core.builders.stream_builder import StreamChunkBuilder
 from traj_proxy.proxy_core.cache.prefix_cache import PrefixMatchCache
+from traj_proxy.proxy_core.filters import ContentSanitizer
 from traj_proxy.proxy_core.parsers import ParserManager
 from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.exceptions import DatabaseError
@@ -125,8 +126,15 @@ class Processor:
         # 创建缓存策略
         cache_strategy = PrefixMatchCache(self.request_repository)
 
-        # 创建转换器（传入 TITO 模板路径）
-        message_converter = MessageConverter(tokenizer, tito_template_path)
+        # 创建内容净化器（TITO 模式专用）
+        # 归一化 system message 中的动态变化字段（如 cch），保障前缀缓存命中率。
+        # DirectPipeline 不注入此对象，因此直接转发模式完全不受影响。
+        content_sanitizer = ContentSanitizer()
+
+        # 创建转换器（传入 TITO 模板路径 + 净化器）
+        message_converter = MessageConverter(
+            tokenizer, tito_template_path, content_sanitizer=content_sanitizer
+        )
         token_converter = TokenConverter(tokenizer, cache_strategy)
 
         # 创建响应构建器
