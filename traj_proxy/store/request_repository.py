@@ -248,6 +248,19 @@ class RequestRepository:
                     # 精简模式下跳过冗余字段（这些字段可从其他字段导出）
                     is_compact = self.storage_mode == "compact"
 
+                    # 构建各字段值，compact 模式时 COMPACT_SKIP_FIELDS 中的字段置 None
+                    _raw = {
+                        "messages": Json(context.messages) if context.messages else None,
+                        "text_request": Json(context.text_request) if context.text_request else None,
+                        "text_response": Json(context.text_response) if context.text_response else None,
+                        "token_ids": context.token_ids or [],
+                        "token_request": Json(context.token_request) if context.token_request else None,
+                        "response_ids": context.response_ids,
+                    }
+                    if is_compact:
+                        for f in COMPACT_SKIP_FIELDS:
+                            _raw[f] = None
+
                     await conn.execute("""
                         INSERT INTO public.request_details_active (
                             unique_id, created_at, tokenizer_path, messages,
@@ -262,17 +275,17 @@ class RequestRepository:
                     """, (
                         context.unique_id,
                         tokenizer_path or "",
-                        Json(context.messages) if not is_compact else None,
+                        _raw["messages"],
                         Json(context.raw_request) if context.raw_request else None,
                         Json(context.raw_response) if context.raw_response else None,
-                        Json(context.text_request) if (context.text_request and not is_compact) else None,
-                        Json(context.text_response) if (context.text_response and not is_compact) else None,
+                        _raw["text_request"],
+                        _raw["text_response"],
                         context.prompt_text or "",
-                        (context.token_ids or []) if not is_compact else None,
-                        Json(context.token_request) if (context.token_request and not is_compact) else None,
+                        _raw["token_ids"],
+                        _raw["token_request"],
                         Json(context.token_response) if context.token_response else None,
                         context.response_text,
-                        context.response_ids if not is_compact else None,
+                        _raw["response_ids"],
                         context.full_conversation_text,
                         context.full_conversation_token_ids,
                         context.error_traceback
