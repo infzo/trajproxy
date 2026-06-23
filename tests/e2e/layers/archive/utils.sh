@@ -203,7 +203,7 @@ _check_local_file_in_container() {
 
     docker exec "${container}" python3 -c "
 import os
-path = '/data/archives/${archive_location}'
+path = '${archive_location}'
 print('exists' if os.path.exists(path) else 'not_found')
 " 2>/dev/null | grep -q "exists"
 }
@@ -347,7 +347,7 @@ print(count)
         for container in $(_get_archiver_containers); do
             actual_count=$(docker exec "${container}" python3 -c "
 import gzip, os
-path = '/data/archives/${archive_location}'
+path = '${archive_location}'
 if not os.path.exists(path):
     print('')
 else:
@@ -398,7 +398,7 @@ os.unlink(local_path)
             local line
             line=$(docker exec "${container}" python3 -c "
 import gzip, os
-path = '/data/archives/${archive_location}'
+path = '${archive_location}'
 if os.path.exists(path):
     with gzip.open(path, 'rt') as f:
         print(f.readline().strip())
@@ -456,7 +456,7 @@ async def main():
         )
         workers.append(w)
 
-    result = await archive_details(
+    workers, result = await archive_details(
         pool=pool, workers=workers, storage=storage,
         local_temp_path=local_temp_path,
         retention_days=${retention_days},
