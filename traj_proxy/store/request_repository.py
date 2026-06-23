@@ -19,8 +19,12 @@ logger = get_logger(__name__)
 
 
 # 精简模式下不存储的冗余字段（可从其他字段导出）
+# 注意：messages 在 DDL 中为 JSONB NOT NULL，不能写 NULL。
+# 本集合中的其他字段均为 nullable，compact 模式下可安全写 NULL。
+# 对于 messages NOT NULL 列，由 insert() 中的特殊处理改用 Json([]) 占位
+# （原始数据可从 raw_request["messages"] 完整恢复）。
 COMPACT_SKIP_FIELDS = frozenset({
-    "messages",          # raw_request 中已包含
+    "messages",          # raw_request 中已包含；NOT NULL 需用 Json([]) 占位
     "text_request",      # 可从 prompt_text + raw_request 导出
     "text_response",     # 可从 response_text + response_ids 导出
     "token_ids",         # full_conversation_token_ids[:prompt_tokens] 可恢复
@@ -260,6 +264,9 @@ class RequestRepository:
                     if is_compact:
                         for f in COMPACT_SKIP_FIELDS:
                             _raw[f] = None
+                        # messages 列 DDL 为 NOT NULL，用空数组占位以保持约束合规；
+                        # 原始 messages 数据可从 raw_request["messages"] 恢复
+                        _raw["messages"] = Json([])
 
                     await conn.execute("""
                         INSERT INTO public.request_details_active (

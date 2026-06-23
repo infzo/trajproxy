@@ -187,7 +187,7 @@ class WorkerManager:
         pythonpath = os.getenv("RAY_PYTHONPATH") or ray_config.get("pythonpath", "/app/traj_proxy")
 
         # 初始化Ray - 增加稳定性配置
-        # models目录已打包到镜像中，需要从runtime_env中排除
+        # working_dir 限定在代码目录（/app/traj_proxy），models/ 等大目录不在其下，无需排除
         ray.init(
             ignore_reinit_error=True,
             num_cpus=num_cpus,
@@ -197,7 +197,6 @@ class WorkerManager:
                     "PYTHONPATH": pythonpath
                 },
                 "excludes": [
-                    "models/",  # 相对于working_dir的路径，排除models目录
                     "*.pyc",
                     "__pycache__/",
                     ".git/"

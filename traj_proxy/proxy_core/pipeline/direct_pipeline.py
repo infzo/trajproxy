@@ -18,6 +18,26 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# 已知 choice 级字段（这些字段有专用累积逻辑，不应被透传机制覆盖）
+DIRECT_KNOWN_CHOICE_KEYS: frozenset[str] = frozenset({
+    "index",          # 固定值 0
+    "delta",          # delta 对象，单独处理
+    "finish_reason",  # 流式结束标志
+    "logprobs",       # 有专用的 extend/merge 逻辑
+    "token_ids",      # 有专用的 extend 逻辑
+    "stop_reason",    # vLLM 扩展，专用存储
+})
+
+# 已知 delta 级字段（在 _accumulate_stream_fields 中逐一处理）
+DIRECT_KNOWN_DELTA_KEYS: frozenset[str] = frozenset({
+    "role",
+    "content",
+    "reasoning",
+    "reasoning_content",
+    "tool_calls",
+    "function_call",
+})
+
 
 def _merge_stream_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """合并流式返回的增量 tool_calls
@@ -379,6 +399,26 @@ class DirectPipeline(BasePipeline):
             context.stream_finished = True
             context.stream_finish_reason = finish_reason
 
+        # 9. 捕获 choice 级自定义字段（排除已知字段，null 值跳过）
+        choice_extras = {
+            k: v for k, v in choice.items()
+            if k not in DIRECT_KNOWN_CHOICE_KEYS and v is not None
+        }
+        if choice_extras:
+            if context.stream_choice_extras is None:
+                context.stream_choice_extras = {}
+            context.stream_choice_extras.update(choice_extras)
+
+        # 10. 捕获 delta 级自定义字段（排除已知字段，null 值跳过）
+        delta_extras = {
+            k: v for k, v in delta.items()
+            if k not in DIRECT_KNOWN_DELTA_KEYS and v is not None
+        }
+        if delta_extras:
+            if context.stream_delta_extras is None:
+                context.stream_delta_extras = {}
+            context.stream_delta_extras.update(delta_extras)
+
     @staticmethod
     def _strip_injected_fields(chunk: Dict[str, Any]) -> None:
         """移除 proxy 强制注入但不应暴露给客户端的字段
@@ -411,15 +451,19 @@ class DirectPipeline(BasePipeline):
             context.total_tokens = (context.prompt_tokens or 0) + context.completion_tokens
 
         # 构建最终响应
-        message = {
-            "role": context.stream_role or "assistant",
-            # 有 tool_calls 时 content 至少保留 ""，确保 LiteLLM 生成 Claude text block
-            "content": context.response_text or ("" if (context.stream_tool_calls or context.stream_function_call) else None),
-            "annotations": None,
-            "audio": None,
-            "function_call": context.stream_function_call,
-            "refusal": None,
-        }
+        # ① 先以 delta 级自定义字段作为 message 的 base（后续已知字段会覆盖同名字段）
+        message = {}
+        if context.stream_delta_extras:
+            message.update(context.stream_delta_extras)
+
+        # ② 设置已知 message 字段（authoritative — 覆盖同名自定义字段）
+        message["role"] = context.stream_role or "assistant"
+        # 有 tool_calls 时 content 至少保留 ""，确保 LiteLLM 生成 Claude text block
+        message["content"] = context.response_text or ("" if (context.stream_tool_calls or context.stream_function_call) else None)
+        message["annotations"] = None
+        message["audio"] = None
+        message["function_call"] = context.stream_function_call
+        message["refusal"] = None
 
         # 添加 reasoning（vLLM 扩展）
         if context.stream_reasoning:
@@ -435,16 +479,18 @@ class DirectPipeline(BasePipeline):
             message["function_call"] = context.stream_function_call
 
         # 构建选择项
-        choice = {
-            "index": 0,
-            "message": message,
-            "logprobs": context.stream_logprobs,
-            "token_ids": context.stream_token_ids,
-            "finish_reason": context.stream_finish_reason or "stop"
-        }
+        # ③ 先以 choice 级自定义字段作为 base（后续已知字段会覆盖同名字段）
+        choice = {"index": 0}
+        if context.stream_choice_extras:
+            choice.update(context.stream_choice_extras)
 
-        # logprobs/token_ids 已在 choice 中
-        # 添加 vLLM 扩展字段（stop_reason 总是返回）
+        # ④ 设置已知 choice 字段（authoritative — 覆盖同名自定义字段）
+        choice["message"] = message
+        choice["logprobs"] = context.stream_logprobs
+        choice["token_ids"] = context.stream_token_ids
+        choice["finish_reason"] = context.stream_finish_reason or "stop"
+
+        # 添加 vLLM 扩展字段（stop_reason，专用累积逻辑优先）
         if context.stream_stop_reason is not None:
             choice["stop_reason"] = context.stream_stop_reason
 

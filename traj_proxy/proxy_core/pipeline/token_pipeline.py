@@ -26,6 +26,27 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# 已知顶级字段（来自 /v1/completions 响应，choices 和 usage 单独处理）
+TOKEN_KNOWN_TOP_KEYS: frozenset[str] = frozenset({
+    "id",
+    "object",
+    "created",
+    "model",
+    "choices",
+    "usage",
+})
+
+# 已知 choice 级字段（来自 /v1/completions response choices 列表）
+TOKEN_KNOWN_CHOICE_KEYS: frozenset[str] = frozenset({
+    "text",
+    "token_ids",
+    "output_token_ids",
+    "index",
+    "finish_reason",
+    "logprobs",
+    "tool_calls",
+})
+
 
 class TokenPipeline(BasePipeline):
     """Token 模式管道
@@ -541,6 +562,32 @@ class TokenPipeline(BasePipeline):
         Returns:
             OpenAI 格式的 chunk 字典，或 None
         """
+        # ========== 捕获自定义字段（先于业务处理） ==========
+        # 1. 捕获顶级自定义字段（last wins，null 值跳过）
+        if context.stream_infer_metadata is None:
+            context.stream_infer_metadata = {}
+        for key, value in infer_chunk.items():
+            if key not in TOKEN_KNOWN_TOP_KEYS and value is not None:
+                context.stream_infer_metadata[key] = value
+
+        # 2. 捕获 usage（每 chunk 检查，不局限于 finish chunk，last wins）
+        if "usage" in infer_chunk and infer_chunk["usage"]:
+            if context.token_response is None:
+                context.token_response = {}
+            context.token_response["usage"] = infer_chunk["usage"]
+
+        # 3. 捕获 choice 级自定义字段（last wins，null 值跳过）
+        if "choices" in infer_chunk and infer_chunk["choices"]:
+            infer_choice = infer_chunk["choices"][0]
+            choice_extras = {
+                k: v for k, v in infer_choice.items()
+                if k not in TOKEN_KNOWN_CHOICE_KEYS and v is not None
+            }
+            if choice_extras:
+                if context.stream_infer_choice_extras is None:
+                    context.stream_infer_choice_extras = {}
+                context.stream_infer_choice_extras.update(choice_extras)
+
         # 解析 Infer 响应块
         chunk_content, chunk_token_ids, tool_calls_delta = \
             InferResponseParser.parse_stream_chunk(infer_chunk, is_token_mode=True)
@@ -624,9 +671,6 @@ class TokenPipeline(BasePipeline):
             parser_finish = self._get_finish_reason_from_parser(context, parser)
             finish_reason = parser_finish or InferResponseParser.get_finish_reason(infer_chunk)
             context.stream_finished = True
-            # 保存 usage 信息（如果有）
-            if "usage" in infer_chunk:
-                context.token_response = {"usage": infer_chunk["usage"]}
 
         # 跳过空 delta chunk（与 vLLM 行为对齐：parser 返回 None 时不发送）
         # 例外：第一个 chunk 需要包含 role，始终发送
@@ -736,6 +780,11 @@ class TokenPipeline(BasePipeline):
                 choice["prompt_token_ids"] = context.token_ids
             context.token_response["choices"] = [choice]
 
+        # 合并顶级自定义字段（last wins 作为 base，setdefault 确保不覆盖 pipeline 生成的字段）
+        if context.stream_infer_metadata:
+            for k, v in context.stream_infer_metadata.items():
+                context.token_response.setdefault(k, v)
+
         # 补全顶级元数据字段，与非流式对齐
         if "id" not in context.token_response:
             context.token_response["id"] = f"cmpl-{context.unique_id}"
@@ -745,6 +794,11 @@ class TokenPipeline(BasePipeline):
             context.token_response["created"] = int(time.time())
         if "model" not in context.token_response:
             context.token_response["model"] = self.model
+
+        # 合并 choice 级自定义字段（setdefault 确保不覆盖 pipeline 生成的字段）
+        if context.stream_infer_choice_extras and "choices" in context.token_response:
+            for k, v in context.stream_infer_choice_extras.items():
+                context.token_response["choices"][0].setdefault(k, v)
 
         # 构建用户响应（不含 EOS）
         context.raw_response = self.response_builder.build(clean_user_text, context)

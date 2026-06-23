@@ -654,8 +654,15 @@ run_scenarios_parallel() {
 # 输出: 场景的全部 stdout/stderr（直通终端 + tee 落盘）
 # 副作用:
 #   - 写 TIMING_LOG（POSIX 短行 >> 追加原子安全,并发写入不会损坏）
+#   - 写 RETRY_LOG（当场景触发重试时，记录场景名|尝试次数|结果）
 #   - 若提供 log_file,scenario 运行期间所有 curl_with_log 调用的完整响应
 #     会先写入 ${log_file}.full,执行结束后合并到 log_file 末尾（流式响应不省略）
+#
+# 重试机制:
+#   - 通过环境变量 RETRIES_MAX 控制最大重试次数（0=不重试，默认）
+#   - 每次尝试的 log_failure 条目写入临时日志（per-attempt temp file），
+#     仅在最终尝试仍失败时才合并到全局 FAILURE_LOG，避免并发场景下竞态覆盖
+#   - 重试时重置 FULL_RESPONSE_LOG，避免累积多次尝试的响应数据
 _run_single_scenario() {
     local layer_name="$1"
     local scenario_file="$2"
@@ -667,37 +674,104 @@ _run_single_scenario() {
     echo -e "${BLUE}[${layer_name}] 运行场景: ${scenario_name}${NC}"
     echo "========================================"
 
-    # 设置完整响应日志文件（scenario 运行期间，curl_with_log 会把原始完整响应
-    # 追加写入该文件；执行结束后会被合并到 scenario 主日志末尾）
-    local full_resp_log=""
-    if [ -n "$log_file" ]; then
-        full_resp_log="${log_file}.full"
-        : > "$full_resp_log"
-        export FULL_RESPONSE_LOG="$full_resp_log"
-    else
-        unset FULL_RESPONSE_LOG 2>/dev/null || true
-    fi
+    # 重试配置（从外层传入，默认 0 = 不重试）
+    local retries_max="${RETRIES_MAX:-0}"
+    local attempt=0
+    local final_exit_code=1
+    local saved_failure_log="${FAILURE_LOG:-}"
 
     export FAILURE_CONTEXT="${scenario_name}"
-    local start_ts=$(date +%s)
-    local exit_code=0
-    if bash "$scenario_file"; then
-        exit_code=0
+
+    while [ $attempt -le "$retries_max" ]; do
+        attempt=$((attempt + 1))
+
+        # 重试提示（第 1 次为首次执行，不提示）
+        if [ $attempt -gt 1 ]; then
+            echo ""
+            echo -e "${YELLOW}[${layer_name}] 重试 ${scenario_name}: 第 ${attempt}/$((retries_max + 1)) 次尝试...${NC}"
+            echo "========================================"
+        fi
+
+        # ====== 每次尝试使用独立的 failure_log，避免并发模式下竞态覆盖 ======
+        # 仅在最终尝试仍失败时才将失败条目合并回全局 FAILURE_LOG
+        # 注意: macOS mktemp 不支持后缀（会把 .log 当字面量），因此不加 .log 后缀
+        local attempt_failure_log
+        attempt_failure_log=$(mktemp "/tmp/e2e_attempt_failure_$$_XXXXXX")
+        export FAILURE_LOG="$attempt_failure_log"
+
+        # ====== 重置完整响应日志（每次尝试独立记录）======
+        local full_resp_log=""
+        if [ -n "$log_file" ]; then
+            full_resp_log="${log_file}.full"
+            : > "$full_resp_log"
+            export FULL_RESPONSE_LOG="$full_resp_log"
+        else
+            unset FULL_RESPONSE_LOG 2>/dev/null || true
+        fi
+
+        local start_ts=$(date +%s)
+        local exit_code=0
+        if bash "$scenario_file"; then
+            exit_code=0
+        else
+            exit_code=1
+        fi
         local end_ts=$(date +%s)
         local duration=$((end_ts - start_ts))
-        echo -e "${GREEN}场景 ${scenario_name} 耗时: ${duration}s${NC}"
-        if [ -n "${TIMING_LOG:-}" ] && [ -w "${TIMING_LOG:-}" ]; then
-            echo "${scenario_name}|${duration}" >> "$TIMING_LOG"
+
+        # 恢复全局 FAILURE_LOG
+        export FAILURE_LOG="$saved_failure_log"
+
+        # ====== 处理结果 ======
+        if [ $exit_code -eq 0 ]; then
+            # 尝试成功
+            echo -e "${GREEN}场景 ${scenario_name} 耗时: ${duration}s${NC}"
+            if [ -n "${TIMING_LOG:-}" ] && [ -w "${TIMING_LOG:-}" ]; then
+                echo "${scenario_name}|${duration}" >> "$TIMING_LOG"
+            fi
+
+            # 若经历过重试，写入 RETRY_LOG（表示"经过 N 次尝试后恢复"）
+            if [ $attempt -gt 1 ]; then
+                echo -e "${GREEN}[${layer_name}] 场景 ${scenario_name} 经过 $((attempt - 1)) 次重试后通过${NC}"
+                if [ -n "${RETRY_LOG:-}" ] && [ -w "${RETRY_LOG:-}" ]; then
+                    echo "${scenario_name}|${attempt}|PASS" >> "$RETRY_LOG"
+                fi
+            fi
+
+            # 丢弃本次成功尝试的临时 failure log（无失败条目）
+            rm -f "$attempt_failure_log"
+            final_exit_code=0
+            break
+        else
+            # 尝试失败
+            if [ $attempt -le "$retries_max" ]; then
+                # 还有重试机会：丢弃本次失败的 failure log，继续重试
+                echo -e "${YELLOW}场景 ${scenario_name} 第 ${attempt} 次尝试失败，将重试（剩余 $((retries_max - attempt + 1)) 次）${NC}"
+                rm -f "$attempt_failure_log"
+            else
+                # 最后一次尝试也失败：将失败条目合并到全局 FAILURE_LOG
+                echo -e "${RED}场景 ${scenario_name} 耗时: ${duration}s (失败)${NC}"
+                if [ -n "${TIMING_LOG:-}" ] && [ -w "${TIMING_LOG:-}" ]; then
+                    echo "${scenario_name}|${duration}" >> "$TIMING_LOG"
+                fi
+
+                if [ -n "${saved_failure_log:-}" ] && [ -f "$attempt_failure_log" ] && [ -s "$attempt_failure_log" ]; then
+                    cat "$attempt_failure_log" >> "$saved_failure_log"
+                fi
+                rm -f "$attempt_failure_log"
+
+                # 若经历过重试，写入 RETRY_LOG（表示"经过 N 次尝试仍失败"）
+                if [ $attempt -gt 1 ]; then
+                    echo -e "${RED}[${layer_name}] 场景 ${scenario_name} 经过 $((attempt - 1)) 次重试后仍失败${NC}"
+                    if [ -n "${RETRY_LOG:-}" ] && [ -w "${RETRY_LOG:-}" ]; then
+                        echo "${scenario_name}|${attempt}|FAIL" >> "$RETRY_LOG"
+                    fi
+                fi
+
+                final_exit_code=1
+            fi
         fi
-    else
-        exit_code=1
-        local end_ts=$(date +%s)
-        local duration=$((end_ts - start_ts))
-        echo -e "${RED}场景 ${scenario_name} 耗时: ${duration}s (失败)${NC}"
-        if [ -n "${TIMING_LOG:-}" ] && [ -w "${TIMING_LOG:-}" ]; then
-            echo "${scenario_name}|${duration}" >> "$TIMING_LOG"
-        fi
-    fi
+    done
 
     # 把完整响应日志追加到 scenario 主日志（流式返回不省略，供离线分析）
     if [ -n "$full_resp_log" ] && [ -f "$full_resp_log" ] && [ -s "$full_resp_log" ]; then
@@ -714,7 +788,7 @@ _run_single_scenario() {
     fi
 
     unset FULL_RESPONSE_LOG 2>/dev/null || true
-    return $exit_code
+    return $final_exit_code
 }
 
 # 打印 Layer 执行摘要

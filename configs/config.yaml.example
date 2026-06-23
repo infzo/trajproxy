@@ -25,7 +25,7 @@ proxy_workers:
 # Ray 配置
 ray:
   num_cpus: 4                 # CPU 核心数
-  working_dir: "/app"         # 默认容器内路径，可通过环境变量 RAY_WORKING_DIR 覆盖
+  working_dir: "/app/traj_proxy"  # Ray working_dir 限定在代码目录，避免打包 models/ 等大文件超过 512MiB 限制
   pythonpath: "/app"          # 默认容器内 PYTHONPATH，可通过环境变量 RAY_PYTHONPATH 覆盖
 
 # 数据库配置

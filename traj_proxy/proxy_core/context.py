@@ -119,3 +119,12 @@ class ProcessContext:
     # 流式累积的顶级响应元数据（用于构建 raw_response，保持与非流式结构一致）
     stream_response_metadata: Optional[Dict[str, Any]] = None  # 累积的顶级元数据字段（id, model, created, system_fingerprint 等）
     stream_usage_full: Optional[Dict[str, Any]] = None  # 完整的 usage 对象（保留所有子字段，如 prompt_tokens_details 等）
+
+    # ========== 流式自定义字段透传 ==========
+    # DirectPipeline: 累积 choice 级和 delta 级自定义字段（last wins）
+    stream_choice_extras: Optional[Dict[str, Any]] = None  # choice 层非已知字段（如自定义注解、引用来源等）
+    stream_delta_extras: Optional[Dict[str, Any]] = None   # delta 层非已知字段（如自定义注释、评分等）
+
+    # TokenPipeline: 累积顶级和 choice 级自定义字段（last wins）
+    stream_infer_metadata: Optional[Dict[str, Any]] = None        # 顶级非已知字段（来自 /v1/completions）
+    stream_infer_choice_extras: Optional[Dict[str, Any]] = None   # choice 级非已知字段

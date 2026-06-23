@@ -12,9 +12,9 @@
   },
   {
     "id": 40,
-    "type": "stat",
-    "title": "Worker 存活状态",
-    "description": "up==1 为正常",
+    "type": "timeseries",
+    "title": "Worker 存活数量 - 按节点",
+    "description": "各节点存活 Worker 数量 (up==1)",
     "gridPos": {
       "h": 9,
       "w": 4,
@@ -27,13 +27,28 @@
     },
     "targets": [
       {
-        "expr": "up{job=\"trajproxy\",instance=~\"$instance\"}",
-        "legendFormat": "{{ instance }}",
+        "expr": "count(up{job=\"trajproxy\",instance=~\"$instance\"} == 1) by (node)",
+        "legendFormat": "{{ node }}",
         "refId": "A"
+      },
+      {
+        "expr": "10",
+        "legendFormat": "基准线 (10)",
+        "refId": "B"
       }
     ],
     "fieldConfig": {
       "defaults": {
+        "unit": "short",
+        "decimals": 0,
+        "min": 0,
+        "custom": {
+          "fillOpacity": 15,
+          "drawStyle": "line",
+          "thresholdsStyle": {
+            "mode": "line"
+          }
+        },
         "thresholds": {
           "mode": "absolute",
           "steps": [
@@ -43,24 +58,54 @@
             },
             {
               "color": "green",
-              "value": 1
+              "value": 10
             }
           ]
-        },
-        "mappings": [
-          {
-            "type": "value",
-            "options": {
-              "0": {
-                "text": "DOWN",
-                "color": "red"
-              },
-              "1": {
-                "text": "UP",
-                "color": "green"
+        }
+      },
+      "overrides": [
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "基准线 (10)"
+          },
+          "properties": [
+            {
+              "id": "custom.drawStyle",
+              "value": "line"
+            },
+            {
+              "id": "custom.lineStyle",
+              "value": {
+                "fill": "dash",
+                "dash": [10, 10]
+              }
+            },
+            {
+              "id": "custom.fillOpacity",
+              "value": 0
+            },
+            {
+              "id": "custom.lineWidth",
+              "value": 2
+            },
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "orange"
               }
             }
-          }
+          ]
+        }
+      ]
+    },
+    "options": {
+      "legend": {
+        "displayMode": "table",
+        "placement": "bottom",
+        "calcs": [
+          "last"
         ]
       }
     }

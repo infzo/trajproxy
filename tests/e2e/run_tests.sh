@@ -30,9 +30,15 @@ TOTAL_SCENARIOS=0
 PASSED_SCENARIOS=0
 FAILED_SCENARIOS=0
 
+# 重试配置（由 --retries 参数设置，0 表示不重试）
+RETRIES_MAX=0
+
 # 计时日志文件（由 run_tests.sh 创建，传递给 run_layer.sh 使用）
 TIMING_LOG=""
 FAILURE_LOG=""
+# 重试日志：记录需要重试的用例及其重试次数和最终结果
+# 格式: 场景名|总尝试次数|结果(PASS/FAIL)
+RETRY_LOG=""
 
 # 默认跳过的场景前缀（T=性能测试, A=归档测试, S=精简存储模式测试），显式指定场景编号时不过滤
 # 可通过 --all 清除此过滤，或通过 --skip / --only / SKIP_PREFIXES 环境变量自定义
@@ -63,6 +69,11 @@ print_usage() {
     echo "  --jobs, -j <N>              Layer 内并发执行场景数（默认 1，顺序执行）"
     echo "  环境变量 E2E_JOBS=<N>       等价于 -j N，命令行 -j 优先"
     echo "  并发模式下日志实时输出到终端，同时落盘到有序日志文件（按场景编号排序）"
+    echo ""
+    echo "失败重试:"
+    echo "  --retries, -r <N>           失败用例自动重试次数（默认 0，不重试）"
+    echo "                              每个场景最多执行 1 + N 次，重试通过则标记通过"
+    echo "                              最终报告中体现重试次数及是否通过重试恢复"
     echo ""
     echo "  环境变量: SKIP_PREFIXES=T,A  （兼容旧用法，等同 --skip T,A）"
     echo ""
@@ -230,7 +241,39 @@ print_failure_report() {
     echo "=========================================="
 }
 
-# 将最终报告（耗时统计 + 失败详情 + 总结）落盘到 summary.log
+# 打印重试统计报告：展示经过重试恢复的用例和重试后仍失败的用例
+print_retry_report() {
+    if [ -z "${RETRY_LOG:-}" ] || [ ! -f "$RETRY_LOG" ] || [ ! -s "$RETRY_LOG" ]; then
+        return
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo -e "${YELLOW}重试统计报告${NC}"
+    echo "=========================================="
+
+    local recovered=0
+    local still_failed=0
+    local total_retries=0
+
+    while IFS='|' read -r scenario attempts result; do
+        local extra=$((attempts - 1))
+        total_retries=$((total_retries + extra))
+        if [ "$result" = "PASS" ]; then
+            recovered=$((recovered + 1))
+            echo -e "  ${GREEN}↻${NC}  ${scenario}  第 ${attempts} 次执行通过（重试 ${extra} 次后恢复）"
+        else
+            still_failed=$((still_failed + 1))
+            echo -e "  ${RED}✗${NC}  ${scenario}  重试 ${extra} 次后仍失败（共尝试 ${attempts} 次）"
+        fi
+    done < "$RETRY_LOG"
+
+    echo "──────────────────────────────────────────"
+    echo -e "  重试恢复: ${GREEN}${recovered} 个${NC}  |  重试仍失败: ${RED}${still_failed} 个${NC}  |  总重试运行次数: ${total_retries}"
+    echo "=========================================="
+}
+
+# 将最终报告（耗时统计 + 重试统计 + 失败详情 + 总结）落盘到 summary.log
 # 去除 ANSI 颜色码，方便离线查阅
 save_summary_log() {
     if [ -z "${E2E_LOG_DIR:-}" ] || [ ! -d "${E2E_LOG_DIR}" ]; then
@@ -255,6 +298,9 @@ save_summary_log() {
 
         # 耗时统计
         print_timing_report
+
+        # 重试统计
+        print_retry_report
 
         # 失败详情
         print_failure_report
@@ -287,6 +333,8 @@ print_final_summary() {
 
     # 输出耗时报告
     print_timing_report
+    # 输出重试统计报告
+    print_retry_report
     # 输出失败结果报告
     print_failure_report
 
@@ -316,14 +364,29 @@ main() {
     fi
 
     # 创建计时日志临时文件，供各 run_layer.sh 写入
-    TIMING_LOG=$(mktemp /tmp/e2e_timing_XXXXXX.log)
-    FAILURE_LOG=$(mktemp /tmp/e2e_failure_XXXXXX.log)
-    export TIMING_LOG FAILURE_LOG
-    trap "rm -f '$TIMING_LOG' '$FAILURE_LOG'" EXIT
+    # 注意: macOS mktemp 不支持带后缀模板（会把 .log 当字面量导致重复文件名），因此不加后缀
+    TIMING_LOG=$(mktemp /tmp/e2e_timing_XXXXXX)
+    FAILURE_LOG=$(mktemp /tmp/e2e_failure_XXXXXX)
+    RETRY_LOG=$(mktemp /tmp/e2e_retry_XXXXXX)
+    export TIMING_LOG FAILURE_LOG RETRY_LOG
+
+    # Ctrl+C 信号处理：杀掉整个进程组，确保后台子进程也被终止
+    cleanup_on_signal() {
+        trap - INT TERM          # 先解除 trap，防止 kill 0 触发递归
+        echo -e "\n${RED}[E2E] 收到中断信号，正在终止所有测试进程...${NC}" >&2
+        kill 0 2>/dev/null       # 杀掉当前进程组内所有进程（含 & 后台子进程）
+        rm -f "$TIMING_LOG" "$FAILURE_LOG" "$RETRY_LOG"
+        exit 130
+    }
+    trap cleanup_on_signal INT TERM
+    trap "rm -f '$TIMING_LOG' '$FAILURE_LOG' '$RETRY_LOG'" EXIT
 
     # 并发度：默认 1（串行，向后兼容）；-j 覆盖环境变量
     E2E_JOBS="${E2E_JOBS:-1}"
     export E2E_JOBS
+
+    # 重试次数：默认 0（不重试），--retries 覆盖
+    export RETRIES_MAX
 
     # 创建日志落盘目录（并发模式下各 layer 子目录会创建其下）
     # 路径: <项目根>/logs/tests/YYYYMMDD_HHMMSS/，按测试启动时间命名
@@ -357,6 +420,10 @@ main() {
                 E2E_JOBS="$2"
                 shift 2
                 ;;
+            --retries|-r)
+                RETRIES_MAX="$2"
+                shift 2
+                ;;
             -h|--help)
                 print_usage
                 exit 0
@@ -369,7 +436,7 @@ main() {
     done
 
     # --only 和 --skip 互斥校验
-    if [ -n "$ONLY_PREFIXES" ] && [ "${SKIP_PREFIXES}" != "T,A" ]; then
+    if [ -n "$ONLY_PREFIXES" ] && [ "${SKIP_PREFIXES}" != "T,A,S" ]; then
         echo -e "${RED}错误: --only 和 --skip 不能同时使用（含 SKIP_PREFIXES 环境变量）${NC}" >&2
         exit 1
     fi
@@ -444,6 +511,8 @@ main() {
         esac
         # 单层层模式也输出耗时报告
         print_timing_report
+        # 单层层模式也输出重试统计报告
+        print_retry_report
         # 单层层模式也输出失败结果报告
         print_failure_report
         # 将报告落盘到 summary.log
@@ -464,6 +533,9 @@ main() {
             echo -e "${YELLOW}运行全部五层测试（跳过前缀 [${SKIP_PREFIXES}] 的场景）...${NC}"
         else
             echo -e "${YELLOW}运行全部五层测试（包含全部场景）...${NC}"
+        fi
+        if [ "${RETRIES_MAX}" -gt 0 ]; then
+            echo -e "${YELLOW}失败重试已启用: 每个用例最多重试 ${RETRIES_MAX} 次（共执行 1+${RETRIES_MAX} 次）${NC}"
         fi
 
         echo ""
@@ -499,6 +571,7 @@ main() {
         echo ""
         echo -e "${GREEN}全部层测试执行完毕${NC}"
         print_timing_report
+        print_retry_report
         print_failure_report
         # 将报告落盘到 summary.log
         save_summary_log
