@@ -127,7 +127,7 @@ class TokenPipeline(BasePipeline):
             处理后的上下文
         """
         logger.info(
-            f"[{context.unique_id}] 开始处理请求（Token 模式）: "
+            f"开始处理请求（Token 模式）: "
             f"model={self.model}, messages_count={len(messages)}"
         )
 
@@ -185,7 +185,7 @@ class TokenPipeline(BasePipeline):
             cache_db = f"{context.cache_db_query_ms:.2f}" if context.cache_db_query_ms else "N/A"
             cache_match = f"{context.cache_prefix_match_ms:.2f}" if context.cache_prefix_match_ms else "N/A"
             logger.info(
-                f"[{context.unique_id}] 请求处理完成: "
+                f"请求处理完成: "
                 f"duration_ms={context.processing_duration_ms:.2f}, "
                 f"transform={context.transform_duration_ms:.2f}ms, "
                 f"encode={context.encode_duration_ms:.2f}ms "
@@ -232,7 +232,7 @@ class TokenPipeline(BasePipeline):
             OpenAI 格式的流式响应块
         """
         logger.info(
-            f"[{context.unique_id}] 开始流式处理请求（Token 模式）: "
+            f"开始流式处理请求（Token 模式）: "
             f"model={self.model}, messages_count={len(messages)}"
         )
 
@@ -349,13 +349,13 @@ class TokenPipeline(BasePipeline):
         except asyncio.CancelledError:
             # 客户端断连或任务取消：确保轨迹数据被存储
             logger.warning(
-                f"[{context.unique_id}] 流式处理被取消（客户端可能已断连）"
+                "流式处理被取消（客户端可能已断连）"
             )
             try:
                 await self._finalize_stream(context)
             except Exception as finalize_err:
                 logger.error(
-                    f"[{context.unique_id}] CancelledError 场景下轨迹存储失败: {finalize_err}"
+                    f"CancelledError 场景下轨迹存储失败: {finalize_err}"
                 )
             from traj_proxy.observability.event_bus import emit
             from traj_proxy.observability.events import EVENT_STREAM_CLIENT_DISCONNECT
@@ -386,7 +386,7 @@ class TokenPipeline(BasePipeline):
             messages, context
         )
         logger.debug(
-            f"[{context.unique_id}] PromptText 转换完成: "
+            f"PromptText 转换完成: "
             f"prompt_length={len(context.prompt_text)}"
         )
 
@@ -407,7 +407,7 @@ class TokenPipeline(BasePipeline):
         context.prompt_tokens = len(context.token_ids)
 
         logger.info(
-            f"[{context.unique_id}] TokenIds 转换完成: "
+            f"TokenIds 转换完成: "
             f"prompt_tokens={context.prompt_tokens}"
         )
 
@@ -422,7 +422,7 @@ class TokenPipeline(BasePipeline):
 
     async def _inference(self, context: ProcessContext) -> ProcessContext:
         """阶段 3: 推理"""
-        logger.info(f"[{context.unique_id}] 发送 Infer 请求（Token 模式）")
+        logger.info("发送 Infer 请求（Token 模式）")
 
         context.token_response = await self.infer_client.send_completion(
             prompt=context.token_ids,
@@ -432,7 +432,7 @@ class TokenPipeline(BasePipeline):
             **context.request_params
         )
 
-        logger.info(f"[{context.unique_id}] Infer 请求完成")
+        logger.info("Infer 请求完成")
 
         return context
 
@@ -465,7 +465,7 @@ class TokenPipeline(BasePipeline):
                 context.response_ids = None
 
         logger.info(
-            f"[{context.unique_id}] ResponseText 转换完成: "
+            f"ResponseText 转换完成: "
             f"response_length={len(context.response_text)}"
         )
 
@@ -515,7 +515,7 @@ class TokenPipeline(BasePipeline):
             context.full_conversation_token_ids = context.token_ids
 
         logger.debug(
-            f"[{context.unique_id}] 完整对话构建完成: "
+            f"完整对话构建完成: "
             f"total_tokens={len(context.full_conversation_token_ids) if context.full_conversation_token_ids else len(context.full_conversation_text)}"
         )
 
@@ -534,7 +534,7 @@ class TokenPipeline(BasePipeline):
             context.total_tokens = context.prompt_tokens + context.completion_tokens
 
         logger.info(
-            f"[{context.unique_id}] 统计信息: "
+            f"统计信息: "
             f"completion_tokens={context.completion_tokens}, "
             f"total_tokens={context.total_tokens}"
         )
@@ -718,7 +718,7 @@ class TokenPipeline(BasePipeline):
         context.response_text = context.stream_buffer_text
         context.response_ids = context.stream_buffer_ids
         logger.debug(
-            f"[{context.unique_id}] _finalize_stream: "
+            f"_finalize_stream: "
             f"stream_buffer_text 长度: {len(context.stream_buffer_text)}, "
             f"stream_buffer_ids 长度: {len(context.stream_buffer_ids)}"
         )
@@ -727,20 +727,20 @@ class TokenPipeline(BasePipeline):
         if context.stream_buffer_ids:
             context.completion_tokens = len(context.stream_buffer_ids)
             logger.debug(
-                f"[{context.unique_id}] Token 模式："
+                f"Token 模式："
                 f"使用 stream_buffer_ids 长度: {context.completion_tokens}"
             )
         elif context.response_text:
             # 使用字符数估算
             context.completion_tokens = max(1, len(context.response_text) // 4)
             logger.debug(
-                f"[{context.unique_id}] Token 模式：估算 completion_tokens: "
+                f"Token 模式：估算 completion_tokens: "
                 f"{context.completion_tokens} (response_text 长度: {len(context.response_text)})"
             )
         else:
             context.completion_tokens = 0
             logger.warning(
-                f"[{context.unique_id}] Token 模式：无法估算 completion_tokens"
+                "Token 模式：无法估算 completion_tokens"
             )
 
         context.total_tokens = (context.prompt_tokens or 0) + context.completion_tokens
@@ -832,7 +832,7 @@ class TokenPipeline(BasePipeline):
         cache_db = f"{context.cache_db_query_ms:.2f}" if context.cache_db_query_ms else "N/A"
         cache_match = f"{context.cache_prefix_match_ms:.2f}" if context.cache_prefix_match_ms else "N/A"
         logger.info(
-            f"[{context.unique_id}] 流式处理完成: "
+            f"流式处理完成: "
             f"chunks={context.stream_chunk_count}, "
             f"duration_ms={context.processing_duration_ms:.2f}, "
             f"transform_ms={transform_str}, encode_ms={encode_str} "

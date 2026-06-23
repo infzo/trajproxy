@@ -108,6 +108,14 @@ class BasePipeline(ABC):
         """
         unique_id = f"{session_id},{request_id}" if session_id else request_id
 
+        # 设置 ContextVar，使 logger Filter 自动注入 request_id / run_id / unique_id
+        from traj_proxy.observability.request_context import set_request_context
+        set_request_context(
+            request_id=request_id,
+            run_id=run_id or "",
+            unique_id=unique_id,
+        )
+
         context = ProcessContext(
             request_id=request_id,
             model=self.model,
@@ -150,10 +158,10 @@ class BasePipeline(ABC):
         t0 = time.perf_counter()
         try:
             await self.request_repository.insert(context, tokenizer_path, run_id)
-            logger.info(f"[{context.unique_id}] 轨迹存储成功")
+            logger.info("轨迹存储成功")
         except DatabaseError as e:
             context.error = f"存储轨迹失败: {str(e)}"
-            logger.error(f"[{context.unique_id}] 存储轨迹失败: {str(e)}")
+            logger.error(f"存储轨迹失败: {str(e)}")
             from traj_proxy.observability.event_bus import emit
             from traj_proxy.observability.events import EVENT_TRAJECTORY_STORE_ERROR
             emit(
@@ -192,5 +200,5 @@ class BasePipeline(ABC):
         context.error_traceback = traceback.format_exc()
         context.end_time = utcnow()
         logger.error(
-            f"[{context.unique_id}] 处理异常: {str(error)}\n{traceback.format_exc()}"
+            f"处理异常: {str(error)}\n{traceback.format_exc()}"
         )

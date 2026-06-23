@@ -96,9 +96,9 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                 if extracted_reasoning:
                     reasoning = extracted_reasoning
                     final_content = extracted_content
-                    logger.debug(f"[{context.unique_id}] 解析到推理内容，长度: {len(reasoning)}")
+                    logger.debug(f"解析到推理内容，长度: {len(reasoning)}")
         except Exception as e:
-            logger.warning(f"[{context.unique_id}] 推理解析失败: {e}\n{traceback.format_exc()}")
+            logger.warning(f"推理解析失败: {e}\n{traceback.format_exc()}")
 
         # 3. 从 reasoning-free 的 content 中解析 tool_calls
         # 对齐 vLLM _parse_tool_calls_from_content()（/vllm/entrypoints/openai/engine/serving.py:455-570）的三分支逻辑：
@@ -134,7 +134,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                             final_content, context.raw_request
                         )
                     except Exception as e:
-                        logger.warning(f"[{context.unique_id}] named 分支 parser fallback 失败: {e}")
+                        logger.warning(f"named 分支 parser fallback 失败: {e}")
 
                     if parser_result and parser_result.tools_called and parser_result.tool_calls:
                         # parser 成功解析（content 是 XML 等非 JSON 格式）→ 降级到分支 C 逻辑
@@ -153,7 +153,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                             }]
                             final_content = parser_result.content
                             # 对齐 vLLM: named tool_choice 的 finish_reason 保留 "stop"
-                            logger.debug(f"[{context.unique_id}] named tool_choice parser fallback: {func_name}")
+                            logger.debug(f"named tool_choice parser fallback: {func_name}")
                         else:
                             # parser 解析出 tool calls 但无匹配函数名 → 标准 JSON 解析
                             tool_calls = [{
@@ -165,7 +165,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                                 }
                             }]
                             final_content = None
-                            logger.debug(f"[{context.unique_id}] named tool_choice: parser 无匹配, 走标准 JSON 解析")
+                            logger.debug("named tool_choice: parser 无匹配, 走标准 JSON 解析")
                     else:
                         # parser 未解析出 tool calls → content 本身是 JSON（如 Hermes）
                         # 对齐 vLLM 分支 A: 直接取 content 作为 arguments
@@ -178,7 +178,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                             }
                         }]
                         final_content = None
-                        logger.debug(f"[{context.unique_id}] named tool_choice: 走标准 JSON 解析")
+                        logger.debug("named tool_choice: 走标准 JSON 解析")
 
             # --- 分支 B: required + supports_required_and_named=True ---
             # 对齐 vLLM: 解析 content 为 JSON 函数列表。
@@ -196,9 +196,9 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                         } for item in parsed]
                         final_content = None
                         finish_reason = "tool_calls"
-                        logger.debug(f"[{context.unique_id}] required tool_choice: 解析 JSON 列表")
+                        logger.debug("required tool_choice: 解析 JSON 列表")
                 except (json.JSONDecodeError, ValueError) as e:
-                    logger.debug(f"[{context.unique_id}] required JSON 列表解析失败: {e}, 降级到 parser")
+                    logger.debug(f"required JSON 列表解析失败: {e}, 降级到 parser")
 
             # --- 分支 C: auto / named(False) / required(False) → tool parser ---
             # 对齐 vLLM 分支 C: 自动工具调用解析（也作为 named/required 的降级分支）
@@ -226,9 +226,9 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                         # required/auto → "tool_calls"
                         if not is_named_choice:
                             finish_reason = "tool_calls"
-                        logger.debug(f"[{context.unique_id}] 从文本解析到 {len(tool_calls)} 个工具调用")
+                        logger.debug(f"从文本解析到 {len(tool_calls)} 个工具调用")
                 except Exception as e:
-                    logger.warning(f"[{context.unique_id}] 工具调用解析失败: {e}\n{traceback.format_exc()}")
+                    logger.warning(f"工具调用解析失败: {e}\n{traceback.format_exc()}")
 
         # 构建消息体
         # 当有 tool_calls 时，content 至少保留 "" 而非 None

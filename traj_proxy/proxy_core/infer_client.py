@@ -197,11 +197,11 @@ class InferClient:
 
         if dropped:
             logger.warning(
-                f"[{request_id or 'unknown'}] Chat->Completion 参数不兼容，已丢弃: {dropped}"
+                f"Chat->Completion 参数不兼容，已丢弃: {dropped}"
             )
         if mapped:
             logger.info(
-                f"[{request_id or 'unknown'}] Chat->Completion 参数已映射: {mapped}"
+                f"Chat->Completion 参数已映射: {mapped}"
             )
 
         return result

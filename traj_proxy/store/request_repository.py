@@ -301,7 +301,7 @@ class RequestRepository:
             # NUL 字节诊断：仅在 INSERT 失败且错误与 NUL 相关时检测，正常路径零开销
             if "NUL" in str(e) or "0x00" in str(e):
                 diag = _diagnose_nul_bytes(context)
-                logger.warning(f"[{context.unique_id}] NUL 字节检测 → {diag}")
+                logger.warning(f"NUL 字节检测 → {diag}")
             raise DatabaseError(f"插入轨迹记录失败: {str(e)}\n{traceback.format_exc()}")
 
     async def get_prefix_candidates(

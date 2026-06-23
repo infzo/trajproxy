@@ -195,7 +195,7 @@ class Processor:
 
         if overridden:
             logger.warning(
-                f"[{context.unique_id}] 客户端请求了以下字段: {', '.join(overridden)}。"
+                f"客户端请求了以下字段: {', '.join(overridden)}。"
                 "proxy 会强制向推理服务请求这些数据用于轨迹记录，但不会在客户端响应中返回。"
             )
 
@@ -238,7 +238,7 @@ class Processor:
         )
 
         logger.info(
-            f"[{context.unique_id}] 开始处理请求: "
+            f"开始处理请求: "
             f"model={self.model}, messages_count={len(messages)}, "
             f"token_mode={self.token_in_token_out}"
         )
@@ -257,7 +257,7 @@ class Processor:
         except Exception as e:
             exception = e
             logger.error(
-                f"[{context.unique_id}] 处理请求时发生异常: {str(e)}\n"
+                f"处理请求时发生异常: {str(e)}\n"
                 f"{traceback.format_exc()}"
             )
             raise
@@ -305,7 +305,7 @@ class Processor:
         )
 
         logger.info(
-            f"[{context.unique_id}] 开始流式处理请求: "
+            f"开始流式处理请求: "
             f"model={self.model}, messages_count={len(messages)}, "
             f"token_mode={self.token_in_token_out}"
         )
@@ -324,7 +324,7 @@ class Processor:
         except Exception as e:
             exception = e
             logger.error(
-                f"[{context.unique_id}] 流式处理异常: {str(e)}\n"
+                f"流式处理异常: {str(e)}\n"
                 f"{traceback.format_exc()}"
             )
             raise

@@ -24,8 +24,14 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
         request_id = getattr(record, "request_id", None)
-        if request_id:
+        if request_id and request_id != "-":
             log_entry["request_id"] = request_id
+        run_id = getattr(record, "run_id", None)
+        if run_id and run_id != "-":
+            log_entry["run_id"] = run_id
+        unique_id = getattr(record, "unique_id", None)
+        if unique_id and unique_id != "-":
+            log_entry["unique_id"] = unique_id
         if record.exc_info and record.exc_info[0]:
             log_entry["exception"] = self.formatException(record.exc_info)
         return json.dumps(log_entry, ensure_ascii=False)

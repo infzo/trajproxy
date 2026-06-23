@@ -134,7 +134,7 @@ class DirectPipeline(BasePipeline):
             处理后的上下文
         """
         logger.info(
-            f"[{context.unique_id}] 开始处理请求（直接转发模式）: "
+            f"开始处理请求（直接转发模式）: "
             f"model={self.model}, messages_count={len(messages)}"
         )
 
@@ -186,7 +186,7 @@ class DirectPipeline(BasePipeline):
 
             self._update_timing(context)
             logger.info(
-                f"[{context.unique_id}] 直接转发请求完成: "
+                f"直接转发请求完成: "
                 f"duration_ms={context.processing_duration_ms:.2f}, "
                 f"inference_ms={context.inference_duration_ms:.2f}"
             )
@@ -241,7 +241,7 @@ class DirectPipeline(BasePipeline):
             OpenAI 格式的流式响应块
         """
         logger.info(
-            f"[{context.unique_id}] 开始流式处理请求（直接转发模式）: "
+            f"开始流式处理请求（直接转发模式）: "
             f"model={self.model}, messages_count={len(messages)}"
         )
 
@@ -547,7 +547,7 @@ class DirectPipeline(BasePipeline):
         ttft_str = f"{context.ttft_ms:.2f}" if context.ttft_ms else "N/A"
         inference_str = f"{context.inference_duration_ms:.2f}" if context.inference_duration_ms else "N/A"
         logger.info(
-            f"[{context.unique_id}] 流式处理完成（直接转发模式）: "
+            f"流式处理完成（直接转发模式）: "
             f"chunks={context.stream_chunk_count}, "
             f"duration_ms={context.processing_duration_ms:.2f}, "
             f"ttft_ms={ttft_str}, inference_ms={inference_str}"

@@ -231,7 +231,7 @@ async def chat_completions(
                  run_id=rejected_run_id, wait_duration_ms=wait_ms)
             max_conc = getattr(request.app.state, "max_concurrent_requests", "?")
             logger.warning(
-                f"[{request_id}] 并发限流拒绝: max_concurrent={max_conc} 已达上限"
+                f"并发限流拒绝: max_concurrent={max_conc} 已达上限"
             )
             raise HTTPException(
                 status_code=429,
@@ -270,6 +270,10 @@ async def chat_completions(
         # 提取 run_id（优先级：路径参数 > x-run-id header > model 参数）
         final_run_id = _extract_run_id(model, x_run_id, run_id)
 
+        # 设置 ContextVar，使后续日志自动携带 run_id
+        from traj_proxy.observability.request_context import set_run_id
+        set_run_id(final_run_id or "")
+
         # 提取实际 model_name
         actual_model = _extract_actual_model(model)
 
@@ -289,7 +293,7 @@ async def chat_completions(
 
         # 生成 request_id（已在 try 外部生成）
 
-        logger.info(f"[{request_id}] 处理聊天补全请求: model={actual_model}, run_id={final_run_id}, session_id={final_session_id}, stream={stream}, messages={len(messages)}")
+        logger.info(f"处理聊天补全请求: model={actual_model}, run_id={final_run_id}, session_id={final_session_id}, stream={stream}, messages={len(messages)}")
 
         # 获取 ProcessorManager 实例（从请求上下文）
         processor_manager = get_processor_manager(request)
@@ -300,11 +304,11 @@ async def chat_completions(
         if processor is None:
             # 本地未找到模型，尝试从数据库查询（回退机制）
             # 用于处理 LISTEN/NOTIFY 通知延迟导致的竞态条件
-            logger.info(f"[{request_id}] 本地未找到模型，尝试 DB 回退查询: model={actual_model}, run_id={final_run_id}")
+            logger.info(f"本地未找到模型，尝试 DB 回退查询: model={actual_model}, run_id={final_run_id}")
             processor = await processor_manager.try_get_or_sync_from_db(final_run_id, actual_model)
 
         if processor is None:
-            logger.warning(f"[{request_id}] 模型未注册: model={actual_model}, run_id={final_run_id}")
+            logger.warning(f"模型未注册: model={actual_model}, run_id={final_run_id}")
             raise HTTPException(
                 status_code=404,
                 detail=f"模型 '{actual_model}' 未注册 (run_id={final_run_id})"
@@ -337,7 +341,7 @@ async def chat_completions(
                     # SSE 流结束标记
                     yield "data: [DONE]\n\n"
                 except Exception as stream_err:
-                    logger.exception(f"[{request_id}] 流式处理异常: {str(stream_err)}")
+                    logger.exception(f"流式处理异常: {str(stream_err)}")
                     error_body, _ = build_error_response(request_id, stream_err)
                     yield f"data: {json.dumps({'error': error_body}, ensure_ascii=False)}\n\n"
                     yield "data: [DONE]\n\n"
@@ -374,7 +378,7 @@ async def chat_completions(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"[{request_id}] 聊天补全请求处理失败: {str(e)}")
+        logger.exception(f"聊天补全请求处理失败: {str(e)}")
         error_detail, status_code = build_error_response(request_id, e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     finally:

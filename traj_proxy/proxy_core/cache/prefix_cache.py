@@ -86,12 +86,14 @@ class PrefixMatchCache(BaseCacheStrategy):
             context.cache_hit_tokens = len(cached_tokens) if cached_tokens else 0
             context.cached_token_ids = cached_tokens or []
 
-            logger.debug(f"[Cache] HIT: cached_len={len(cached_text)}, "
-                         f"cached_tokens={context.cache_hit_tokens}")
-
             # 未匹配的文本
             uncached_text = text[len(cached_text):]
             context.uncached_text = uncached_text
+
+            logger.debug(f"[Cache] HIT: session={context.session_id}, "
+                         f"text_len={len(text)}, cached_len={len(cached_text)}, "
+                         f"cached_tokens={context.cache_hit_tokens}, "
+                         f"uncached_len={len(uncached_text)}")
 
             # 编码未匹配的部分
             if uncached_text:
@@ -101,57 +103,13 @@ class PrefixMatchCache(BaseCacheStrategy):
             else:
                 context.uncached_token_ids = []
                 return cached_tokens or []
-        else:
-            # 没有匹配：记录诊断信息
-            if history:
-                best_prefix = 0
-                best_candidate_idx = -1
-                for i, h in enumerate(history[:5]):
-                    ct = h.get("full_conversation_text", "")
-                    # 计算公共前缀长度
-                    prefix_len = 0
-                    for a, b in zip(text, ct):
-                        if a != b:
-                            break
-                        prefix_len += 1
-                    if prefix_len > best_prefix:
-                        best_prefix = prefix_len
-                        best_candidate_idx = i
-                    # 诊断信息：差异点上下文
-                    diff_context = ""
-                    if prefix_len > 0:
-                        cached_diff = ct[max(0, prefix_len - 40):prefix_len + 40]
-                        text_diff = text[max(0, prefix_len - 40):prefix_len + 80]
-                        # 检测常见不一致模式
-                        eos_in_cached = "<|im_end|>" in ct
-                        eos_in_text = "<|im_end|>" in text
-                        think_in_cached = "<think>" in ct
-                        think_in_text = "<think>" in text
-                        diff_context = (f"EOS(cached={eos_in_cached}, text={eos_in_text}), "
-                                        f"think(cached={think_in_cached}, text={think_in_text})")
-                    logger.debug(f"[Cache] MISS candidate[{i}]: cached_len={len(ct)}, "
-                                 f"common_prefix={prefix_len}, "
-                                 f"cached_end={ct[-80:]!r}, "
-                                 f"text_at_diff={text[prefix_len:prefix_len+80]!r}")
-                    if diff_context:
-                        logger.debug(f"[Cache]    pattern_check: {diff_context}")
 
-                # 最佳候选仍未命中 → 输出警告，便于排查多轮缓存失效根因
-                if best_prefix > 0 and best_candidate_idx >= 0:
-                    best_ct = history[best_candidate_idx].get("full_conversation_text", "")
-                    logger.warning(
-                        f"[Cache] 最佳候选未命中: session={context.session_id}, "
-                        f"best_candidate_idx={best_candidate_idx}, "
-                        f"best_common_prefix={best_prefix}/{len(best_ct)}, "
-                        f"cached_tail={best_ct[-120:]!r}, "
-                        f"text_head_diff={text[best_prefix:best_prefix+120]!r}"
-                    )
-            else:
-                logger.debug(f"[Cache] MISS: no history for session={context.session_id}")
-
-            token_ids = tokenizer.encode(text, add_special_tokens=False)
-            context.uncached_token_ids = token_ids
-            return token_ids
+        # 没有匹配，全量编码
+        logger.debug(f"[Cache] MISS: session={context.session_id}, "
+                     f"text_len={len(text)}, history_count={len(history)}")
+        token_ids = tokenizer.encode(text, add_special_tokens=False)
+        context.uncached_token_ids = token_ids
+        return token_ids
 
     def _find_longest_prefix_match(
         self,
