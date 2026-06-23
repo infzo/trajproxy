@@ -40,10 +40,11 @@ FAILURE_LOG=""
 # 格式: 场景名|总尝试次数|结果(PASS/FAIL)
 RETRY_LOG=""
 
-# 默认跳过的场景前缀（T=性能测试, A=归档测试, S=精简存储模式测试），显式指定场景编号时不过滤
+# 默认跳过的场景前缀（T=性能测试, A=归档测试, S=精简存储模式测试, R=故障注入/韧性测试），显式指定场景编号时不过滤
 # 可通过 --all 清除此过滤，或通过 --skip / --only / SKIP_PREFIXES 环境变量自定义
 # 注意：S 系列需要服务以 storage_mode=compact 部署，与全量模式（默认）互斥，不能同环境运行
-SKIP_PREFIXES="${SKIP_PREFIXES:-T,A,S}"
+# 注意：R 系列包含破坏性操作（SIGKILL Worker），可能影响同批次其他测试，默认跳过
+SKIP_PREFIXES="${SKIP_PREFIXES:-T,A,S,R}"
 ONLY_PREFIXES=""
 
 # 打印帮助
@@ -436,7 +437,7 @@ main() {
     done
 
     # --only 和 --skip 互斥校验
-    if [ -n "$ONLY_PREFIXES" ] && [ "${SKIP_PREFIXES}" != "T,A,S" ]; then
+    if [ -n "$ONLY_PREFIXES" ] && [ "${SKIP_PREFIXES}" != "T,A,S,R" ]; then
         echo -e "${RED}错误: --only 和 --skip 不能同时使用（含 SKIP_PREFIXES 环境变量）${NC}" >&2
         exit 1
     fi

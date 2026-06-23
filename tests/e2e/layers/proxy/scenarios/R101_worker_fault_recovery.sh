@@ -1,5 +1,5 @@
 #!/bin/bash
-# R01: Worker 故障自动重启恢复
+# R101: Worker 故障自动重启恢复
 # 矩阵: 代理层×故障注入×自愈恢复
 # 验证目标: kill 所有 Worker Actor 进程后, Ray 自动重启全部 Worker + 健康监控分别 re-initialize,
 #            整体服务能力恢复 (避免只 kill 一个导致请求落到另一个 Worker 误判为恢复)
@@ -10,9 +10,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../utils.sh"
 
-echo "=== R01: Worker 故障自动重启 ==="
+echo "=== R101: Worker 故障自动重启 ==="
 
-RUN_ID="run-r01"
+RUN_ID="run-r101"
 MODEL_NAME="${DEFAULT_MODEL_NAME}"
 CONTAINER_NAME="${TRAJPROXY_CONTAINER:-traj-proxy}"
 # Worker 端口范围: base_port (12300) + worker_count (2) → 12300 12301
