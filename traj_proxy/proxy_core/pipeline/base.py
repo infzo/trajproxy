@@ -200,5 +200,5 @@ class BasePipeline(ABC):
         context.error_traceback = traceback.format_exc()
         context.end_time = utcnow()
         logger.error(
-            f"处理异常: {str(error)}\n{traceback.format_exc()}"
+            f"处理异常: {error}", exc_info=True
         )

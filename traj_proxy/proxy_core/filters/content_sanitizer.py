@@ -122,6 +122,6 @@ class ContentSanitizer:
         if total_matches > 0:
             message["content"] = content
             logger.debug(
-                f"[ContentSanitizer] 规则命中: "
+                f"[内容净化] 规则命中: "
                 f"matches={total_matches}, role=system"
             )

@@ -48,16 +48,17 @@ def get_logger(
     logger.setLevel(level)
 
     # 创建格式化器
-    # 格式：时间戳 | 日志级别 | 模块名 | request_id | run_id | unique_id | 消息
+    # 文本格式（文件始终使用）：时间戳 | 日志级别 | run_id | unique_id | 模块名 | 消息
+    _TEXT_FORMAT = '%(asctime)s | %(levelname)s | %(run_id)s | %(unique_id)s | %(module)s | %(message)s'
+    file_formatter = logging.Formatter(_TEXT_FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
+
+    # 控制台格式：跟随 LOG_FORMAT 环境变量
     log_format = os.getenv("LOG_FORMAT", "text")
     if log_format == "json":
         from traj_proxy.observability.json_formatter import JsonFormatter
-        formatter = JsonFormatter()
+        console_formatter = JsonFormatter()
     else:
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)s | %(module)s | %(worker_id)s | %(request_id)s | %(run_id)s | %(unique_id)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        console_formatter = logging.Formatter(_TEXT_FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
 
     # 尝试创建日志目录并添加文件处理器
     log_path = Path(log_dir)
@@ -80,7 +81,7 @@ def get_logger(
                 encoding='utf-8'
             )
             file_handler.setLevel(level)
-            file_handler.setFormatter(formatter)
+            file_handler.setFormatter(file_formatter)  # 文件始终使用文本格式
             logger.addHandler(file_handler)
         except (OSError, PermissionError) as e:
             import warnings
@@ -89,7 +90,7 @@ def get_logger(
     # 创建控制台处理器 - 输出到标准输出（docker logs）
     console_handler = logging.StreamHandler()
     console_handler.setLevel(level)
-    console_handler.setFormatter(formatter)
+    console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
     # 添加请求上下文过滤器（从 ContextVar 读取 request_id / run_id / unique_id）

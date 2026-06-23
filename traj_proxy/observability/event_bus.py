@@ -31,7 +31,7 @@ def emit(event_name: str, **kwargs: Any) -> None:
         try:
             handler(**kwargs)
         except Exception as exc:
-            logger.error(f"EventBus subscriber error [{event_name}]: {exc}")
+            logger.error(f"EventBus 订阅者执行异常 [{event_name}]: {exc}")
 
 
 def disable() -> None:

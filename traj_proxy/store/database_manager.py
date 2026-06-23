@@ -8,7 +8,7 @@ DatabaseManager - 数据库管理器
 """
 
 import asyncio
-import traceback
+
 from typing import Optional
 
 from psycopg_pool import AsyncConnectionPool
@@ -54,7 +54,7 @@ class DatabaseManager:
 
         注意：不再自动创建数据库表，请确保部署前已执行 scripts/init_db.py
         """
-        logger.info("DatabaseManager: 开始初始化连接池")
+        logger.info("开始初始化连接池")
         try:
             self.pool = AsyncConnectionPool(
                 conninfo=self.db_url,
@@ -63,14 +63,14 @@ class DatabaseManager:
                 timeout=self.pool_config["timeout"]
             )
             # 显式打开连接池
-            logger.info("DatabaseManager: 正在打开连接池...")
+            logger.info("正在打开连接池...")
             await self.pool.open()
-            logger.info("DatabaseManager: 连接池已打开，初始化完成")
+            logger.info("连接池已打开，初始化完成")
 
             # 启动连接池监控任务
             self._monitor_task = asyncio.create_task(self._monitor_pool())
         except Exception as e:
-            logger.error(f"DatabaseManager: 初始化失败: {e}\n{traceback.format_exc()}")
+            logger.error(f"连接池初始化失败: {e}", exc_info=True)
             raise
 
     async def _monitor_pool(self, interval: int = 30):

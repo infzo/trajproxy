@@ -7,7 +7,7 @@ LISTEN 需要一个持久的独占连接，因此不能使用连接池。
 
 import asyncio
 import json
-import traceback
+
 from typing import Optional, Callable, Awaitable
 from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 
@@ -98,7 +98,7 @@ class NotificationListener:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"LISTEN 连接错误: {e}\n{traceback.format_exc()}")
+                logger.error(f"LISTEN 连接错误: {e}", exc_info=True)
                 await self._close_connection()
                 if self._running:
                     logger.warning(f"在 {delay:.1f} 秒后重连 LISTEN...")
@@ -118,7 +118,7 @@ class NotificationListener:
         except json.JSONDecodeError as e:
             logger.error(f"无效的通知 payload: {notify.payload}, 错误: {e}")
         except Exception as e:
-            logger.error(f"处理通知时出错: {e}\n{traceback.format_exc()}")
+            logger.error(f"处理通知时出错: {e}", exc_info=True)
 
     async def _close_connection(self):
         """安全关闭 LISTEN 连接"""

@@ -33,7 +33,7 @@ def setup(app: Optional[Any] = None) -> None:
 
     import os
     if os.getenv("OBSERVABILITY_ENABLED", "true").lower() != "true":
-        logger.info("Observability disabled via OBSERVABILITY_ENABLED env")
+        logger.info("可观测性系统已通过 OBSERVABILITY_ENABLED 环境变量禁用")
         return
 
     from traj_proxy.observability.event_bus import enable
@@ -49,10 +49,10 @@ def setup(app: Optional[Any] = None) -> None:
         label_guards.init_known_models()
     except Exception as e:
         _initialized = False
-        logger.error(f"Observability initialization failed: {e}")
+        logger.error(f"可观测性系统初始化失败: {e}")
         raise
 
-    logger.info("Observability system initialized")
+    logger.info("可观测性系统已初始化")
 
 
 def teardown() -> None:
@@ -62,7 +62,7 @@ def teardown() -> None:
     reset()
     global _initialized
     _initialized = False
-    logger.info("Observability system teardown complete")
+    logger.info("可观测性系统已关闭")
 
 
 def disable() -> None:

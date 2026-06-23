@@ -7,8 +7,6 @@ OpenAIResponseBuilder - OpenAI 格式响应构建器
 import json
 import uuid
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
-import traceback
-
 from traj_proxy.proxy_core.builders.base import BaseResponseBuilder
 from traj_proxy.utils.logger import get_logger
 
@@ -98,7 +96,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                     final_content = extracted_content
                     logger.debug(f"解析到推理内容，长度: {len(reasoning)}")
         except Exception as e:
-            logger.warning(f"推理解析失败: {e}\n{traceback.format_exc()}")
+            logger.warning(f"推理解析失败: {e}", exc_info=True)
 
         # 3. 从 reasoning-free 的 content 中解析 tool_calls
         # 对齐 vLLM _parse_tool_calls_from_content()（/vllm/entrypoints/openai/engine/serving.py:455-570）的三分支逻辑：
@@ -228,7 +226,7 @@ class OpenAIResponseBuilder(BaseResponseBuilder):
                             finish_reason = "tool_calls"
                         logger.debug(f"从文本解析到 {len(tool_calls)} 个工具调用")
                 except Exception as e:
-                    logger.warning(f"工具调用解析失败: {e}\n{traceback.format_exc()}")
+                    logger.warning(f"工具调用解析失败: {e}", exc_info=True)
 
         # 构建消息体
         # 当有 tool_calls 时，content 至少保留 "" 而非 None

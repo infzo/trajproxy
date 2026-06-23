@@ -58,7 +58,7 @@ class PrefixMatchCache(BaseCacheStrategy):
 
         # 如果没有 session_id 或 request_repository，直接编码
         if not context.session_id or not self.request_repository:
-            logger.debug(f"[Cache] SKIP: session_id={context.session_id}, "
+            logger.debug(f"[缓存] 跳过查询: session_id={context.session_id}, "
                          f"repo={self.request_repository is not None}")
             token_ids = tokenizer.encode(text, add_special_tokens=False)
             context.uncached_token_ids = token_ids
@@ -69,7 +69,7 @@ class PrefixMatchCache(BaseCacheStrategy):
         history = await self.request_repository.get_prefix_candidates(context.session_id)
         context.cache_db_query_ms = (time.perf_counter() - t_db_start) * 1000
 
-        logger.debug(f"[Cache] session={context.session_id}, history_count={len(history)}, "
+        logger.debug(f"[缓存] session={context.session_id}, history_count={len(history)}, "
                      f"prompt_len={len(text)}")
 
         # 找到最长前缀匹配（匹配完整对话文本）
@@ -90,7 +90,7 @@ class PrefixMatchCache(BaseCacheStrategy):
             uncached_text = text[len(cached_text):]
             context.uncached_text = uncached_text
 
-            logger.debug(f"[Cache] HIT: session={context.session_id}, "
+            logger.debug(f"[缓存] 命中: session={context.session_id}, "
                          f"text_len={len(text)}, cached_len={len(cached_text)}, "
                          f"cached_tokens={context.cache_hit_tokens}, "
                          f"uncached_len={len(uncached_text)}")
@@ -105,7 +105,7 @@ class PrefixMatchCache(BaseCacheStrategy):
                 return cached_tokens or []
 
         # 没有匹配，全量编码
-        logger.debug(f"[Cache] MISS: session={context.session_id}, "
+        logger.debug(f"[缓存] 未命中: session={context.session_id}, "
                      f"text_len={len(text)}, history_count={len(history)}")
         token_ids = tokenizer.encode(text, add_special_tokens=False)
         context.uncached_token_ids = token_ids

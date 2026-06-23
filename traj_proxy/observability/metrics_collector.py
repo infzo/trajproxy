@@ -54,7 +54,7 @@ def cleanup_evicted_run_id(run_id: str) -> None:
             for label_tuple in to_remove:
                 metric.remove(*label_tuple)
         except Exception as exc:
-            logger.warning(f"Failed to cleanup run_id={run_id} from metric: {exc}")
+            logger.warning(f"清理 run_id={run_id} 的指标子项失败: {exc}")
 
 # ── 指标实例（惰性初始化，由 register_all() 填充）──
 # A. 请求核心 (5个)
@@ -142,7 +142,7 @@ def validate_context_fields(context: Any) -> None:
         f for f in _REQUIRED_CONTEXT_FIELDS if hasattr(context, f)
     }
     if missing:
-        logger.error(f"ProcessContext missing fields: {missing}")
+        logger.error(f"ProcessContext 缺少字段: {missing}")
 
 
 def _on_request_started(model: str, is_stream: bool, max_concurrent: int) -> None:

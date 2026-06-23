@@ -7,7 +7,7 @@ Worker 实现
 import asyncio
 import time
 import threading
-import traceback
+
 import uuid
 from typing import Optional
 
@@ -234,10 +234,8 @@ class ProxyWorker:
                     model = "models"
 
             self.logger.info(
-                f"Request: {method} {url} | "
-                f"request_id={request_id} | "
-                f"model={model} | "
-                f"client={client_host}"
+                f"收到请求: method={method}, url={url}, "
+                f"request_id={request_id}, model={model}, client={client_host}"
             )
 
             # 处理请求
@@ -246,11 +244,9 @@ class ProxyWorker:
             except Exception as e:
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 self.logger.error(
-                    f"Request failed: {method} {url} | "
-                    f"request_id={request_id} | "
-                    f"status=500 | "
-                    f"elapsed={elapsed_ms}ms | "
-                    f"error={str(e)}\n{traceback.format_exc()}"
+                    f"请求处理失败: method={method}, url={url}, "
+                    f"request_id={request_id}, status=500, elapsed={elapsed_ms}ms, error={e}",
+                    exc_info=True,
                 )
                 raise
 
@@ -259,10 +255,8 @@ class ProxyWorker:
             status_code = response.status_code
 
             self.logger.info(
-                f"Response: {method} {url} | "
-                f"request_id={request_id} | "
-                f"status={status_code} | "
-                f"elapsed={elapsed_ms}ms"
+                f"响应完成: method={method}, url={url}, "
+                f"request_id={request_id}, status={status_code}, elapsed={elapsed_ms}ms"
             )
 
             # 添加请求ID到响应头
@@ -423,7 +417,7 @@ class ProxyWorker:
                 except ValueError as e:
                     logger.warning(f"预置模型注册失败（可能已存在）: {model_config.get('model_name')}, 错误: {e}")
                 except Exception as e:
-                    logger.error(f"预置模型注册异常: {model_config.get('model_name')}, 错误: {e}\n{traceback.format_exc()}")
+                    logger.error(f"预置模型注册异常: {model_config.get('model_name')}, 错误: {e}", exc_info=True)
 
         # 将并发限流信号量挂到 app.state，供路由使用
         self.app.state.request_semaphore = self._request_semaphore
@@ -447,7 +441,7 @@ class ProxyWorker:
             try:
                 await self.model_synchronizer.stop()
             except Exception as e:
-                logger.error(f"停止同步失败: {e}\n{traceback.format_exc()}")
+                logger.error(f"停止同步失败: {e}", exc_info=True)
 
         if self.db_manager:
             await self.db_manager.close()

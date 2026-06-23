@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional
 import asyncio
 import json
 import time
-import traceback
+
 import uuid
 
 # 轨迹查询超时配置（秒）
@@ -449,7 +449,7 @@ async def register_model(request: Request, req: RegisterModelRequest):
         error_detail, status_code = build_error_response("register_model", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
-        logger.error(f"注册模型异常: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"注册模型异常: {e}", exc_info=True)
         error_detail, status_code = build_error_response("register_model", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
 
@@ -499,7 +499,7 @@ async def delete_model(request: Request, model_name: str, run_id: str = ""):
         error_detail, status_code = build_error_response("delete_model", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     except Exception as e:
-        logger.error(f"删除模型异常: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"删除模型异常: {e}", exc_info=True)
         error_detail, status_code = build_error_response("delete_model", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
 
@@ -523,7 +523,7 @@ async def list_models(request: Request):
         }
 
     except Exception as e:
-        logger.error(f"列出模型异常: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"列出模型异常: {e}", exc_info=True)
         error_detail, status_code = build_error_response("list_models", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
 
@@ -560,7 +560,7 @@ async def list_models_openai(request: Request):
         }
 
     except Exception as e:
-        logger.error(f"列出模型异常: {str(e)}\n{traceback.format_exc()}")
+        logger.error(f"列出模型异常: {e}", exc_info=True)
         error_detail, status_code = build_error_response("list_models_openai", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
 

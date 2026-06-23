@@ -14,7 +14,7 @@ Ray进程管理器
 import ray
 import asyncio
 import os
-import traceback
+
 from typing import List, Dict, Optional, Any
 from traj_proxy.workers.worker import ProxyWorker
 from traj_proxy.utils.logger import get_logger
@@ -84,7 +84,7 @@ class RemoteWorker:
         else:
             self.worker = self.worker_class(self.worker_id, self.port)
 
-        self.worker_logger.info(f"RemoteWorker initialized: {self.worker_class.__name__}-{self.worker_id} on port {self.port}")
+        self.worker_logger.info(f"RemoteWorker 初始化完成: {self.worker_class.__name__}-{self.worker_id}, 端口: {self.port}")
 
         # BUG-1 修复：先启动 uvicorn 线程并保存引用，
         # 即使后续步骤失败，线程引用仍被记录以便幂等性检查
@@ -96,7 +96,7 @@ class RemoteWorker:
 
         self._server_thread = Thread(target=run_server, daemon=True)
         self._server_thread.start()
-        self.worker_logger.info(f"Started uvicorn server for {self.worker_class.__name__}-{self.worker_id} on port {self.port}")
+        self.worker_logger.info(f"已启动 uvicorn 服务: {self.worker_class.__name__}-{self.worker_id}, 端口: {self.port}")
 
         try:
             # 如果Worker有initialize方法，则调用（DB连接等可能在此失败）
@@ -106,11 +106,10 @@ class RemoteWorker:
             self._initialized = True  # 全部初始化步骤完成
         except Exception as e:
             self.worker_logger.error(
-                f"RemoteWorker {self.worker_id} post-uvicorn initialization failed: {e}\n"
-                f"{traceback.format_exc()}\n"
-                f"NOTE: uvicorn thread is still running on port {self.port}. "
-                f"Re-initialization will fail with EADDRINUSE. "
-                f"Worker process must be fully killed and restarted."
+                f"RemoteWorker {self.worker_id} uvicorn 启动后初始化失败: {e}, "
+                f"当前 uvicorn 线程仍在端口 {self.port} 运行中，重新初始化会触发 EADDRINUSE。"
+                f"必须由外部进程强杀后重建 Worker。",
+                exc_info=True,
             )
             raise
 
@@ -208,7 +207,7 @@ class WorkerManager:
                 "worker_lease_timeout_milliseconds": 10000,
             }
         )
-        logger.info(f"Ray initialized successfully: working_dir={working_dir}, pythonpath={pythonpath}")
+        logger.info(f"Ray 初始化完成: working_dir={working_dir}, pythonpath={pythonpath}")
 
         self.workers: List[ray.ActorHandle] = []
         self._worker_meta: Dict[int, dict] = {}  # Worker创建元数据，用于崩溃恢复
@@ -222,7 +221,7 @@ class WorkerManager:
 
         创建并初始化所有配置的ProxyWorker Actor
         """
-        logger.info("Starting workers...")
+        logger.info("正在启动 Worker...")
 
         # 获取数据库URL
         db_config = self.config.get("database", {})
@@ -233,7 +232,7 @@ class WorkerManager:
         worker_count = proxy_config.get("count", 1)
         base_port = proxy_config.get("base_port", 12300)
 
-        logger.info(f"Starting {worker_count} ProxyWorkers from port {base_port}")
+        logger.info(f"正在启动 {worker_count} 个 ProxyWorker，起始端口: {base_port}")
 
         async def _init_worker(i: int):
             port = base_port + i
@@ -266,24 +265,21 @@ class WorkerManager:
             for attempt in range(max_init_retries):
                 try:
                     await worker.initialize.remote()
-                    logger.info(f"ProxyWorker {i} started on port {port}")
+                    logger.info(f"ProxyWorker {i} 已启动，端口: {port}")
                     break
                 except RuntimeError as re_err:
                     # uvicorn 线程冲突 — 重试无意义，立即终止
                     logger.error(
-                        f"ProxyWorker {i} initialize failed with RuntimeError "
-                        f"(uvicorn thread conflict, retrying will cause EADDRINUSE): {re_err}"
+                        f"ProxyWorker {i} 初始化失败（uvicorn 线程冲突，重试会触发 EADDRINUSE）: {re_err}"
                     )
                     raise
                 except Exception as e:
                     logger.warning(
-                        f"ProxyWorker {i} initialize failed "
-                        f"(attempt {attempt + 1}/{max_init_retries}): {e}"
+                        f"ProxyWorker {i} 初始化失败（第 {attempt + 1}/{max_init_retries} 次）: {e}"
                     )
                     if attempt == max_init_retries - 1:
                         logger.error(
-                            f"ProxyWorker {i} initialize failed after "
-                            f"{max_init_retries} attempts: {e}"
+                            f"ProxyWorker {i} 在 {max_init_retries} 次尝试后初始化失败: {e}"
                         )
                         raise
 
@@ -299,9 +295,9 @@ class WorkerManager:
 
         # 启动后台健康监控，定期检测 Worker 存活状态并自动恢复
         self._health_task = asyncio.create_task(self._health_monitor_loop())
-        logger.info(f"Health monitor started (interval={self._health_check_interval}s)")
+        logger.info(f"健康监控已启动，检查间隔: {self._health_check_interval}秒")
 
-        logger.info(f"All workers started: {len(self.workers)} ProxyWorkers")
+        logger.info(f"全部 Worker 已启动，共 {len(self.workers)} 个 ProxyWorker")
 
     async def get_worker_status(self) -> Dict:
         """
@@ -335,7 +331,7 @@ class WorkerManager:
                         "status": "recovering",
                         "port": meta.get("port", 0),
                     })
-                    logger.warning(f"Worker {i} detected as recovering (restarted but not initialized)")
+                    logger.warning(f"Worker {i} 处于恢复中状态（已重启但未初始化）")
             except Exception as e:
                 # Actor 已死亡或不可达，标记为 dead
                 meta = self._worker_meta.get(i, {})
@@ -345,7 +341,7 @@ class WorkerManager:
                     "port": meta.get("port", 0),
                     "error": str(e),
                 })
-                logger.error(f"Worker {i} detected as dead: {e}")
+                logger.error(f"Worker {i} 已死亡: {e}")
 
         return {
             "workers": status_list,
@@ -368,10 +364,10 @@ class WorkerManager:
                 await asyncio.sleep(self._health_check_interval)
                 await self._check_and_recover_workers()
             except asyncio.CancelledError:
-                logger.info("Health monitor task cancelled, exiting loop")
+                logger.info("健康监控任务已取消，退出循环")
                 break
             except Exception as e:
-                logger.error(f"Health monitor loop error: {e}\n{traceback.format_exc()}")
+                logger.error(f"健康监控循环异常: {e}", exc_info=True)
 
     async def _check_and_recover_workers(self) -> None:
         """
@@ -390,15 +386,14 @@ class WorkerManager:
                     ray.get, worker.is_initialized.remote(), timeout=5
                 )
                 if not is_init:
-                    logger.warning(f"Worker {i} needs re-initialization (possibly restarted by Ray)")
+                    logger.warning(f"Worker {i} 需要重新初始化（可能被 Ray 自动重启）")
                     await self._reinitialize_worker(i, worker)
             except ray.exceptions.GetTimeoutError:
                 logger.warning(
-                    f"Worker {i} health check timed out (5s) — "
-                    f"Actor may be overloaded or unresponsive"
+                    f"Worker {i} 健康检查超时（5秒），Actor 可能过载或无响应"
                 )
             except Exception as e:
-                logger.error(f"Worker {i} health check failed: {e}")
+                logger.error(f"Worker {i} 健康检查失败: {e}")
                 # Actor 引用失效（max_restarts 耗尽）
                 await self._recover_dead_worker(i)
 
@@ -421,22 +416,21 @@ class WorkerManager:
         """
         try:
             await worker.initialize.remote()
-            logger.info(f"Worker {worker_id} re-initialized successfully after crash recovery")
+            logger.info(f"Worker {worker_id} 崩溃恢复后重新初始化成功")
         except ray.exceptions.RayActorError:
             # Actor 已死, 等下一轮健康检查触发 _recover_dead_worker
-            logger.warning(f"Worker {worker_id} actor handle already dead, will be recovered in next cycle")
+            logger.warning(f"Worker {worker_id} Actor handle 已失效，将在下一轮检查中恢复")
         except RuntimeError as re_err:
             # uvicorn daemon 残留占用端口, re-init 不可能成功
             # 强杀当前 Actor, 让 Ray 用 max_restarts 配额重启新进程
             # Ray Actor 重启一定在新 OS process, daemon 线程随旧进程死亡自动退出、释放端口
             # 新进程可以绑定同一端口, 因此 no_restart=False 是正确选择
             logger.error(
-                f"Worker {worker_id} re-init RuntimeError (uvicorn zombie state): {re_err}. "
-                f"Killing actor to force Ray restart with fresh process."
+                f"Worker {worker_id} 重新初始化时遇到 RuntimeError（uvicorn 僵尸状态）: {re_err}，正在强杀 Actor 以触发 Ray 重启"
             )
             ray.kill(worker, no_restart=False)  # no_restart=False → Ray 会重启 Actor, 新进程释放端口
         except Exception as e:
-            logger.error(f"Worker {worker_id} re-initialization failed: {e}\n{traceback.format_exc()}")
+            logger.error(f"Worker {worker_id} 重新初始化失败: {e}", exc_info=True)
 
     async def _recover_dead_worker(self, worker_id: int) -> None:
         """
@@ -464,10 +458,10 @@ class WorkerManager:
 
         先取消健康监控后台任务，再关闭 Ray 运行时，清理所有资源
         """
-        logger.warning("Shutting down WorkerManager...")
+        logger.warning("正在关闭 WorkerManager...")
         # 取消健康监控后台任务
         if self._health_task and not self._health_task.done():
             self._health_task.cancel()
-            logger.info("Health monitor task cancelled")
+            logger.info("健康监控任务已取消")
         ray.shutdown()
-        logger.info("Ray shutdown complete")
+        logger.info("Ray 已关闭")

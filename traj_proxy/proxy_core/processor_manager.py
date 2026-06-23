@@ -17,7 +17,6 @@ from collections import OrderedDict
 from typing import Dict, Optional, List, Tuple
 from datetime import datetime
 import os
-import traceback
 
 from traj_proxy.utils import utcnow
 
@@ -259,7 +258,7 @@ class ProcessorManager:
             try:
                 processor = await self._build_processor(config)
             except Exception as e:
-                logger.error(f"创建 Processor 失败 [{key}]: {e}\n{traceback.format_exc()}")
+                logger.error(f"创建 Processor 失败 [{key}]: {e}", exc_info=True)
                 return None
 
             # TOCTOU 防护：_build_processor 包含 await 点，期间 config 可能被并发删除
@@ -524,7 +523,7 @@ class ProcessorManager:
                         f"[{model_name}] DB 回滚: 清理了缓存中的孤儿 Processor, "
                         f"run_id={run_id}"
                     )
-                logger.error(f"持久化模型到数据库失败: {e}\n{traceback.format_exc()}")
+                logger.error(f"持久化模型到数据库失败: {e}", exc_info=True)
                 raise DatabaseError(f"注册模型失败（数据库错误）: {str(e)}")
 
         return config
@@ -571,7 +570,7 @@ class ProcessorManager:
                 if not success:
                     logger.warning(f"[{model_name}] 数据库中未找到模型: run_id={run_id}")
             except Exception as e:
-                logger.error(f"[{model_name}] 从数据库删除模型失败: {e}\n{traceback.format_exc()}")
+                logger.error(f"[{model_name}] 从数据库删除模型失败: {e}", exc_info=True)
                 raise DatabaseError(f"删除模型失败（数据库错误）: {str(e)}")
 
         return deleted
@@ -766,7 +765,7 @@ class ProcessorManager:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"空闲淘汰循环异常: {e}\n{traceback.format_exc()}")
+                logger.error(f"空闲淘汰循环异常: {e}", exc_info=True)
 
     async def _evict_idle_processors(self):
         """淘汰所有超时未使用的 Processor"""

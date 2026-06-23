@@ -8,7 +8,7 @@ import sys
 import time
 import signal
 import asyncio
-import traceback
+
 import ray
 from pathlib import Path
 from traj_proxy.workers.manager import WorkerManager
@@ -38,7 +38,7 @@ async def main():
         config = load_config()
         logger.info(f"配置加载成功")
     except FileNotFoundError as e:
-        logger.error(f"错误: {e}\n{traceback.format_exc()}")
+        logger.error(f"加载配置失败: {e}", exc_info=True)
         sys.exit(1)
 
     # 创建管理器
