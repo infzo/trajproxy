@@ -6,6 +6,79 @@
 
 ---
 
+## [0.3.4] - 2026-06-23
+
+**类型**: 功能增强 + 长稳运行修复 + 可观测性增强
+
+### 新增功能
+- **精简存储模式 (Compact Storage)**: `RequestRepository` 支持 `storage_mode` 配置，compact 模式跳过冗余字段存储（`messages`/`text_request`/`text_response`/`token_ids`/`response_ids`/`token_request`），节省 30-50% 存储空间。支持 YAML 配置和环境变量覆盖
+- **ContentSanitizer 消息内容净化器**: 归一化 Anthropic billing header 的 `cch` 字段，保障 TITO 前缀缓存命中率。仅处理 system message，deep copy 后 in-place 修改，不影响原始数据
+- **流式自定义字段透传**: DirectPipeline 捕获 choice 级和 delta 级自定义字段，TokenPipeline 捕获顶级和 choice 级自定义字段，均透传到 raw_response/token_response。已知字段白名单排除机制确保不覆盖协议标准字段
+- **`base_url` 标签**: `trajproxy_requests_total` Counter 新增 `base_url` 标签，用于区分不同推理服务地址的请求量
+- **run_id LRU 淘汰策略**: run_id 基数封顶从 Set 改为 OrderedDict LRU（容量 30），淘汰时自动清理对应 Prometheus 子指标，防止指标无限增长
+- **`classify_infer_error` 新增 `deserialization` 类型**: 捕获非 httpx 异常，区分反序列化错误与常规推理错误
+- **Dashboard 可配置统计窗口**: 新增 `rate_interval` 变量替代硬编码 5m 窗口，支持 30s~15m 切换
+- **INSERT 失败 NUL 字节诊断**: INSERT 失败时输出 NUL 字节来源诊断警告，辅助排查数据污染问题
+- **E2E 失败重试机制**: `run_tests.sh` 新增 `--retries/-r` 参数，支持失败用例自动重试，每次尝试使用独立 failure_log 避免并发竞态
+- **R101 Worker 故障自动重启恢复场景**: 新增 E2E 测试验证 Ray Worker SIGKILL 后自动重启和恢复能力
+
+### 重构
+- **per-request Parser 实例化（对齐 vLLM v0.16.0）**: `ParserManager.create_parser()` 返回 `(parser_cls, parser_instance)` 元组，流式/非流式路径均使用 `parser_cls(tokenizer, tools, **kwargs)` 创建 per-request Parser 实例，消除并发请求间的状态竞态。移除 `update_for_request()`、`reset_streaming_state()` 等 proxy-specific 扩展，对齐 vLLM 原生接口
+- **Worker 崩溃恢复增强**: WorkerManager 添加健康监控循环（30s 间隔），检测并自动恢复 Ray 重启后未初始化的 Actor。RemoteWorker 添加幂等性保证和 `is_initialized()` 状态检查。放弃命名 Actor 机制，改用 Ray UUID + 本地缓存，避免非优雅重启后的名称冲突
+- **日志 Context 自动注入**: 扩展 `RequestContext` ContextVar 新增 `run_id`/`unique_id` 字段，`RequestContextFilter` 自动注入三个 ID 到日志记录。移除所有 logger 调用中手动拼接的 `[unique_id]` 前缀（约 40 处）
+- **日志标准化**: 统一使用 `exc_info=True` 替代 `traceback.format_exc()`，日志消息中文标准化。简化文本日志格式：移除冗余字段，文件始终使用文本格式、控制台跟随 `LOG_FORMAT` 环境变量
+- **Grafana 动态时间窗口**: 移除硬编码 `[1h]`，改用 `$__range` 跟随 Grafana 全局时间选择器。请求数同时展示趋势线和区间总量。Row 2 拆分为 2a(流量分布)、2b(耗时与序列)、2c(吞吐量)、2d(失败分析)
+- **归档 Ray Actor 重启策略可配置化**: `WorkerManager`/`SessionArchiveWorker` 的 `max_restarts`/`max_task_retries` 从配置文件读取，不再硬编码
+- **TokenConverter.decode_streaming() 增量优化**: checkpoint 机制将 O(n²) 全量 decode 降为 O(n²/C)（C=32 常数因子改善 ~3x）
+
+### Bug 修复
+- **流式信号量泄漏**: 流式路径接管信号量管理，防止并发计数泄漏
+- **流式断连 duration_ms 混用**: 修复 `perf_counter` 与 `datetime` 时间基点混用导致的耗时计算错误
+- **LISTEN 连接 keepalive 参数**: 改用 URL query string 传递 psycopg3 的 keepalive 参数，修复空格拼接导致连接失败
+- **`get_prefix_candidates` 异常包装**: 补上 `DatabaseError` 异常包装，修复数据库超时误分类为 `internal_error`
+- **COMPACT_SKIP_FIELDS 硬编码漂移**: 从文档常量改为实际引用，消除 INSERT 硬编码与实际跳过字段不一致的风险
+- **轨迹路由 422 漏记**: 中间件兜底上报 FastAPI 路由函数执行前拦截的 422 参数校验错误，修复 Grafana 细分图表漏记
+- **API 重复上报 422**: `_api_error_emitted` 标志防止业务层与中间件层重复上报
+- **归档精确清理**: 归档清理仅针对成功归档的 session，避免部分失败时数据丢失
+- **Worker 健康恢复**: 增加健康检查、重建死亡 Worker、连续重建上限、session 级别重试上限，防止集体崩溃时的死循环
+- **processor_manager TOCTOU 防护**: 防止 config 在异步构建期间被并发删除导致缓存孤儿 Processor
+- **流式重试重复数据**: `has_yielded` 标志防止数据已传输后重试导致重复
+- **token_pipeline CancelledError**: 捕获 `CancelledError` 确保客户端断连时轨迹数据存储
+- **`openai_builder` None content 防御**: `extract_tool_calls` 对 None content 的防御性处理
+
+### 文档更新
+- **Grafana Dashboard 使用指南重写**: 从实现细节视角改为使用者视角，改为「作用 + 怎么看」的问答式说明，新增「常见场景：我该看哪个面板？」导航
+- **流式自定义字段透传设计文档**: 新增设计文档说明字段透传机制
+- **API 文档增强**: 新增 OpenAI 兼容接口规范文档
+
+### 影响范围
+- `traj_proxy/store/request_repository.py` - compact 存储模式 + `get_prefix_candidates` 异常包装
+- `traj_proxy/store/content_sanitizer.py` - 新增 ContentSanitizer
+- `traj_proxy/store/database_manager.py` - LISTEN keepalive 修复
+- `traj_proxy/proxy_core/parsers/parser_manager.py` - per-request Parser 实例化
+- `traj_proxy/proxy_core/pipeline/direct_pipeline.py` - 流式自定义字段透传
+- `traj_proxy/proxy_core/pipeline/token_pipeline.py` - 流式自定义字段透传 + CancelledError
+- `traj_proxy/proxy_core/converters/token_converter.py` - decode_streaming 增量优化
+- `traj_proxy/proxy_core/context.py` - 新增 base_url 和自定义字段累积字段
+- `traj_proxy/proxy_core/infer_client.py` - has_yielded 防重复
+- `traj_proxy/proxy_core/processor_manager.py` - TOCTOU 防护
+- `traj_proxy/proxy_core/builders/openai_builder.py` - None content 防御
+- `traj_proxy/observability/metrics_collector.py` - run_id LRU + base_url 标签 + 清理钩子
+- `traj_proxy/observability/outcome.py` - error_database 分支
+- `traj_proxy/observability/request_context.py` - run_id/unique_id 自动注入
+- `traj_proxy/observability/json_formatter.py` - 新字段输出
+- `traj_proxy/utils/logger.py` - RequestContextFilter + 日志格式简化
+- `traj_proxy/workers/manager.py` - Worker 健康监控 + 崩溃恢复
+- `traj_proxy/workers/worker.py` - 422 兜底上报 + api_metrics 限频
+- `traj_proxy/serve/routes.py` - 信号量生命周期 + _api_error_emitted
+- `traj_archiver/` - Ray Actor 可配置化 + 精确清理 + 健康检查
+- `dockers/observability/configs/grafana/` - Dashboard 全面重构
+- `docs/guide/grafana-dashboard.md` - 重写 Dashboard 使用指南
+- `docs/api/openai_compat.md` - 新增 OpenAI 兼容接口规范
+- `tests/e2e/` - E2E 重试机制 + R101 Worker 故障恢复 + S101 compact 模式
+
+---
+
 ## [0.3.3] - 2026-06-15
 
 **类型**: 可观测性增强 + Grafana 优化 + 文档
