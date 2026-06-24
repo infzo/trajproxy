@@ -21,16 +21,16 @@ proxy_workers:
   max_restarts: -1            # Actor 异常重启次数：-1 = 无限重启，0 = 不重启，N = 最多 N 次
   max_task_retries: 2         # Actor 方法调用失败后重试次数
   models:                     # 预置模型配置
-        - model_name: Qwen/Qwen3-0.6B
-          url: http://host.docker.internal:8000/v1
-          api_key: sk-1234
-        - model_name: Qwen/Qwen3-0.6B
-          run_id: app-001
-          url: http://host.docker.internal:8000/v1
-          api_key: sk-1234
-          tokenizer_path: Qwen/Qwen3-0.6B
-          token_in_token_out: true
-          tool_parser: "hermes"
+    - model_name: Qwen/Qwen3-0.6B
+      url: http://host.docker.internal:8000/v1
+      api_key: sk-1234
+    - model_name: Qwen/Qwen3-0.6B
+      run_id: app-001
+      url: http://host.docker.internal:8000/v1
+      api_key: sk-1234
+      tokenizer_path: Qwen/Qwen3-0.6B
+      token_in_token_out: true
+      tool_parser: "hermes"
     - model_name: qwen3.5-2b
       url: http://host.docker.internal:8000/v1
       api_key: sk-1234
