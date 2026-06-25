@@ -155,6 +155,9 @@ class MockInferHandler(BaseHTTPRequestHandler):
         if body.get('return_token_ids'):
             choice["token_ids"] = [9901, 0]  # Hello! 的模拟token ids
 
+        # 模拟MoE路由元数据
+        choice["routed_experts"] = [{"expert_id": 2, "weight": 0.7}, {"expert_id": 5, "weight": 0.3}]
+
         self._send_json_response({
             "id": "chatcmpl-mock",
             "object": "chat.completion",
@@ -189,6 +192,9 @@ class MockInferHandler(BaseHTTPRequestHandler):
         # 如果请求了token_ids，在最后一个chunk添加
         if body.get('return_token_ids'):
             final_choice["token_ids"] = [9901, 0]  # Hello! 的模拟token ids
+
+        # 模拟MoE路由元数据
+        final_choice["routed_experts"] = [{"expert_id": 2, "weight": 0.7}, {"expert_id": 5, "weight": 0.3}]
 
         chunks = [
             {
@@ -239,6 +245,9 @@ class MockInferHandler(BaseHTTPRequestHandler):
         if body.get('return_token_ids'):
             choice["token_ids"] = [9901, 0]
 
+        # 模拟MoE路由元数据
+        choice["routed_experts"] = [{"expert_id": 2, "weight": 0.7}, {"expert_id": 5, "weight": 0.3}]
+
         self._send_json_response({
             "id": "cmpl-mock",
             "object": "text_completion",
@@ -267,6 +276,9 @@ class MockInferHandler(BaseHTTPRequestHandler):
         # 如果请求了token_ids，在最后一个chunk添加
         if body.get('return_token_ids'):
             final_choice["token_ids"] = [9901, 0]
+
+        # 模拟MoE路由元数据
+        final_choice["routed_experts"] = [{"expert_id": 2, "weight": 0.7}, {"expert_id": 5, "weight": 0.3}]
 
         chunks = [
             {
