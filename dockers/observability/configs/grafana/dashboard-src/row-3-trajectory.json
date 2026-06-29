@@ -83,7 +83,7 @@
         "unit": "s",
         "decimals": 3,
         "custom": {
-          "fillOpacity": 5,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }
@@ -129,7 +129,7 @@
         "unit": "short",
         "decimals": 1,
         "custom": {
-          "fillOpacity": 5,
+          "fillOpacity": 0,
           "drawStyle": "line",
           "lineWidth": 2,
           "pointSize": 5,
@@ -179,7 +179,7 @@
         "unit": "bytes",
         "decimals": 2,
         "custom": {
-          "fillOpacity": 5,
+          "fillOpacity": 0,
           "drawStyle": "line",
           "lineWidth": 2,
           "pointSize": 5,
@@ -272,7 +272,7 @@
         "unit": "short",
         "decimals": 0,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line",
           "lineWidth": 2,
           "pointSize": 5,

@@ -139,7 +139,7 @@
       "defaults": {
         "unit": "bytes",
         "custom": {
-          "fillOpacity": 15,
+          "fillOpacity": 0,
           "drawStyle": "line",
           "thresholdsStyle": {
             "mode": "line"
@@ -196,7 +196,7 @@
       "defaults": {
         "unit": "percent",
         "custom": {
-          "fillOpacity": 15,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }
@@ -238,7 +238,7 @@
       "defaults": {
         "unit": "percent",
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line"
         },
         "min": 0,
@@ -282,7 +282,7 @@
       "defaults": {
         "unit": "short",
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }

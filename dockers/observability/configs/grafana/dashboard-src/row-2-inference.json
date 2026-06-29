@@ -37,7 +37,7 @@
         "unit": "short",
         "decimals": 0,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "stacking": {
             "mode": "none"
           },
@@ -85,7 +85,7 @@
         "unit": "short",
         "decimals": 0,
         "custom": {
-          "fillOpacity": 20,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }
@@ -179,7 +179,7 @@
         "unit": "s",
         "decimals": 2,
         "custom": {
-          "fillOpacity": 5,
+          "fillOpacity": 0,
           "drawStyle": "line",
           "spanNulls": true
         }
@@ -226,7 +226,7 @@
         "unit": "s",
         "decimals": 2,
         "custom": {
-          "fillOpacity": 5,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }
@@ -272,7 +272,7 @@
         "unit": "s",
         "decimals": 2,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }
@@ -318,7 +318,7 @@
         "unit": "short",
         "decimals": 0,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }
@@ -364,7 +364,7 @@
         "unit": "s",
         "decimals": 2,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }
@@ -541,7 +541,7 @@
         "unit": "short",
         "decimals": 0,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line",
           "lineWidth": 2,
           "pointSize": 5,
@@ -937,7 +937,7 @@
         "unit": "ops",
         "decimals": 1,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line",
           "spanNulls": true
         }
@@ -984,7 +984,7 @@
         "unit": "ops",
         "decimals": 1,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "drawStyle": "line",
           "spanNulls": true
         }

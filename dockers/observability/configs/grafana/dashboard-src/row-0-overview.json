@@ -71,7 +71,7 @@
         "unit": "short",
         "decimals": 0,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "stacking": {
             "mode": "none"
           },
@@ -169,7 +169,7 @@
         "unit": "s",
         "decimals": 3,
         "custom": {
-          "fillOpacity": 5,
+          "fillOpacity": 0,
           "drawStyle": "line"
         }
       }
