@@ -290,7 +290,7 @@
           "unit": "short",
           "decimals": 0,
           "custom": {
-            "fillOpacity": 10,
+            "fillOpacity": 0,
             "stacking": {
               "mode": "none"
             },
@@ -2408,7 +2408,7 @@
           "decimals": 0,
           "min": 0,
           "custom": {
-            "fillOpacity": 15,
+            "fillOpacity": 0,
             "drawStyle": "line",
             "thresholdsStyle": {
               "mode": "line"

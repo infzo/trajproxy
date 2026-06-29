@@ -120,7 +120,7 @@
         "unit": "short",
         "decimals": 0,
         "custom": {
-          "fillOpacity": 10,
+          "fillOpacity": 0,
           "stacking": {
             "mode": "none"
           },
