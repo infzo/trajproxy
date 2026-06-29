@@ -1886,7 +1886,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[$__rate_interval])))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[$rate_interval])))",
           "legendFormat": "{{ run_id }}",
           "refId": "A"
         }
@@ -1896,8 +1896,11 @@
           "unit": "short",
           "decimals": 0,
           "custom": {
-            "fillOpacity": 10,
-            "drawStyle": "bars"
+            "fillOpacity": 0,
+            "stacking": {
+              "mode": "none"
+            },
+            "drawStyle": "line"
           }
         }
       },
