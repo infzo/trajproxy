@@ -464,11 +464,6 @@ providers:
       path: /var/lib/grafana/dashboards
 ```
 
-### 7.4 额外 Dashboard
-
-项目还包含一个独立的 `model-mix.json` Dashboard（UID: `trajproxy-model-mix`），
-位于 `configs/grafana/dashboards/model-mix.json`，专注于模型使用分布分析。
-
 ---
 
 ## 八、应用层配置
