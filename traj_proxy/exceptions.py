@@ -78,3 +78,16 @@ class SessionIdError(ProxyCoreError):
     """
     status_code = 422
     error_type = "invalid_session_id"
+
+
+class ParserError(ProxyCoreError):
+    """Parser 解析错误异常
+
+    当 tool parser 或 reasoning parser 在流式解析过程中失败时抛出。
+
+    用于将 Parser 解析错误从通用内部错误（error_server）中拆分出来，
+    便于在 Grafana 看板中独立观测。继承 ProxyCoreError，使 error_handler
+    自动映射为 HTTP 500 + error_type=parser_error，无需改动 serve 层。
+    """
+    status_code = 500
+    error_type = "parser_error"

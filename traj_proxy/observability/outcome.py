@@ -25,6 +25,7 @@ def determine_outcome(context, exception: Optional[Exception] = None) -> str:
         DatabaseError,
         InferServiceError,
         InferTimeoutError,
+        ParserError,
     )
 
     # ── 异常驱动 ──
@@ -37,6 +38,8 @@ def determine_outcome(context, exception: Optional[Exception] = None) -> str:
             return "error_infer"
         if isinstance(exception, DatabaseError):
             return "error_database"
+        if isinstance(exception, ParserError):
+            return "error_parser"
         status = getattr(exception, "status_code", None)
         if status == 429:
             return "error_rate_limit"

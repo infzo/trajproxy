@@ -605,12 +605,18 @@ class TokenPipeline(BasePipeline):
         # 流式请求使用 request_parser（per-request 实例），避免并发竞态；
         # 若未提供 request_parser（非流式路径），回退到共享 Parser
         parser = request_parser or self.parser
-        delta_msg = parser.parse_delta(
-            delta_text=chunk_content or "",
-            delta_token_ids=delta_token_ids,
-            request=context.raw_request,
-            prompt_token_ids=context.token_ids if context.stream_chunk_count == 0 else None,
-        )
+        try:
+            delta_msg = parser.parse_delta(
+                delta_text=chunk_content or "",
+                delta_token_ids=delta_token_ids,
+                request=context.raw_request,
+                prompt_token_ids=context.token_ids if context.stream_chunk_count == 0 else None,
+            )
+        except Exception as parse_exc:
+            from traj_proxy.exceptions import ParserError
+            raise ParserError(
+                f"parser.parse_delta failed: {type(parse_exc).__name__}: {parse_exc}"
+            ) from parse_exc
 
         if delta_msg:
             effective_content = delta_msg.content

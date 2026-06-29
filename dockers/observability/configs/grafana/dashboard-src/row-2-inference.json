@@ -501,7 +501,7 @@
     },
     "targets": [
       {
-        "expr": "round(sum by (node) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server|error_client|error_rate_limit\"}[$rate_interval])))",
+        "expr": "round(sum by (node) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server|error_client|error_rate_limit|error_parser\"}[$rate_interval])))",
         "legendFormat": "错误: {{ node }}",
         "refId": "A"
       }
@@ -551,7 +551,7 @@
     },
     "targets": [
       {
-        "expr": "round(sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server|error_client|error_rate_limit\"}[$rate_interval])))",
+        "expr": "round(sum by (run_id) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_infer|timeout|stream_partial|error_server|error_client|error_rate_limit|error_parser\"}[$rate_interval])))",
         "legendFormat": "错误: {{ run_id }}",
         "refId": "A"
       }
@@ -711,12 +711,31 @@
               "value": "推理-服务超时 (Timeout)"
             }
           ]
+        },
+        {
+          "matcher": {
+            "id": "byName",
+            "options": "error_parser"
+          },
+          "properties": [
+            {
+              "id": "color",
+              "value": {
+                "mode": "fixed",
+                "fixedColor": "light-red"
+              }
+            },
+            {
+              "id": "displayName",
+              "value": "内部-Parser解析错误 (Parser Error)"
+            }
+          ]
         }
       ]
     },
     "targets": [
       {
-        "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial\"}[$rate_interval])))",
+        "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$rate_interval])))",
         "legendFormat": "{{ outcome }}",
         "refId": "A"
       }
