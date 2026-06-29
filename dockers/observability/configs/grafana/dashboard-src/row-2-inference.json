@@ -121,7 +121,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$__interval]))",
+        "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$__rate_interval]))",
         "legendFormat": "{{ node }}",
         "refId": "A"
       }
@@ -736,7 +736,7 @@
     },
     "targets": [
       {
-        "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$__interval])))",
+        "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$__rate_interval])))",
         "legendFormat": "{{ outcome }}",
         "refId": "A"
       }
@@ -772,7 +772,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$__interval]))",
+        "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$__rate_interval]))",
         "legendFormat": "{{ result }}",
         "refId": "A"
       }

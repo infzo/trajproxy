@@ -375,7 +375,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[$__interval]))",
+          "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[$__rate_interval]))",
           "legendFormat": "{{ action }}:{{ type }}",
           "refId": "A"
         }
@@ -927,7 +927,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$__interval]))",
+          "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$__rate_interval]))",
           "legendFormat": "{{ node }}",
           "refId": "A"
         }
@@ -1542,7 +1542,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$__interval])))",
+          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$__rate_interval])))",
           "legendFormat": "{{ outcome }}",
           "refId": "A"
         }
@@ -1578,7 +1578,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$__interval]))",
+          "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "{{ result }}",
           "refId": "A"
         }
@@ -1886,7 +1886,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[$__interval])))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "{{ run_id }}",
           "refId": "A"
         }
@@ -2345,7 +2345,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (error_category) (increase(trajproxy_api_errors_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",run_id=~\"$run_id\"}[$__interval])))",
+          "expr": "round(sum by (error_category) (increase(trajproxy_api_errors_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",run_id=~\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "{{ error_category }}",
           "refId": "A"
         }
