@@ -375,7 +375,7 @@ def _create_metrics() -> None:
         "trajproxy_sequence_length_tokens",
         "Total sequence length (prompt + completion tokens) per request",
         ["model", "run_id"],
-        buckets=[128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072],
+        buckets=[128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576],
     )
 
     # E. 下游依赖
@@ -455,7 +455,7 @@ def _create_metrics() -> None:
         "trajproxy_trajectory_response_size_bytes",
         "Serialized response body size in bytes per trajectory query",
         labelnames=["route", "run_id"],
-        buckets=[1024, 10240, 102400, 1048576, 5242880, 10485760, 52428800, 104857600],
+        buckets=[1024, 10240, 102400, 1048576, 5242880, 10485760, 52428800, 104857600, 209715200, 524288000, 1073741824],
     )
 
     # K. TITO 缓存监控
