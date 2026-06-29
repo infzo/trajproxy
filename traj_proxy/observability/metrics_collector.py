@@ -314,7 +314,7 @@ def _create_metrics() -> None:
         "trajproxy_request_duration_seconds",
         "End-to-end request latency",
         ["model", "stream", "run_id"],
-        buckets=[0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60],
+        buckets=[0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200],
     )
     ACTIVE_REQUESTS = Gauge(
         "trajproxy_active_requests", "Currently active requests"
@@ -346,7 +346,7 @@ def _create_metrics() -> None:
         "trajproxy_ttft_seconds",
         "Time to first token",
         ["model", "run_id"],
-        buckets=[0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+        buckets=[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120],
     )
     STREAM_COMPLETION = Counter(
         "trajproxy_stream_completion_total",
@@ -364,7 +364,7 @@ def _create_metrics() -> None:
         "trajproxy_phase_duration_seconds",
         "Pipeline phase duration",
         ["model", "phase", "run_id"],
-        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200],
     )
 
     # D. Token
@@ -383,7 +383,7 @@ def _create_metrics() -> None:
         "trajproxy_infer_duration_seconds",
         "Inference call duration",
         ["model"],
-        buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60],
+        buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200],
     )
     INFER_ERRORS = Counter(
         "trajproxy_infer_errors_total",
@@ -427,7 +427,7 @@ def _create_metrics() -> None:
         "trajproxy_api_request_duration_seconds",
         "HTTP API request duration",
         labelnames=["route", "run_id"],
-        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200],
     )
 
     # H. API 错误归因
