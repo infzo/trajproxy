@@ -257,3 +257,4 @@ commitlint.config.js
 # OpenCode
 .opencode/instructions/
 opencode.json
+.omo/
