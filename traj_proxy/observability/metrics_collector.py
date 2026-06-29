@@ -333,7 +333,7 @@ def _create_metrics() -> None:
         "trajproxy_semaphore_wait_seconds",
         "Semaphore wait duration",
         ["model"],
-        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200],
     )
     SEMAPHORE_REJECTED = Counter(
         "trajproxy_semaphore_rejected_total",
@@ -346,7 +346,7 @@ def _create_metrics() -> None:
         "trajproxy_ttft_seconds",
         "Time to first token",
         ["model", "run_id"],
-        buckets=[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120],
+        buckets=[0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200],
     )
     STREAM_COMPLETION = Counter(
         "trajproxy_stream_completion_total",
@@ -407,7 +407,7 @@ def _create_metrics() -> None:
         "trajproxy_trajectory_store_duration_seconds",
         "Trajectory store duration",
         labelnames=["model", "run_id"],
-        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1200],
     )
 
     # F. 可选
