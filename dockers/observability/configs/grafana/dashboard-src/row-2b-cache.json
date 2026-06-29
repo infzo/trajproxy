@@ -3,7 +3,7 @@
     "id": 150,
     "type": "timeseries",
     "title": "TITO模式缓存命中率 - 按作业",
-    "description": "命中率 = hits / (hits + misses) × 100，按作业分组。使用 increase() 计算所选时间范围内的增量，不受进程重启影响。仅 TITO 模式有数据。",
+    "description": "命中率 = hits / (hits + misses) × 100，按作业分组。使用 increase($rate_interval) 计算滚动窗口增量，不受进程重启影响。仅 TITO 模式有数据。",
     "gridPos": {
       "h": 8,
       "w": 4,
@@ -16,7 +16,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\",result=\"hit\"}[$__range])) / sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\"}[$__range])) * 100",
+        "expr": "sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\",result=\"hit\"}[$rate_interval])) / sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])) * 100",
         "legendFormat": "{{ run_id }}",
         "refId": "A"
       }
@@ -48,4 +48,3 @@
     }
   }
 ]
-

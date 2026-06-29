@@ -95,7 +95,8 @@
         "displayMode": "table",
         "placement": "bottom",
         "calcs": [
-          "sum"
+          "lastNotNull",
+          "max"
         ]
       },
       "tooltip": {
@@ -120,7 +121,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$rate_interval]))",
+        "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$__interval]))",
         "legendFormat": "{{ node }}",
         "refId": "A"
       }
@@ -142,7 +143,7 @@
         "displayMode": "table",
         "placement": "bottom",
         "calcs": [
-          "sum",
+          "lastNotNull",
           "max"
         ]
       },
@@ -511,7 +512,7 @@
         "displayMode": "table",
         "placement": "bottom",
         "calcs": [
-          "sum",
+          "lastNotNull",
           "max"
         ]
       },
@@ -561,7 +562,7 @@
         "displayMode": "table",
         "placement": "bottom",
         "calcs": [
-          "sum",
+          "lastNotNull",
           "max"
         ]
       },
@@ -735,7 +736,7 @@
     },
     "targets": [
       {
-        "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$rate_interval])))",
+        "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$__interval])))",
         "legendFormat": "{{ outcome }}",
         "refId": "A"
       }
@@ -745,7 +746,7 @@
         "displayMode": "table",
         "placement": "bottom",
         "calcs": [
-          "sum",
+          "lastNotNull",
           "max"
         ]
       },
@@ -771,7 +772,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$rate_interval]))",
+        "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$__interval]))",
         "legendFormat": "{{ result }}",
         "refId": "A"
       }
@@ -853,7 +854,7 @@
         "displayMode": "table",
         "placement": "bottom",
         "calcs": [
-          "sum",
+          "lastNotNull",
           "max"
         ]
       },
@@ -933,7 +934,7 @@
     ],
     "fieldConfig": {
       "defaults": {
-        "unit": "short",
+        "unit": "ops",
         "decimals": 1,
         "custom": {
           "fillOpacity": 10,
@@ -980,7 +981,7 @@
     ],
     "fieldConfig": {
       "defaults": {
-        "unit": "short",
+        "unit": "ops",
         "decimals": 1,
         "custom": {
           "fillOpacity": 10,

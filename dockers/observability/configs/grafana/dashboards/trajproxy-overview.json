@@ -375,7 +375,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[$rate_interval]))",
+          "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[$__interval]))",
           "legendFormat": "{{ action }}:{{ type }}",
           "refId": "A"
         }
@@ -901,7 +901,8 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum"
+            "lastNotNull",
+            "max"
           ]
         },
         "tooltip": {
@@ -926,7 +927,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$rate_interval]))",
+          "expr": "sum by (node) (increase(trajproxy_infer_retries_total{node=~\"$node\",model=~\"$model\"}[$__interval]))",
           "legendFormat": "{{ node }}",
           "refId": "A"
         }
@@ -948,7 +949,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum",
+            "lastNotNull",
             "max"
           ]
         },
@@ -1317,7 +1318,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum",
+            "lastNotNull",
             "max"
           ]
         },
@@ -1367,7 +1368,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum",
+            "lastNotNull",
             "max"
           ]
         },
@@ -1541,7 +1542,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$rate_interval])))",
+          "expr": "round(sum by (outcome) (increase(trajproxy_requests_total{node=~\"$node\",run_id=~\"$run_id\",outcome=~\"error_client|error_server|error_infer|error_rate_limit|timeout|stream_partial|error_parser\"}[$__interval])))",
           "legendFormat": "{{ outcome }}",
           "refId": "A"
         }
@@ -1551,7 +1552,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum",
+            "lastNotNull",
             "max"
           ]
         },
@@ -1577,7 +1578,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$rate_interval]))",
+          "expr": "sum by (result) (increase(trajproxy_stream_completion_total{node=~\"$node\",model=~\"$model\",run_id=~\"$run_id\"}[$__interval]))",
           "legendFormat": "{{ result }}",
           "refId": "A"
         }
@@ -1659,7 +1660,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum",
+            "lastNotNull",
             "max"
           ]
         },
@@ -1739,7 +1740,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "ops",
           "decimals": 1,
           "custom": {
             "fillOpacity": 10,
@@ -1786,7 +1787,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "ops",
           "decimals": 1,
           "custom": {
             "fillOpacity": 10,
@@ -1813,7 +1814,7 @@
       "id": 150,
       "type": "timeseries",
       "title": "TITO模式缓存命中率 - 按作业",
-      "description": "命中率 = hits / (hits + misses) × 100，按作业分组。使用 increase() 计算所选时间范围内的增量，不受进程重启影响。仅 TITO 模式有数据。",
+      "description": "命中率 = hits / (hits + misses) × 100，按作业分组。使用 increase($rate_interval) 计算滚动窗口增量，不受进程重启影响。仅 TITO 模式有数据。",
       "gridPos": {
         "h": 8,
         "w": 4,
@@ -1826,7 +1827,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\",result=\"hit\"}[$__range])) / sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\"}[$__range])) * 100",
+          "expr": "sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\",result=\"hit\"}[$rate_interval])) / sum by (run_id) (increase(trajproxy_cache_lookups_total{node=~\"$node\",run_id=~\"$run_id\"}[$rate_interval])) * 100",
           "legendFormat": "{{ run_id }}",
           "refId": "A"
         }
@@ -1885,7 +1886,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[$rate_interval])))",
+          "expr": "round(sum by (run_id) (increase(trajproxy_api_requests_total{node=~\"$node\",route=\"trajectory_detail\",run_id=~\"$run_id\"}[$__interval])))",
           "legendFormat": "{{ run_id }}",
           "refId": "A"
         }
@@ -1905,7 +1906,8 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum"
+            "lastNotNull",
+            "max"
           ]
         },
         "tooltip": {
@@ -2100,7 +2102,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum",
+            "lastNotNull",
             "max"
           ]
         },
@@ -2150,7 +2152,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum",
+            "lastNotNull",
             "max"
           ]
         },
@@ -2343,7 +2345,7 @@
       },
       "targets": [
         {
-          "expr": "round(sum by (error_category) (increase(trajproxy_api_errors_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",run_id=~\"$run_id\"}[$rate_interval])))",
+          "expr": "round(sum by (error_category) (increase(trajproxy_api_errors_total{node=~\"$node\",route=~\"trajectory_list|trajectory_detail|trajectory_legacy\",run_id=~\"$run_id\"}[$__interval])))",
           "legendFormat": "{{ error_category }}",
           "refId": "A"
         }
@@ -2353,7 +2355,7 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "sum",
+            "lastNotNull",
             "max"
           ]
         },
@@ -2579,7 +2581,7 @@
       "id": 44,
       "type": "timeseries",
       "title": "DB 连接池使用率 - 按节点标识",
-      "description": "used / peak 比率 + 连接数趋势（按 node 区分）",
+      "description": "used / peak 连接池使用率（百分比），按 node 区分",
       "gridPos": {
         "h": 9,
         "w": 5,
@@ -2592,18 +2594,21 @@
       },
       "targets": [
         {
-          "expr": "trajproxy_db_pool_usage{node=~\"$node\",state=\"used\"}",
-          "legendFormat": "{{instance}} - used",
+          "expr": "trajproxy_db_pool_usage{node=~\"$node\",state=\"used\"} / trajproxy_db_pool_usage{node=~\"$node\",state=\"peak\"}",
+          "legendFormat": "{{instance}} - used/peak",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "percent",
           "custom": {
             "fillOpacity": 10,
             "drawStyle": "line"
-          }
+          },
+          "min": 0,
+          "max": 100,
+          "decimals": 1
         }
       },
       "options": {

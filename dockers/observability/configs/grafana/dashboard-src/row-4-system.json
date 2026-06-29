@@ -78,7 +78,10 @@
               "id": "custom.lineStyle",
               "value": {
                 "fill": "dash",
-                "dash": [10, 10]
+                "dash": [
+                  10,
+                  10
+                ]
               }
             },
             {
@@ -213,7 +216,7 @@
     "id": 44,
     "type": "timeseries",
     "title": "DB 连接池使用率 - 按节点标识",
-    "description": "used / peak 比率 + 连接数趋势（按 node 区分）",
+    "description": "used / peak 连接池使用率（百分比），按 node 区分",
     "gridPos": {
       "h": 9,
       "w": 5,
@@ -226,18 +229,21 @@
     },
     "targets": [
       {
-        "expr": "trajproxy_db_pool_usage{node=~\"$node\",state=\"used\"}",
-        "legendFormat": "{{instance}} - used",
+        "expr": "trajproxy_db_pool_usage{node=~\"$node\",state=\"used\"} / trajproxy_db_pool_usage{node=~\"$node\",state=\"peak\"}",
+        "legendFormat": "{{instance}} - used/peak",
         "refId": "A"
       }
     ],
     "fieldConfig": {
       "defaults": {
-        "unit": "short",
+        "unit": "percent",
         "custom": {
           "fillOpacity": 10,
           "drawStyle": "line"
-        }
+        },
+        "min": 0,
+        "max": 100,
+        "decimals": 1
       }
     },
     "options": {

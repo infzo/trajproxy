@@ -205,7 +205,7 @@
     },
     "targets": [
       {
-        "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[$rate_interval]))",
+        "expr": "sum by (action, type) (increase(trajproxy_model_lifecycle_total{node=~\"$node\"}[$__interval]))",
         "legendFormat": "{{ action }}:{{ type }}",
         "refId": "A"
       }
