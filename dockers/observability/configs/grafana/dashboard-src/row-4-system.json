@@ -229,7 +229,7 @@
     },
     "targets": [
       {
-        "expr": "trajproxy_db_pool_usage{node=~\"$node\",state=\"used\"} / trajproxy_db_pool_usage{node=~\"$node\",state=\"peak\"}",
+        "expr": "trajproxy_db_pool_usage{node=~\"$node\",state=\"used\"} / trajproxy_db_pool_usage{node=~\"$node\",state=\"peak\"} * 100",
         "legendFormat": "{{instance}} - used/peak",
         "refId": "A"
       }
