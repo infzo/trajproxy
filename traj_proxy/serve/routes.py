@@ -856,3 +856,204 @@ async def get_trajectory_detail(
     finally:
         if acquired:
             semaphore.release()
+
+
+# ========== 轨迹查询接口（Record 粒度） ==========
+
+@trajectory_router.get("/{session_id}/records")
+async def list_session_records(
+    request: Request,
+    session_id: str,
+    limit: int = 10000,
+    fields: Optional[str] = None
+) -> Response:
+    """查询指定 session 下的 record 元数据列表（含归档记录，仅返回轻量元数据）"""
+    from traj_proxy.workers.worker import get_transcript_provider as get_provider
+
+    valid, msg = validate_session_id(session_id)
+    if not valid:
+        raise HTTPException(status_code=422, detail=msg)
+
+    request.state.metric_run_id = ""
+    t_start = time.perf_counter()
+
+    semaphore = getattr(request.app.state, "request_semaphore", None)
+    acquired = False
+    if semaphore:
+        try:
+            await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
+            acquired = True
+        except asyncio.TimeoutError:
+            _emit_api_error("trajectory_records_list", request.state.metric_run_id, "rate_limit")
+            request.state._api_error_emitted = True
+            raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
+
+    try:
+        t_db_start = time.perf_counter()
+        provider = get_provider(request)
+        try:
+            result = await asyncio.wait_for(
+                provider.list_records(session_id, limit=limit, fields=fields),
+                timeout=TRAJECTORY_DB_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            t_db_elapsed = (time.perf_counter() - t_db_start) * 1000
+            logger.warning(f"[{session_id}] records 列表查询超时 ({TRAJECTORY_DB_TIMEOUT}s), 已耗时={t_db_elapsed:.1f}ms")
+            _emit_api_error("trajectory_records_list", request.state.metric_run_id, "timeout")
+            request.state._api_error_emitted = True
+            raise
+        t_db_end = time.perf_counter()
+
+        record_count = len(result.get("records", []))
+
+        first_record = result["records"][0] if result.get("records") else None
+        first_run_id = (first_record.get("run_id") if isinstance(first_record, dict) else None) or ""
+        request.state.metric_run_id = safe_run_id_label(first_run_id)
+
+        t_ser_start = time.perf_counter()
+        try:
+            json_bytes = await asyncio.wait_for(
+                asyncio.to_thread(_serialize_json, result),
+                timeout=TRAJECTORY_SERIALIZE_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            t_ser_elapsed = (time.perf_counter() - t_ser_start) * 1000
+            logger.warning(f"[{session_id}] records 列表序列化超时 ({TRAJECTORY_SERIALIZE_TIMEOUT}s), 已耗时={t_ser_elapsed:.1f}ms")
+            _emit_api_error("trajectory_records_list", request.state.metric_run_id, "serialize_timeout")
+            request.state._api_error_emitted = True
+            raise
+        t_end = time.perf_counter()
+
+        t_db_elapsed = (t_db_end - t_db_start) * 1000
+        t_ser_elapsed = (t_end - t_db_end) * 1000
+        t_total = (t_end - t_start) * 1000
+        response_size_kb = len(json_bytes) / 1024
+        logger.info(
+            f"[{session_id}] records 列表查询完成: {record_count}条, "
+            f"{response_size_kb:.1f}KB, fields={fields or '全部'}, "
+            f"DB查询={t_db_elapsed:.1f}ms, 序列化={t_ser_elapsed:.1f}ms, 总耗时={t_total:.1f}ms"
+        )
+        _emit_trajectory_query_completed(
+            "trajectory_records_list", request.state.metric_run_id,
+            record_count, len(json_bytes),
+        )
+        return Response(content=json_bytes, media_type="application/json")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="轨迹查询超时")
+    except DatabaseError as e:
+        _emit_api_error("trajectory_records_list", request.state.metric_run_id, "database")
+        request.state._api_error_emitted = True
+        logger.exception(f"records 列表查询数据库错误: {str(e)}")
+        error_detail, status_code = build_error_response("list_session_records", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
+    except Exception as e:
+        _emit_api_error("trajectory_records_list", request.state.metric_run_id, "other")
+        request.state._api_error_emitted = True
+        logger.exception(f"records 列表查询失败: {str(e)}")
+        error_detail, status_code = build_error_response("list_session_records", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
+    finally:
+        if acquired:
+            semaphore.release()
+
+
+@trajectory_router.get("/{session_id}/records/{request_id}")
+async def get_session_record(
+    request: Request,
+    session_id: str,
+    request_id: str,
+    fields: Optional[str] = None
+) -> Response:
+    """查询单条 record 详情（归档记录的详情字段为 None）"""
+    from traj_proxy.workers.worker import get_transcript_provider as get_provider
+
+    valid, msg = validate_session_id(session_id)
+    if not valid:
+        raise HTTPException(status_code=422, detail=msg)
+
+    if ',' in (request_id or ""):
+        raise HTTPException(status_code=422, detail="request_id 不能包含逗号")
+
+    request.state.metric_run_id = ""
+    t_start = time.perf_counter()
+
+    semaphore = getattr(request.app.state, "request_semaphore", None)
+    acquired = False
+    if semaphore:
+        try:
+            await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
+            acquired = True
+        except asyncio.TimeoutError:
+            _emit_api_error("trajectory_record_detail", request.state.metric_run_id, "rate_limit")
+            request.state._api_error_emitted = True
+            raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
+
+    try:
+        t_db_start = time.perf_counter()
+        provider = get_provider(request)
+        try:
+            result = await asyncio.wait_for(
+                provider.get_record(session_id, request_id, fields=fields),
+                timeout=TRAJECTORY_DB_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            t_db_elapsed = (time.perf_counter() - t_db_start) * 1000
+            logger.warning(f"[{session_id}/{request_id}] record 详情查询超时 ({TRAJECTORY_DB_TIMEOUT}s), 已耗时={t_db_elapsed:.1f}ms")
+            _emit_api_error("trajectory_record_detail", request.state.metric_run_id, "timeout")
+            request.state._api_error_emitted = True
+            raise
+        t_db_end = time.perf_counter()
+
+        if result is None:
+            raise HTTPException(status_code=404, detail="记录不存在")
+
+        first_run_id = (result.get("run_id") if isinstance(result, dict) else None) or ""
+        request.state.metric_run_id = safe_run_id_label(first_run_id)
+
+        t_ser_start = time.perf_counter()
+        try:
+            json_bytes = await asyncio.wait_for(
+                asyncio.to_thread(_serialize_json, result),
+                timeout=TRAJECTORY_SERIALIZE_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            t_ser_elapsed = (time.perf_counter() - t_ser_start) * 1000
+            logger.warning(f"[{session_id}/{request_id}] record 详情序列化超时 ({TRAJECTORY_SERIALIZE_TIMEOUT}s), 已耗时={t_ser_elapsed:.1f}ms")
+            _emit_api_error("trajectory_record_detail", request.state.metric_run_id, "serialize_timeout")
+            request.state._api_error_emitted = True
+            raise
+        t_end = time.perf_counter()
+
+        t_db_elapsed = (t_db_end - t_db_start) * 1000
+        t_ser_elapsed = (t_end - t_db_end) * 1000
+        t_total = (t_end - t_start) * 1000
+        response_size_kb = len(json_bytes) / 1024
+        logger.info(
+            f"[{session_id}/{request_id}] record 详情查询完成: "
+            f"{response_size_kb:.1f}KB, fields={fields or '全部'}, "
+            f"DB查询={t_db_elapsed:.1f}ms, 序列化={t_ser_elapsed:.1f}ms, 总耗时={t_total:.1f}ms"
+        )
+        _emit_trajectory_query_completed(
+            "trajectory_record_detail", request.state.metric_run_id,
+            1, len(json_bytes),
+        )
+        return Response(content=json_bytes, media_type="application/json")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="轨迹查询超时")
+    except HTTPException:
+        raise
+    except DatabaseError as e:
+        _emit_api_error("trajectory_record_detail", request.state.metric_run_id, "database")
+        request.state._api_error_emitted = True
+        logger.exception(f"record 详情查询数据库错误: {str(e)}")
+        error_detail, status_code = build_error_response("get_session_record", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
+    except Exception as e:
+        _emit_api_error("trajectory_record_detail", request.state.metric_run_id, "other")
+        request.state._api_error_emitted = True
+        logger.exception(f"record 详情查询失败: {str(e)}")
+        error_detail, status_code = build_error_response("get_session_record", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
+    finally:
+        if acquired:
+            semaphore.release()
