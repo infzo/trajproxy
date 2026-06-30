@@ -13,6 +13,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 
 from traj_proxy.observability import metrics_collector
@@ -22,7 +23,7 @@ from traj_proxy.proxy_core.provider import TrajectoryProvider
 from traj_proxy.store.database_manager import DatabaseManager
 from traj_proxy.store.model_synchronizer import ModelSynchronizer
 from traj_proxy.store.request_repository import RequestRepository
-from traj_proxy.utils.config import get_database_pool_config, get_max_concurrent_requests, get_storage_mode
+from traj_proxy.utils.config import get_database_pool_config, get_gzip_config, get_max_concurrent_requests, get_storage_mode
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.validators import normalize_run_id
 
@@ -209,6 +210,20 @@ class ProxyWorker:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+        # 置于 CORS 之后、日志中间件之前，使日志中间件位于最外层记录原始请求
+        gzip_cfg = get_gzip_config()
+        if gzip_cfg["enabled"]:
+            self.app.add_middleware(
+                GZipMiddleware,
+                minimum_size=gzip_cfg["minimum_size"],
+            )
+            self.logger.info(
+                f"gzip 响应压缩已启用: minimum_size={gzip_cfg['minimum_size']}"
+            )
+        else:
+            self.logger.info("gzip 响应压缩未启用（gzip_enabled=false）")
+
         @self.app.middleware("http")
         async def request_logging_middleware(request: Request, call_next):
             """请求日志中间件：记录请求详情和响应耗时"""

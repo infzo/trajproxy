@@ -186,6 +186,27 @@ def get_semaphore_acquire_timeout() -> float:
     return get_proxy_workers_config().get("semaphore_acquire_timeout", 5.0)
 
 
+def get_gzip_config() -> Dict:
+    """获取 HTTP gzip 响应压缩配置
+
+    用于控制 ProxyWorker 是否对 HTTP 响应体启用 gzip 压缩。
+    轨迹查询响应含大量 JSON 文本与整数数组，gzip 压缩率通常可达 5-10 倍，
+    可显著降低传输数据量。默认关闭，需显式开启。
+
+    配置项位于 config.yaml 的 proxy_workers 段：
+    - gzip_enabled: 是否启用（默认 false）
+    - gzip_minimum_size: 触发压缩的最小响应体字节数（默认 1024）
+
+    Returns:
+        {"enabled": bool, "minimum_size": int}
+    """
+    pw = get_proxy_workers_config()
+    return {
+        "enabled": pw.get("gzip_enabled", False),
+        "minimum_size": pw.get("gzip_minimum_size", 1024),
+    }
+
+
 def get_processor_cache_max_size() -> int:
     """
     获取 LRU 缓存最大 Processor 数量
