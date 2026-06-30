@@ -129,6 +129,8 @@ Worker 进程配置。
 | `base_port` | int | 12300 | 起始端口号，后续 Worker 递增 |
 | `max_concurrent_requests` | int | 4096 | 单 Worker 最大并发请求数，超限返回 429（代码 fallback: 128） |
 | `semaphore_acquire_timeout` | float | 5.0 | 信号量获取超时（秒），超时返回 429（代码 fallback: 5.0） |
+| `gzip_enabled` | bool | false | 是否启用 HTTP gzip 响应压缩；开启后对 ≥ `gzip_minimum_size` 的响应体自动压缩，轨迹查询传输量可降 5-10 倍（代码 fallback: false） |
+| `gzip_minimum_size` | int | 1024 | 触发 gzip 压缩的最小响应体字节数（代码 fallback: 1024） |
 | `models` | list | [] | 预置模型配置列表 |
 
 > **注意**：`max_concurrent_requests` 所有部署模式统一为 4096。代码 fallback 为 128。
