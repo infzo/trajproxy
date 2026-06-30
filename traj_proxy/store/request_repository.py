@@ -557,3 +557,62 @@ class RequestRepository:
                     return await cur.fetchall()
         except Exception as e:
             raise DatabaseError(f"查询轨迹记录失败: {str(e)}\n{traceback.format_exc()}")
+
+    async def get_record_detail(
+        self,
+        session_id: str,
+        request_id: str,
+        fields: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """查询单条记录详情（LEFT JOIN 单次查询，归档记录详情字段为 NULL）
+
+        使用 LEFT JOIN 一次查询消除两阶段查询的竞态风险：
+        - 活跃记录（archive_location IS NULL）：详情字段从 JOIN 结果返回
+        - 归档记录（archive_location 非空）：详情字段强制设为 None，不回读外部 JSONL
+        - archive_location/archived_at 始终返回（归档状态标识，不受 fields 过滤）
+
+        Args:
+            session_id: 会话 ID
+            request_id: 请求 ID
+            fields: 逗号分隔的字段名列表，None 返回全部；
+                    支持 field_name（包含）和 -field_name（排除）
+
+        Returns:
+            记录字典；记录不存在时返回 None
+
+        Raises:
+            DatabaseError: 当查询失败时抛出
+        """
+        unique_id = f"{session_id},{request_id}"
+        field_list = resolve_fields(fields, FIELDS_MAPPING)
+
+        try:
+            async with self.pool.connection() as conn:
+                async with conn.cursor(row_factory=dict_row) as cur:
+                    select_columns = ", ".join(FIELDS_MAPPING[f] for f in field_list)
+                    extra_select = "m.archive_location, m.archived_at"
+                    all_select = f"{select_columns}, {extra_select}" if select_columns else extra_select
+
+                    await cur.execute(f"""
+                        SELECT {all_select}
+                        FROM public.request_metadata m
+                        LEFT JOIN public.request_details_active d ON m.unique_id = d.unique_id
+                        WHERE m.unique_id = %s
+                    """, (unique_id,))
+                    record = await cur.fetchone()
+
+                    if record is None:
+                        return None
+
+                    record = dict(record)
+
+                    # 归档记录：详情字段强制设为 None（不回读外部 JSONL）
+                    if record.get("archive_location") is not None:
+                        for f in field_list:
+                            if f not in META_FIELDS_MAPPING:
+                                record[f] = None
+
+                    return record
+
+        except Exception as e:
+            raise DatabaseError(f"查询单条记录详情失败: {str(e)}\n{traceback.format_exc()}")

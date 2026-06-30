@@ -80,3 +80,29 @@ class TrajectoryProvider:
             "session_id": session_id,
             "records": records
         }
+
+    async def list_records(
+        self,
+        session_id: str,
+        limit: int = 10000,
+        fields: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """查询指定 session 下的 record 元数据列表（含归档记录）"""
+        records = await self.request_repository.get_metadata_by_session(
+            session_id, limit=limit, fields=fields
+        )
+        return {
+            "session_id": session_id,
+            "records": records
+        }
+
+    async def get_record(
+        self,
+        session_id: str,
+        request_id: str,
+        fields: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """查询单条 record 详情（归档记录的详情字段为 None）"""
+        return await self.request_repository.get_record_detail(
+            session_id, request_id, fields=fields
+        )
