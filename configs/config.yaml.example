@@ -9,6 +9,8 @@ models_dir: /app/models
 proxy_workers:
   count: 2                    # Worker 数量
   base_port: 12300            # 起始端口（12300, 12301）
+  gzip_enabled: false         # 是否启用 HTTP gzip 响应压缩（默认关；开启可大幅降低轨迹查询传输量）
+  gzip_minimum_size: 1024     # 触发压缩的最小响应体大小（字节）
   models:                     # 预置模型配置
     - model_name: qwen3.5-2b
       url: http://host.docker.internal:8000/v1
