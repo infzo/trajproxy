@@ -475,6 +475,167 @@ curl "http://localhost:12300/trajectories/task-123?fields=-raw_request,-raw_resp
 
 ---
 
+### GET /trajectories/{session_id}/records
+
+查询指定 session 下的 record 元数据列表（含归档记录，仅返回轻量元数据）。
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| session_id | string | 是 | 会话 ID |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| limit | integer | 否 | 10000 | 最大返回条数（上限保护，非分页） |
+| fields | string | 否 | - | 字段过滤，逗号分隔。支持 `field_name`（包含）和 `-field_name`（排除） |
+
+**响应**:
+
+```json
+{
+  "session_id": "task-123",
+  "records": [
+    {
+      "id": 1,
+      "unique_id": "task-123,req-uuid-1",
+      "request_id": "req-uuid-1",
+      "session_id": "task-123",
+      "run_id": "run_001",
+      "model": "qwen3.5-2b",
+      "prompt_tokens": 10,
+      "completion_tokens": 20,
+      "total_tokens": 30,
+      "cache_hit_tokens": 0,
+      "processing_duration_ms": 1500.5,
+      "start_time": "2024-01-01T00:00:00Z",
+      "end_time": "2024-01-01T00:00:01.5Z",
+      "created_at": "2024-01-01T00:00:00Z",
+      "error": null,
+      "archive_location": null,
+      "archived_at": null
+    }
+  ]
+}
+```
+
+**说明**:
+- 仅返回元数据字段（不含 `messages`、`raw_request` 等详情大字段）
+- 含归档记录（`archive_location` 非空表示已归档，详情字段需查单条详情接口）
+- session 不存在时返回空 `records` 数组（200）
+
+**curl 示例**:
+
+```bash
+curl "http://localhost:12300/trajectories/task-123/records"
+curl "http://localhost:12300/trajectories/task-123/records?fields=model,request_id,start_time"
+```
+
+---
+
+### GET /trajectories/{session_id}/records/{request_id}
+
+查询单条 record 详情。
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| session_id | string | 是 | 会话 ID |
+| request_id | string | 是 | 请求 ID（UUID） |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| fields | string | 否 | - | 字段过滤，逗号分隔。支持 `field_name`（包含）和 `-field_name`（排除） |
+
+**响应（活跃记录）**:
+
+```json
+{
+  "id": 1,
+  "unique_id": "task-123,req-uuid-1",
+  "request_id": "req-uuid-1",
+  "session_id": "task-123",
+  "run_id": "run_001",
+  "model": "qwen3.5-2b",
+  "prompt_tokens": 10,
+  "completion_tokens": 20,
+  "total_tokens": 30,
+  "cache_hit_tokens": 0,
+  "processing_duration_ms": 1500.5,
+  "start_time": "2024-01-01T00:00:00Z",
+  "end_time": "2024-01-01T00:00:01.5Z",
+  "created_at": "2024-01-01T00:00:00Z",
+  "error": null,
+  "archive_location": null,
+  "archived_at": null,
+  "tokenizer_path": "Qwen/Qwen3.5-2B",
+  "messages": [...],
+  "raw_request": {...},
+  "raw_response": {...},
+  "prompt_text": "...",
+  "token_ids": [1, 2, 3],
+  "response_text": "...",
+  "response_ids": [4, 5, 6],
+  "full_conversation_text": "...",
+  "full_conversation_token_ids": [1, 2, 3, 4, 5, 6],
+  "error_traceback": null
+}
+```
+
+**响应（归档记录，详情字段为 null）**:
+
+```json
+{
+  "id": 1,
+  "unique_id": "task-123,req-uuid-1",
+  "request_id": "req-uuid-1",
+  "session_id": "task-123",
+  "run_id": "run_001",
+  "model": "qwen3.5-2b",
+  "prompt_tokens": 10,
+  "completion_tokens": 20,
+  "total_tokens": 30,
+  "cache_hit_tokens": 0,
+  "processing_duration_ms": 1500.5,
+  "start_time": "2024-01-01T00:00:00Z",
+  "end_time": "2024-01-01T00:00:01.5Z",
+  "created_at": "2024-01-01T00:00:00Z",
+  "error": null,
+  "archive_location": "2026_03/run_001/task-123.jsonl.gz",
+  "archived_at": "2026-03-15T00:00:00Z",
+  "tokenizer_path": null,
+  "messages": null,
+  "raw_request": null,
+  "raw_response": null,
+  "prompt_text": null,
+  "token_ids": null,
+  "response_text": null,
+  "response_ids": null,
+  "full_conversation_text": null,
+  "full_conversation_token_ids": null,
+  "error_traceback": null
+}
+```
+
+**说明**:
+- 活跃记录（`archive_location` 为 null）：返回完整详情字段
+- 归档记录（`archive_location` 非空）：详情字段一律为 `null`，仅元数据可查
+- `session_id` 与 `request_id` 不匹配时返回 404
+
+**curl 示例**:
+
+```bash
+curl "http://localhost:12300/trajectories/task-123/records/req-uuid-1"
+curl "http://localhost:12300/trajectories/task-123/records/req-uuid-1?fields=model,messages"
+```
+
+---
+
 ## 错误响应
 
 所有错误响应格式：
