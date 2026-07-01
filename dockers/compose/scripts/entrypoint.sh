@@ -273,6 +273,77 @@ def init_database():
             conn.execute("CREATE INDEX IF NOT EXISTS model_registry_model_name_idx ON public.model_registry (model_name)")
             conn.execute("CREATE INDEX IF NOT EXISTS model_registry_updated_at_idx ON public.model_registry (updated_at DESC)")
 
+            # r3_blob_refs 表（route_experts 大字段卸载引用）
+            # session_id 列用于多租户授权：fallback 端点必须按 (session_id, request_id)
+            # 复合查询，防止任意客户端凭他人 request_id 读取他人 route_experts
+            print("  创建 r3_blob_refs 表...")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS public.r3_blob_refs (
+                    request_id   TEXT PRIMARY KEY,
+                    session_id   TEXT NOT NULL,
+                    blob_key     TEXT NOT NULL,
+                    backend      TEXT NOT NULL,
+                    status       TEXT NOT NULL DEFAULT 'uploading',
+                    size_bytes   BIGINT,
+                    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    ready_at     TIMESTAMPTZ,
+                    consumed_at  TIMESTAMPTZ,
+                    expires_at   TIMESTAMPTZ NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_r3_status_ready
+                    ON public.r3_blob_refs (expires_at)
+                    WHERE status IN ('uploading', 'ready')
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_r3_status_consumed
+                    ON public.r3_blob_refs (consumed_at)
+                    WHERE status = 'consumed'
+            """)
+            # 多租户授权复合索引：fallback 端点按 (session_id, request_id) 查询
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_r3_session_request
+                    ON public.r3_blob_refs (session_id, request_id)
+            """)
+            print("  r3_blob_refs 表和索引创建完成")
+
+            # r3_blob_refs 兼容性: 旧版本创建的表可能缺 session_id 列, 需补列
+            print("  检查 r3_blob_refs 表列兼容性...")
+            has_session_id = conn.execute("""
+                SELECT EXISTS(
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'r3_blob_refs'
+                      AND column_name = 'session_id'
+                )
+            """).fetchone()[0]
+            if not has_session_id:
+                print("  补充 r3_blob_refs.session_id 列 (旧版本升级)...")
+                # 先加列 (默认 NULL, 避免旧行 NOT NULL 报错)
+                conn.execute("ALTER TABLE public.r3_blob_refs ADD COLUMN session_id TEXT")
+                # 回填已有行的 session_id: 从 request_metadata JOIN 取 (request_id 关联)
+                # 若 JOIN 不到, 用 'unknown' 占位
+                conn.execute("""
+                    UPDATE public.r3_blob_refs r
+                    SET session_id = COALESCE(
+                        (SELECT m.session_id FROM public.request_metadata m
+                         WHERE m.request_id = r.request_id),
+                        'unknown'
+                    )
+                    WHERE r.session_id IS NULL
+                """)
+                # 回填后加 NOT NULL 约束
+                conn.execute("ALTER TABLE public.r3_blob_refs ALTER COLUMN session_id SET NOT NULL")
+                # 补复合索引 (若不存在)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_r3_session_request
+                        ON public.r3_blob_refs (session_id, request_id)
+                """)
+                print("  r3_blob_refs.session_id 列补充完成")
+            else:
+                print("  r3_blob_refs.session_id 列已存在, 跳过")
+
             # 兼容性：为 model_registry 添加新列
             print("  检查 model_registry 表列兼容性...")
             conn.execute("""

@@ -8,6 +8,7 @@ from traj_proxy.store.database_manager import DatabaseManager
 from traj_proxy.store.request_repository import RequestRepository
 from traj_proxy.store.model_repository import ModelRepository
 from traj_proxy.store.notification_listener import NotificationListener
+from traj_proxy.store.r3_ref_repository import R3RefRepository
 from traj_proxy.store.models import ModelConfig, RequestRecord
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "RequestRepository",
     "ModelRepository",
     "NotificationListener",
+    "R3RefRepository",
     "ModelConfig",
     "RequestRecord",
 ]

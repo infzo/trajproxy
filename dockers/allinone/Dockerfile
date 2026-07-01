@@ -78,6 +78,7 @@ RUN mkdir -p /run/postgresql \
     /var/log/supervisor \
     /app/logs \
     /app/configs \
+    /app/shard_data \
     /data/postgres \
     /data/archives \
     && chown postgres:postgres /data/postgres /run/postgresql \
@@ -98,7 +99,7 @@ ENV PGDATA=/data/postgres
 ENV TRAJ_PROXY_CONFIG=/app/configs/config.yaml
 
 # 数据持久化卷
-VOLUME ["/data/postgres", "/data/archives", "/app/logs", "/app/models"]
+VOLUME ["/data/postgres", "/data/archives", "/app/logs", "/app/models", "/app/shard_data"]
 
 # ========================================
 # 入口

@@ -94,3 +94,26 @@ archive:
   batch_size: 1000               # 每批处理的记录数
   schedule: "0 2 * * *"          # cron 表达式：每天凌晨 2 点执行
   timezone: "Asia/Shanghai"      # 时区配置
+
+# route_experts 大字段卸载配置
+# ⚠️ 生产警示：本期未实现清理任务（r3_blob_refs 表与 Local 磁盘/CSB 对象无回收机制）。
+# enabled=true 前必须先确认清理任务就绪，否则 r3_blob_refs 表与存储会持续膨胀。
+# 详见 docs/design/features/route-experts-offload.md 十一/十四。
+route_experts_offload:
+  enabled: true                     # 本地部署已开启（生产开启前需先实现清理任务）
+  ttl_hours: 2                      # expires_at = created_at + ttl
+  blob_key_prefix: "route_experts"  # 对象 key 前缀
+  backend: "local"                  # csb | local
+  csb:
+    app_token: ""                   # 或 env CSB_APP_TOKEN
+    bucket: "trajproxy-r3"
+    endpoint: "https://csb.example.com"  # client 直访用
+    verify_tls: true                # 生产环境应启用 TLS 校验
+  local:
+    # write_path 必须用绝对路径：Ray RemoteWorker 的实际 CWD 是 /tmp/ray/.../_ray_pkg_*/,
+    # 而非容器 WORKDIR /app，相对路径 "./shard_data" 会落到 Ray package 目录（非 volume 挂载点），
+    # 导致宿主机/e2e 读不到 blob。绝对路径 /app/shard_data 经 compose volume
+    # (../../shard_data:/app/shard_data) 映射到项目根 shard_data。
+    # access_path 供 client/e2e 从项目根读取（宿主机相对路径），与 /app/shard_data 同一物理目录。
+    write_path: "/app/shard_data"   # 容器内绝对路径（volume 挂载点），避免 Ray CWD 漂移
+    access_path: "./shard_data"     # client/e2e 读路径（宿主机项目根相对路径），留空默认=write_path

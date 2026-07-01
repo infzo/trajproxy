@@ -84,6 +84,7 @@ services:
       - ../../traj_proxy:/app/traj_proxy
       - ../../archives:/data/archives
       - ../../logs:/app/logs
+      - ../../shard_data:/app/shard_data
     environment:
       - DATABASE_URL=postgresql://llmproxy:dbpassword9090@db:5432/traj_proxy
       - PYTHONUNBUFFERED=1

@@ -62,11 +62,19 @@ class ProcessorManager:
     注意：模型同步由 ModelSynchronizer 负责
     """
 
-    def __init__(self, db_manager: DatabaseManager):
+    def __init__(
+        self,
+        db_manager: DatabaseManager,
+        request_repository: Optional[RequestRepository] = None,
+    ):
         """初始化 ProcessorManager
 
         Args:
-            db_manager: 数据库管理器（所有 Processor 共享）
+            db_manager: 数据库管理器（所有 Processor 共享）。
+            request_repository: 请求记录仓库实例（可选）。若传入则直接使用
+                （可为 OffloadingRepository 包裹后的实例，使写路径 Processor→
+                Pipeline→insert 走卸载逻辑，route_experts 写入时即 strip 为 marker）；
+                若为 None 则内部自建裸 RequestRepository（兼容旧调用，feature off）。
         """
         self.db_manager = db_manager
 
@@ -91,7 +99,13 @@ class ProcessorManager:
 
         # 模型注册表（供 ModelSynchronizer 使用）
         self.model_registry = ModelRepository(db_manager.pool)
-        self.request_repository = RequestRepository(db_manager.pool, get_storage_mode())
+        # 支持外部注入（如 OffloadingRepository 包裹后的实例），使写路径与读路径
+        # 共用同一 repository；未注入则自建裸 RequestRepository（兼容旧调用）
+        self.request_repository = (
+            request_repository
+            if request_repository is not None
+            else RequestRepository(db_manager.pool, get_storage_mode())
+        )
 
         logger.info(f"ProcessorManager 初始化完成，LRU 缓存上限: {self._cache_max_size}")
 

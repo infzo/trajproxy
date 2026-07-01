@@ -8,8 +8,9 @@ FastAPI 路由定义
 """
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse, Response
-from typing import Dict, Any, Optional
+from fastapi.responses import JSONResponse, StreamingResponse, Response
+from starlette.background import BackgroundTask
+from typing import Dict, Any, Optional, assert_never
 import asyncio
 import json
 import time
@@ -19,6 +20,9 @@ import uuid
 # 轨迹查询超时配置（秒）
 TRAJECTORY_DB_TIMEOUT = 30
 TRAJECTORY_SERIALIZE_TIMEOUT = 30
+# P1-4: route_experts 回拉独立超时（含 blob open_stream: CSB 三步认证 + HTTP stream 打开），
+# 不复用 DB 30s，避免 CSB 网络抖动误报 504
+ROUTE_EXPERTS_FETCH_TIMEOUT = 60
 
 try:
     import orjson
@@ -1053,6 +1057,140 @@ async def get_session_record(
         request.state._api_error_emitted = True
         logger.exception(f"record 详情查询失败: {str(e)}")
         error_detail, status_code = build_error_response("get_session_record", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
+    finally:
+        if acquired:
+            semaphore.release()
+
+
+@trajectory_router.get("/{session_id}/records/{request_id}/route_experts")
+async def get_route_experts(
+    request: Request,
+    session_id: str,
+    request_id: str,
+) -> Response:
+    """回拉 route_experts 大字段（fallback 端点，设计文档 九）。
+
+    client 直访存储失败时的可选回退路径，亦用于状态查询与调试。
+    feature off 时无 ref 行，恒返回 404（正确行为）。
+    """
+    from traj_proxy.workers.worker import get_transcript_provider as get_provider
+    from traj_proxy.proxy_core.provider import (
+        RouteExpertsConsumed,
+        RouteExpertsNotFound,
+        RouteExpertsReady,
+        RouteExpertsUploading,
+    )
+    from traj_proxy.store.blob_storage import BlobStorageError
+
+    valid, msg = validate_session_id(session_id)
+    if not valid:
+        raise HTTPException(status_code=422, detail=msg)
+
+    if "," in (request_id or ""):
+        raise HTTPException(status_code=422, detail="request_id 不能包含逗号")
+
+    request.state.metric_run_id = ""
+    log_prefix = f"[{session_id}/{request_id}]"
+
+    # 并发限流：对齐 trajectory_legacy / get_session_record，防止 fallback 端点被滥用
+    semaphore = getattr(request.app.state, "request_semaphore", None)
+    acquired = False
+    if semaphore:
+        try:
+            await asyncio.wait_for(semaphore.acquire(), timeout=get_semaphore_acquire_timeout())
+            acquired = True
+        except asyncio.TimeoutError:
+            _emit_api_error("trajectory_record_detail", request.state.metric_run_id, "rate_limit")
+            request.state._api_error_emitted = True
+            raise HTTPException(status_code=429, detail="服务繁忙，请稍后重试")
+
+    try:
+        provider = get_provider(request)
+        # 防止慢 SQL / 慢 blob open_stream 长时间占用 semaphore 槽位
+        # P1-4: 用独立 ROUTE_EXPERTS_FETCH_TIMEOUT（60s），不复用 DB 30s，
+        # 因 open_stream 含 CSB 三步认证 + HTTP stream 打开，网络抖动需更长余量
+        result = await asyncio.wait_for(
+            provider.get_route_experts(session_id, request_id),
+            timeout=ROUTE_EXPERTS_FETCH_TIMEOUT,
+        )
+
+        match result:
+            case RouteExpertsNotFound():
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": result.reason, "hint": result.hint},
+                )
+            case RouteExpertsUploading():
+                return JSONResponse(
+                    status_code=202,
+                    content={"status": "uploading"},
+                    headers={"Retry-After": str(result.retry_after_seconds)},
+                )
+            case RouteExpertsReady(blob_key=blob_key, stream_handle=handle):
+                logger.info(
+                    f"{log_prefix} route_experts 流式返回: key={blob_key}"
+                )
+                async def _stream_generator():
+                    try:
+                        async for chunk in handle.iter_bytes():
+                            yield chunk
+                    except Exception:
+                        logger.exception(
+                            f"{log_prefix} route_experts 流式中途失败: key={blob_key}"
+                        )
+                        raise
+                    finally:
+                        await handle.close()
+                # P0-2: BackgroundTask 兜底 close handle，防 StreamingResponse 未被
+                # 消费时 _stream_generator 的 finally 不执行导致资源泄漏。
+                # close 幂等，与 _stream_generator 的 finally 不会双重释放冲突
+                return StreamingResponse(
+                    _stream_generator(),
+                    media_type="application/json",
+                    background=BackgroundTask(handle.close),
+                )
+            case RouteExpertsConsumed():
+                return JSONResponse(
+                    status_code=410,
+                    content={"error": result.reason},
+                )
+            case _:
+                assert_never(result)
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"{log_prefix} route_experts 回拉超时 ({ROUTE_EXPERTS_FETCH_TIMEOUT}s)"
+        )
+        _emit_api_error(
+            "trajectory_record_detail", request.state.metric_run_id, "timeout"
+        )
+        request.state._api_error_emitted = True
+        raise HTTPException(status_code=504, detail="route_experts 回拉超时")
+    except DatabaseError as e:
+        _emit_api_error(
+            "trajectory_record_detail", request.state.metric_run_id, "database"
+        )
+        request.state._api_error_emitted = True
+        logger.exception(f"{log_prefix} route_experts 回拉数据库错误: {e}")
+        error_detail, status_code = build_error_response("get_route_experts", e)
+        raise HTTPException(status_code=status_code, detail=error_detail)
+    except BlobStorageError as e:
+        _emit_api_error(
+            "trajectory_record_detail", request.state.metric_run_id, "other"
+        )
+        request.state._api_error_emitted = True
+        logger.exception(f"{log_prefix} route_experts 回拉存储错误: {e}")
+        raise HTTPException(status_code=502, detail="route_experts 存储暂不可用")
+    except HTTPException:
+        # 透显 422 / 429 等业务异常，避免被下面的 Exception 兜底改写
+        raise
+    except Exception as e:
+        _emit_api_error(
+            "trajectory_record_detail", request.state.metric_run_id, "other"
+        )
+        request.state._api_error_emitted = True
+        logger.exception(f"{log_prefix} route_experts 回拉失败: {e}")
+        error_detail, status_code = build_error_response("get_route_experts", e)
         raise HTTPException(status_code=status_code, detail=error_detail)
     finally:
         if acquired:

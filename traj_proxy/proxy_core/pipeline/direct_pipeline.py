@@ -191,15 +191,16 @@ class DirectPipeline(BasePipeline):
                 f"inference_ms={context.inference_duration_ms:.2f}"
             )
 
-            # 存储到数据库（保留完整的 logprobs/token_ids）
+            # 存储到数据库（保留完整的 logprobs/token_ids/routed_experts）
             await self._store_trajectory(context, run_id=context.run_id)
 
             # 过滤内部字段，不返回给客户端
-            # （与 TITO 模式行为对齐，logprobs/token_ids 仅用于轨迹记录）
+            # （与 TITO 模式行为对齐，logprobs/token_ids/routed_experts 仅用于轨迹记录）
             if "choices" in context.raw_response:
                 for choice in context.raw_response["choices"]:
                     choice.pop("logprobs", None)
                     choice.pop("token_ids", None)
+                    choice.pop("routed_experts", None)
             context.raw_response.pop("prompt_token_ids", None)
 
             # 确保响应中所有可选字段有默认值
@@ -270,11 +271,12 @@ class DirectPipeline(BasePipeline):
                 context.stream_chunk_count += 1
 
                 # 过滤内部字段，不返回给客户端
-                # （与 TITO 模式行为对齐，logprobs/token_ids 仅用于轨迹记录）
+                # （与 TITO 模式行为对齐，logprobs/token_ids/routed_experts 仅用于轨迹记录）
                 if "choices" in chunk and chunk["choices"]:
                     choice = chunk["choices"][0]
                     choice.pop("logprobs", None)
                     choice.pop("token_ids", None)
+                    choice.pop("routed_experts", None)
                 chunk.pop("prompt_token_ids", None)
 
                 yield chunk
@@ -421,19 +423,24 @@ class DirectPipeline(BasePipeline):
 
     @staticmethod
     def _strip_injected_fields(chunk: Dict[str, Any]) -> None:
-        """移除 proxy 强制注入但不应暴露给客户端的字段
+        """移除不应暴露给客户端的内部字段
 
-        proxy 会向推理服务强制注入 logprobs=1 和 return_token_ids=True 以获取
-        轨迹存储所需的数据，但原始 chunk 在转发给客户端前必须剥离这些内部字段，
-        避免客户端看到非预期的扩展数据。
+        包含两类：
+        - proxy 强制注入的字段：logprobs=1、return_token_ids=True（用于轨迹存储）；
+        - proxy 选择不外发的 vLLM 返回字段：routed_experts（MoE 路由元数据，体量大，
+          已存入轨迹 DB，可通过 GET .../route_experts 回拉）。
+
+        原始 chunk 在转发给客户端前必须剥离这些字段，避免客户端看到非预期的扩展数据。
+        其他 vLLM 返回的额外字段仍正常透传，不受影响。
 
         Args:
             chunk: 推理服务返回的原始 chunk（原地修改）
         """
-        # 移除每个 choice 中的 logprobs 和 token_ids
+        # 移除每个 choice 中的 logprobs、token_ids 和 routed_experts
         for choice in chunk.get("choices", []):
             choice.pop("logprobs", None)
             choice.pop("token_ids", None)
+            choice.pop("routed_experts", None)
 
     async def _finalize_stream(self, context: ProcessContext):
         """完成流式处理

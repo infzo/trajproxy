@@ -1,13 +1,12 @@
 #!/bin/bash
-# 场景 P209: DirectPipeline 额外字段透传（Proxy 层）
+# 场景 P209: DirectPipeline routed_experts 客户端剥离验证（Proxy 层）
 # 测试流程：启动mock服务 -> 注册模型(直接模式) -> 发送非流式/流式请求 ->
-#           验证客户端响应含 routed_experts -> 验证轨迹存储含 routed_experts -> 删除模型
+#           验证客户端响应不含 routed_experts -> 验证轨迹存储仍含 routed_experts -> 删除模型
 #
 # 验证要点：
-#   1. 服务端流式返回的额外字段（routed_experts，在 choices 数组内与 logprobs 同层级）
-#      被正确透传给客户端（非流式和流式）
-#   2. 轨迹存储的 raw_response 中包含该额外字段
-#   3. 该字段不影响已知字段（logprobs, token_ids, content 等）的正常处理
+#   1. vLLM 返回的 routed_experts（MoE 路由元数据）被 proxy 剥离，不返回客户端
+#      （非流式 choice 与流式 chunk 均不含），已知业务字段（message/finish_reason/content）正常
+#   2. 轨迹存储的 raw_response 中仍包含 routed_experts（已存 DB，可通过 GET .../route_experts 回拉）
 
 # 获取脚本目录并加载utils
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -184,33 +183,29 @@ echo ""
 # ========================================
 # 步骤 4: 验证非流式客户端响应包含 routed_experts
 # ========================================
-log_step "步骤 4: 验证非流式客户端响应包含 routed_experts"
+log_step "步骤 4: 验证非流式客户端响应已剥离 routed_experts"
 
 NS_CHECK=$(echo "$CHAT_BODY" | python3 -c "
 import sys, json
 data = json.loads(sys.stdin.read())
 choice = data['choices'][0]
-# 验证 routed_experts 存在且结构正确
-assert 'routed_experts' in choice, 'routed_experts missing from choice'
-experts = choice['routed_experts']
-assert isinstance(experts, list), 'routed_experts should be a list'
-assert len(experts) == 2, f'expected 2 experts, got {len(experts)}'
-assert experts[0]['expert_id'] == 2, 'first expert_id mismatch'
-assert experts[0]['weight'] == 0.7, 'first weight mismatch'
-assert experts[1]['expert_id'] == 5, 'second expert_id mismatch'
-assert experts[1]['weight'] == 0.3, 'second weight mismatch'
-# 验证已知字段仍然正常
+# 验证 routed_experts 已被 proxy 剥离，不返回客户端
+assert 'routed_experts' not in choice, 'routed_experts should be stripped from client response'
+# 顺带验证其他 proxy 内部字段也已被剥离
+assert 'logprobs' not in choice, 'logprobs should be stripped from client response'
+assert 'token_ids' not in choice, 'token_ids should be stripped from client response'
+# 验证已知业务字段仍然正常
 assert 'message' in choice, 'message field missing'
 assert choice.get('finish_reason') == 'stop', 'finish_reason should be stop'
 print('OK')
 " 2>&1)
 
 if [ "$NS_CHECK" == "OK" ]; then
-    log_success "非流式客户端响应包含 routed_experts 且结构正确，已知字段正常"
+    log_success "非流式客户端响应正确剥离 routed_experts，已知业务字段正常"
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    assert_fail "非流式客户端响应 routed_experts 验证失败" "$NS_CHECK"
+    assert_fail "非流式客户端响应 routed_experts 剥离验证失败" "$NS_CHECK"
 fi
 
 echo ""
@@ -261,11 +256,11 @@ echo ""
 # ========================================
 # 步骤 7: 验证流式 chunks 包含 routed_experts
 # ========================================
-log_step "步骤 7: 验证流式 chunks 包含 routed_experts"
+log_step "步骤 7: 验证流式 chunks 已剥离 routed_experts"
 
 STREAM_CHECK=$(echo "$STREAM_RESPONSE" | python3 -c "
 import sys, json
-found_routed_experts = False
+leaked = []
 found_content = False
 for line in sys.stdin:
     line = line.strip()
@@ -277,37 +272,29 @@ for line in sys.stdin:
     try:
         data = json.loads(payload)
         for choice in data.get('choices', []):
-            if 'routed_experts' in choice:
-                found_routed_experts = True
-                experts = choice['routed_experts']
-                # 验证结构
-                if isinstance(experts, list) and len(experts) == 2:
-                    if experts[0].get('expert_id') == 2 and experts[0].get('weight') == 0.7 and \
-                       experts[1].get('expert_id') == 5 and experts[1].get('weight') == 0.3:
-                        pass  # 结构正确
-                    else:
-                        print(f'FAIL:routed_experts content mismatch')
-                        sys.exit(0)
-                else:
-                    print(f'FAIL:routed_experts not list or len mismatch')
-                    sys.exit(0)
+            # 验证 routed_experts 及其他内部字段已被剥离，不出现在任何 chunk
+            for f in ('routed_experts', 'logprobs', 'token_ids'):
+                if f in choice:
+                    leaked.append(f)
             delta = choice.get('delta', {})
             if delta.get('content'):
                 found_content = True
     except json.JSONDecodeError:
         continue
-if found_routed_experts and found_content:
+if leaked:
+    print(f'FAIL:leaked_fields={leaked}')
+elif found_content:
     print('OK')
 else:
-    print(f'FAIL:routed_experts={found_routed_experts}, content={found_content}')
+    print('FAIL:no_content')
 " 2>&1)
 
 if [ "$STREAM_CHECK" == "OK" ]; then
-    log_success "流式响应中包含 routed_experts 且结构正确，content 正常"
+    log_success "流式响应中 routed_experts 已被剥离，content 正常"
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
-    assert_fail "流式响应 routed_experts 验证失败" "$STREAM_CHECK"
+    assert_fail "流式响应 routed_experts 剥离验证失败" "$STREAM_CHECK"
 fi
 
 echo ""

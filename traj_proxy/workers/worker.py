@@ -9,7 +9,7 @@ import time
 import threading
 
 import uuid
-from typing import Optional
+from typing import Optional, Union, cast
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,8 +22,17 @@ from traj_proxy.proxy_core.processor_manager import ProcessorManager
 from traj_proxy.proxy_core.provider import TrajectoryProvider
 from traj_proxy.store.database_manager import DatabaseManager
 from traj_proxy.store.model_synchronizer import ModelSynchronizer
+from traj_proxy.store.blob_storage import BlobStorage, create_blob_storage
+from traj_proxy.store.decorators import OffloadingRepository
+from traj_proxy.store.r3_ref_repository import R3RefRepository
 from traj_proxy.store.request_repository import RequestRepository
-from traj_proxy.utils.config import get_database_pool_config, get_gzip_config, get_max_concurrent_requests, get_storage_mode
+from traj_proxy.utils.config import (
+    get_database_pool_config,
+    get_gzip_config,
+    get_max_concurrent_requests,
+    get_route_experts_offload_config,
+    get_storage_mode,
+)
 from traj_proxy.utils.logger import get_logger
 from traj_proxy.utils.validators import normalize_run_id
 
@@ -195,6 +204,10 @@ class ProxyWorker:
         self.processor_manager: Optional[ProcessorManager] = None
         self.model_synchronizer: Optional[ModelSynchronizer] = None
         self.transcript_provider: Optional[TrajectoryProvider] = None
+        self.blob_storage: Optional[BlobStorage] = None
+        # OffloadingRepository 引用：仅 enabled=true 时非 None，shutdown 时需先于
+        # blob_storage / db_manager 关闭，以取消并等待后台上传 task，防止孤儿化
+        self.offloading_repo: Optional[OffloadingRepository] = None
 
         # 设置中间件和路由
         self._setup_middleware()
@@ -389,16 +402,75 @@ class ProxyWorker:
         # 初始化数据库管理器（共享）
         self.db_manager = DatabaseManager(self.db_url, pool_config)
         await self.db_manager.initialize()
+        # initialize() 完成后 pool 必然存在; 用 raise 而非 assert (python -O 不剥离)
+        if self.db_manager is None or self.db_manager.pool is None:
+            raise RuntimeError("DatabaseManager 初始化后 pool 不应为 None")
+        pool = self.db_manager.pool
 
         # 初始化 RequestRepository（共享）
-        request_repository = RequestRepository(self.db_manager.pool, get_storage_mode())
+        request_repository: Union[RequestRepository, OffloadingRepository] = (
+            RequestRepository(pool, get_storage_mode())
+        )
+        # route_experts 卸载 feature toggle 变量（功能关闭时为 None，TrajectoryProvider 收到 None 即恒返回 404）
+        r3_ref_repo: Optional[R3RefRepository] = None
+        blob_storage_instance: Optional[BlobStorage] = None
 
-        # 创建 ProcessorManager
-        self.processor_manager = ProcessorManager(self.db_manager)
+        # route_experts 大字段卸载: 按配置开关决定是否包裹 OffloadingRepository，
+        # 并注入 R3RefRepository / BlobStorage 到 TrajectoryProvider（功能关闭时零影响）
+        r3_config = get_route_experts_offload_config()
+        if r3_config.get("enabled", False):
+            blob_storage_instance = create_blob_storage(r3_config)
+            r3_ref_repo = R3RefRepository(pool)
+
+            # 按后端类型构造 marker_config（直访 marker 构造参数）
+            backend = r3_config.get("backend", "local")
+            if backend == "csb":
+                csb_cfg = r3_config.get("csb", {})
+                marker_config = {
+                    "endpoint": csb_cfg.get("endpoint", ""),
+                    "bucket": csb_cfg.get("bucket", ""),
+                }
+            else:
+                local_cfg = r3_config.get("local", {})
+                access_path = local_cfg.get("access_path") or local_cfg.get("write_path", "")
+                marker_config = {"access_path": access_path}
+
+            # 用 OffloadingRepository 包裹 RequestRepository（Duck-type 委托，__getattr__ 透传读操作）
+            request_repository = OffloadingRepository(
+                inner=cast(RequestRepository, request_repository),
+                blob=blob_storage_instance,
+                ref_repo=r3_ref_repo,
+                backend=backend,
+                marker_config=marker_config,
+                ttl_hours=r3_config.get("ttl_hours", 2),
+                blob_key_prefix=r3_config.get("blob_key_prefix", "route_experts"),
+            )
+            logger.info("route_experts 大字段卸载: ENABLED (backend=%s)", backend)
+            # 保存引用供 shutdown 调用 aclose（取消并等待后台上传 task）
+            self.offloading_repo = request_repository
+        else:
+            logger.info("route_experts 大字段卸载: DISABLED")
+
+        # 保存 BlobStorage 引用，供 shutdown 释放资源 (httpx.AsyncClient 等)
+        self.blob_storage = blob_storage_instance
+        self.app.state.blob_storage = self.blob_storage
+
+        # 创建 ProcessorManager：注入（可能已包裹的）request_repository，
+        # 使写路径（Processor→Pipeline→insert）与读路径共用同一 repository；
+        # feature 开启时为 OffloadingRepository，route_experts 写入时即原位 strip 为 marker。
+        self.processor_manager = ProcessorManager(
+            self.db_manager,
+            request_repository=cast(RequestRepository, request_repository),
+        )
         self.app.state.processor_manager = self.processor_manager
 
-        # 创建 TranscriptProvider（共享 request_repository）
-        self.transcript_provider = TrajectoryProvider(request_repository)
+        # TrajectoryProvider: 功能开启时注入 r3_ref_repo + blob_storage
+        # 供 fallback 回拉端点使用；功能关闭时保持原始行为
+        self.transcript_provider = TrajectoryProvider(
+            cast(RequestRepository, request_repository),
+            r3_ref_repository=r3_ref_repo,
+            blob_storage=blob_storage_instance,
+        )
         self.app.state.transcript_provider = self.transcript_provider
 
         # 创建 ModelSynchronizer 并启动同步
@@ -457,6 +529,23 @@ class ProxyWorker:
                 await self.model_synchronizer.stop()
             except Exception as e:
                 logger.error(f"停止同步失败: {e}", exc_info=True)
+
+        # OffloadingRepository.aclose: 取消并等待后台上传 task，防止孤儿化
+        # 必须在 BlobStorage / db_manager 关闭之前执行（task 持有 blob 和 db 引用）
+        if self.offloading_repo is not None:
+            try:
+                await self.offloading_repo.aclose()
+            except Exception as e:
+                logger.warning(f"OffloadingRepository aclose 失败: {e}")
+
+        # BlobStorage ABC.aclose 由并发 Agent 同步添加，用 getattr 兜底
+        if self.blob_storage is not None:
+            blob_aclose = getattr(self.blob_storage, "aclose", None)
+            if blob_aclose is not None:
+                try:
+                    await blob_aclose()
+                except Exception as e:
+                    logger.warning(f"BlobStorage aclose 失败: {e}")
 
         if self.db_manager:
             await self.db_manager.close()

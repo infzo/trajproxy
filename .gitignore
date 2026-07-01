@@ -258,3 +258,7 @@ commitlint.config.js
 .opencode/instructions/
 opencode.json
 .omo/
+
+# route_experts 卸载本地 blob 存储目录（运行时数据，不提交内容）
+shard_data/*
+!shard_data/.gitkeep

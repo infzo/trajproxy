@@ -130,6 +130,7 @@
 | `choices[].finish_reason` | `stop`/`tool_calls`/`length` | `stop`/`tool_calls` | 基本一致 |
 | `choices[].logprobs` | ✅ 支持 | ❌ 客户端侧不返回 | **差异**: proxy 内部保留用于轨迹记录 |
 | `choices[].token_ids` | ✅ 支持 | ❌ 客户端侧不返回 | **差异**: proxy 内部保留用于轨迹记录 |
+| `choices[].routed_experts` | ✅ vLLM MoE 扩展 | ❌ 客户端侧不返回 | **差异**: MoE 路由元数据，proxy 存入轨迹 DB（可 offload），不返回客户端，可通过 `GET .../route_experts` 回拉 |
 | `usage.prompt_tokens` | ✅ | ✅ | 一致 |
 | `usage.completion_tokens` | ✅ | ✅ | 一致 |
 | `usage.total_tokens` | ✅ | ✅ | 一致 |
@@ -303,6 +304,7 @@ if isinstance(data["tool_choice"], dict):
 |------|------|-----------|
 | `n` 参数 | 支持多 choice | 不支持 |
 | `logprobs` | 支持 | 不支持（客户端侧不返回，proxy 内部强制请求用于轨迹记录） |
+| `routed_experts` | 支持（MoE 路由元数据） | 不支持（客户端侧不返回，proxy 存入轨迹 DB，可 offload 回拉） |
 | `max_completion_tokens` | 优先使用 | ⚠️ TokenPipeline 映射为 max_tokens；DirectPipeline 透传 |
 | `response_format` | 支持结构化输出 | ⚠️ DirectPipeline 透传；TokenPipeline 丢弃 |
 | `stream_options` | 支持流式 usage | ⚠️ DirectPipeline 透传；TokenPipeline 丢弃 |

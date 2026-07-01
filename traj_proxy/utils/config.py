@@ -261,3 +261,65 @@ def get_storage_mode() -> str:
     if env_mode:
         return env_mode
     return mode
+
+
+def get_route_experts_offload_config() -> Dict:
+    """获取 route_experts 大字段卸载配置
+
+    配置段 route_experts_offload 包含卸载功能的总开关与后端参数。
+    环境变量可覆盖部分字段（R3_OFFLOAD_ENABLED / R3_BACKEND / R3_TTL_HOURS 等）。
+
+    注意：对 cfg 及子段（csb / local）均做浅拷贝，避免污染全局配置缓存。
+
+    Returns:
+        route_experts_offload 配置字典（独立副本，不影响全局缓存）
+    """
+    # 浅拷贝避免污染全局配置缓存；子段（csb/local）也需独立拷贝
+    raw_cfg = get_config().get("route_experts_offload", {})
+    cfg = dict(raw_cfg)  # 顶层浅拷贝
+
+    # csb / local 子段独立拷贝，避免修改全局缓存的子 dict
+    csb = dict(raw_cfg.get("csb", {}))
+    local = dict(raw_cfg.get("local", {}))
+
+    # 环境变量覆盖
+    env_enabled = os.getenv("R3_OFFLOAD_ENABLED")
+    if env_enabled is not None:
+        cfg["enabled"] = env_enabled.lower() in ("true", "1", "yes")
+    else:
+        cfg.setdefault("enabled", False)
+
+    env_backend = os.getenv("R3_BACKEND")
+    if env_backend is not None:
+        cfg["backend"] = env_backend
+
+    env_ttl = os.getenv("R3_TTL_HOURS")
+    if env_ttl is not None:
+        cfg["ttl_hours"] = int(env_ttl)
+
+    cfg.setdefault("ttl_hours", 2)
+    cfg.setdefault("blob_key_prefix", "route_experts")
+    cfg.setdefault("backend", "local")
+
+    # csb 子段
+    env_csb_token = os.getenv("CSB_APP_TOKEN")
+    if env_csb_token is not None:
+        csb["app_token"] = env_csb_token
+    csb.setdefault("app_token", "")
+    csb.setdefault("bucket", "trajproxy-r3")
+    csb.setdefault("endpoint", "https://csb.example.com")
+    csb.setdefault("verify_tls", True)
+    cfg["csb"] = csb  # 把拷贝后的 csb 赋回 cfg
+
+    # local 子段
+    env_write_path = os.getenv("R3_LOCAL_WRITE_PATH")
+    if env_write_path is not None:
+        local["write_path"] = env_write_path
+    env_access_path = os.getenv("R3_LOCAL_ACCESS_PATH")
+    if env_access_path is not None:
+        local["access_path"] = env_access_path
+    local.setdefault("write_path", "/data/r3")
+    local.setdefault("access_path", local["write_path"])  # 留空默认 = write_path
+    cfg["local"] = local  # 把拷贝后的 local 赋回 cfg
+
+    return cfg

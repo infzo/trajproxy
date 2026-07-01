@@ -50,6 +50,7 @@ OPENAI_SKIP_FIELDS = {
     "service_tier",               # vLLM 返回 null, proxy 省略
     "system_fingerprint",         # vLLM 返回 null, proxy 省略
     "completion_tokens_details",  # vLLM 含 reasoning_tokens 等, proxy 不保证透传
+    "routed_experts",             # MoE 路由元数据, proxy 剥离不返回客户端 (存轨迹 DB)
 }
 OPENAI_STREAM_SKIP_FIELDS = OPENAI_SKIP_FIELDS | {"seed"}
 
