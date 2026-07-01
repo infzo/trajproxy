@@ -1,12 +1,13 @@
 #!/bin/bash
 # 场景 P209: DirectPipeline routed_experts 客户端剥离验证（Proxy 层）
 # 测试流程：启动mock服务 -> 注册模型(直接模式) -> 发送非流式/流式请求 ->
-#           验证客户端响应不含 routed_experts -> 验证轨迹存储仍含 routed_experts -> 删除模型
+#           验证客户端响应不含 routed_experts -> 验证轨迹存储 routed_experts 为 marker -> 删除模型
 #
 # 验证要点：
 #   1. vLLM 返回的 routed_experts（MoE 路由元数据）被 proxy 剥离，不返回客户端
 #      （非流式 choice 与流式 chunk 均不含），已知业务字段（message/finish_reason/content）正常
-#   2. 轨迹存储的 raw_response 中仍包含 routed_experts（已存 DB，可通过 GET .../route_experts 回拉）
+#   2. r3offload 开启后，轨迹 raw_response 中 routed_experts 存为 marker（轻量引用），
+#      原始数据已卸载到 blob，可通过 GET .../route_experts 回拉（闭环由 P502/P503 验证）
 
 # 获取脚本目录并加载utils
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -85,23 +86,25 @@ if not choices:
 
 choice = choices[0]
 
-# 检查 routed_experts
-has_routed_experts = 'routed_experts' in choice and choice['routed_experts'] is not None
-if has_routed_experts:
-    experts = choice['routed_experts']
-    # 验证结构：应为列表，含2个expert，expert_id/weight正确
-    if isinstance(experts, list) and len(experts) == 2:
-        e0 = experts[0]
-        e1 = experts[1]
-        if e0.get('expert_id') == 2 and e0.get('weight') == 0.7 and \
-           e1.get('expert_id') == 5 and e1.get('weight') == 0.3:
-            print('RESULT:routed_experts=OK')
-        else:
-            print(f'RESULT:routed_experts=FAIL(expert_content_mismatch)')
-    else:
-        print(f'RESULT:routed_experts=FAIL(list_len={len(experts) if isinstance(experts, list) else "not_list"})')
-else:
+# 检查 routed_experts：r3offload 开启后，轨迹 DB 存的是 marker（轻量引用），
+# 原始 route_experts 已卸载到 blob，可通过 GET .../route_experts 回拉
+# （fallback 闭环由 P502/P503 验证）。本场景只验证 marker 存在且结构完整。
+re = choice.get('routed_experts')
+if re is None:
     print('RESULT:routed_experts=FAIL(not_present)')
+elif isinstance(re, dict) and re.get('_offloaded') is True:
+    backend = re.get('backend')
+    location = re.get('location') or {}
+    if backend == 'local' and location.get('path'):
+        print('RESULT:routed_experts=OK')
+    elif backend == 'csb' and location.get('key'):
+        print('RESULT:routed_experts=OK')
+    else:
+        print(f'RESULT:routed_experts=FAIL(marker_incomplete: backend={backend}, location={location})')
+elif isinstance(re, list):
+    print('RESULT:routed_experts=FAIL(is_raw_list_feature_maybe_off)')
+else:
+    print(f'RESULT:routed_experts=FAIL(type={type(re).__name__})')
 PYEOF
 
     rm -f "$tmpfile"
@@ -211,9 +214,9 @@ fi
 echo ""
 
 # ========================================
-# 步骤 5: 验证非流式轨迹包含 routed_experts
+# 步骤 5: 验证非流式轨迹 routed_experts 为 marker
 # ========================================
-log_step "步骤 5: 验证非流式轨迹存储包含 routed_experts"
+log_step "步骤 5: 验证非流式轨迹 routed_experts 为 marker（r3offload 已卸载）"
 
 sleep 0.5
 log_info "查询非流式轨迹..."
@@ -221,7 +224,7 @@ TRAJ_VERIFY=$(verify_trajectory_routed_experts "${SESSION_NS}")
 
 ROUTED_EXPERTS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:routed_experts=" | cut -d= -f2)
 if [ "$ROUTED_EXPERTS_RESULT" == "OK" ]; then
-    log_success "非流式轨迹中 routed_experts 存在且结构正确 → 额外字段被正确存储"
+    log_success "非流式轨迹 routed_experts 为 marker 且结构完整 → 已卸载到 blob"
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
@@ -300,9 +303,9 @@ fi
 echo ""
 
 # ========================================
-# 步骤 8: 验证流式轨迹包含 routed_experts
+# 步骤 8: 验证流式轨迹 routed_experts 为 marker
 # ========================================
-log_step "步骤 8: 验证流式轨迹存储包含 routed_experts"
+log_step "步骤 8: 验证流式轨迹 routed_experts 为 marker（r3offload 已卸载）"
 
 sleep 0.5
 log_info "查询流式轨迹..."
@@ -310,7 +313,7 @@ TRAJ_VERIFY=$(verify_trajectory_routed_experts "${SESSION_S}")
 
 ROUTED_EXPERTS_RESULT=$(echo "$TRAJ_VERIFY" | grep "^RESULT:routed_experts=" | cut -d= -f2)
 if [ "$ROUTED_EXPERTS_RESULT" == "OK" ]; then
-    log_success "流式轨迹中 routed_experts 存在且结构正确 → 额外字段被正确存储"
+    log_success "流式轨迹 routed_experts 为 marker 且结构完整 → 已卸载到 blob"
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
