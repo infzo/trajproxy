@@ -6,6 +6,74 @@
 
 ---
 
+## [0.3.5] - 2026-07-01
+
+**类型**: 功能增强 + 可观测性增强 + Grafana 修复
+
+### 新增功能
+- **route_experts 大字段卸载 (r3offload)**: MoE 路由元数据 `routed_experts`（峰值 ~500GB/小时）体量大且仅轨迹回放需要，开启后写路径将其从响应中原位剥离，卸载到外部对象存储（Local/CSB），PG 仅存轻量 marker。采用 Decorator 模式包裹 `RequestRepository`（`OffloadingRepository`），Pipeline/Processor/ProcessorManager 代码零改动，开关集中在 Worker 组装处一行，关闭时绝对零影响
+  - **写路径**: 抽 `routed_experts` → 插 `r3_blob_refs` 引用行（失败则退化原行为）→ fire-and-forget 异步上传 blob → 原位替换为 `{"_offloaded": true, "backend": ..., "location": ...}` marker → delegate 存储轻量 marker
+  - **DirectPipeline 剥离**: `routed_experts` 不外发客户端，对齐 `logprobs`/`token_ids` 的剥离机制
+  - **Fallback 回拉端点**: 新增 `GET /trajectories/{session_id}/records/{request_id}/route_experts`，流式返回 + `(session_id, request_id)` 多租户授权 + 独立 60s 超时，穷尽匹配 404（未卸载）/202（上传中，Retry-After）/200（流式）/410（已消费）
+  - **新表 `r3_blob_refs`**: 记录 blob 引用（status/blob_key/backend/expires_at），schema 预留 `consumed_at`/`expires_at` 供未来清理任务
+  - **⚠️ 生产警示**: 本期未实现清理任务（`r3_blob_refs` 表与外部存储无回收机制），生产开启 `enabled=true` 前必须先确认清理任务就绪，详见 `docs/design/features/route-experts-offload.md`
+- **Record 粒度轨迹查询**: 新增 `GET /trajectories/{session_id}/records` Record 粒度列表查询端点，配套 Store/Provider/Schema 层实现，支持活跃/归档双数据源
+- **HTTP gzip 响应压缩**: 集成 `GZipMiddleware`，`gzip_enabled` 配置控制开关，减少大轨迹查询响应体积
+- **Parser 解析错误独立 outcome 分类**: 新增 `ParserError` 异常，流式 `parse_delta` 失败时包装抛出，`determine_outcome` 归因为 `error_parser`，Grafana 可独立观测，不再混入 `error_server`（内部 5XX）
+
+### Bug 修复
+- **时间类 Histogram bucket 上限扩展**: 统一所有时间类 Histogram bucket 上限至 1200s，消除长耗时请求落入 `+Inf` 桶导致面板无数据
+- **sequence_length / response_size 直方图桶上限扩展**: 扩展序列长度与响应体积直方图桶上限，适配大序列/大响应场景
+- **Grafana 计数面板 sum 图例虚高**: 修复计数面板 `sum` 图例统计导致数值虚高及面板类型/单位不匹配
+- **Grafana 柱状图 increase() 窗口**: 从 `$__interval` 改为 `$__rate_interval`，修复计数重置与重采样导致的计算偏差
+- **Grafana 轨迹详情请求数面板**: 从柱状图改为线图，与推理请求数面板保持一致
+- **Grafana DB 连接池面板**: 使用率查询添加 `*100` 修复百分比单位不匹配导致无数据；还原为原始连接数显示
+- **Grafana 面板面积填充清理**: Worker 存活/全站请求数按节点面板、多系列非堆叠面板移除面积填充，消除重叠面积视觉干扰
+
+### 重构
+- **废弃 model-mix 看板清理**: 删除废弃 `model-mix.json` 看板，移除可观测性文档中对应引用
+- **配置格式统一**: 统一 `models` 列表缩进格式
+
+### 配置更新
+- `route_experts_offload`: 新增配置段（`enabled`/`ttl_hours`/`backend`/`csb`/`local`），支持 `R3_OFFLOAD_ENABLED`/`R3_BACKEND`/`R3_TTL_HOURS`/`CSB_APP_TOKEN`/`R3_LOCAL_WRITE_PATH`/`R3_LOCAL_ACCESS_PATH` 环境变量覆盖
+- `gzip_enabled` / `gzip_*`: 新增 HTTP gzip 响应压缩配置项
+
+### 文档更新
+- **route_experts 卸载设计文档**: 新增 `docs/design/features/route-experts-offload.md`，详述 Decorator 架构、marker 格式、直访模型、失败模式与生产警示
+- **Record 粒度查询 API 文档**: 补充 `GET /records` 与 `GET /records/{request_id}` 接口文档，含活跃/归档双响应示例
+- **gzip 配置文档**: 补充 gzip 压缩配置项说明
+- **vs-vllm 字段说明**: 补充 `routed_experts` 字段剥离说明
+
+### 测试
+- **P501-P503**: 新增 r3offload e2e 场景（feature off 零影响 / Direct 模式 marker / TITO 模式 marker）
+- **P209/P210**: 由"验证透传"改为"验证剥离"，适配 r3offload 开启后的 marker 断言
+- **Record 粒度查询 e2e**: 新增长期看护场景
+- **MoE routed_experts 透传/存储**: 新增额外字段透传与存储测试场景
+
+### 影响范围
+- `traj_proxy/store/blob_storage.py` - 新增 BlobStorage ABC + Local/CSB 实现 + 工厂
+- `traj_proxy/store/r3_ref_repository.py` - 新增 R3RefRepository 引用表 CRUD
+- `traj_proxy/store/decorators/offloading_repository.py` - 新增 OffloadingRepository Decorator
+- `traj_proxy/store/CLAUDE.md` - store 模块接口边界文档
+- `traj_proxy/proxy_core/pipeline/direct_pipeline.py` - routed_experts 剥离
+- `traj_proxy/proxy_core/provider.py` - TrajectoryProvider 新增 records 查询与 route_experts 回拉
+- `traj_proxy/proxy_core/processor_manager.py` - shutdown 顺序释放适配
+- `traj_proxy/serve/routes.py` - 新增 records 列表 / route_experts fallback 端点
+- `traj_proxy/workers/worker.py` - OffloadingRepository 装配 + GZipMiddleware 挂载 + shutdown 释放顺序
+- `traj_proxy/exceptions.py` - 新增 ParserError
+- `traj_proxy/observability/outcome.py` - 新增 error_parser 分类
+- `traj_proxy/utils/config.py` - route_experts_offload / gzip 配置函数
+- `configs/config.yaml` / `dockers/*/configs/config.yaml` - 新增配置段
+- `dockers/compose/scripts/entrypoint.sh` / `dockers/allinone/scripts/entrypoint.sh` - r3_blob_refs 建表 DDL
+- `dockers/compose/docker-compose.yml` / `dockers/allinone/Dockerfile` - shard_data volume 挂载
+- `dockers/observability/configs/grafana/dashboard-src/` - 面板修复
+- `docs/design/features/route-experts-offload.md` - 新增设计文档
+- `docs/api/proxy.md` - Record 粒度查询接口文档
+- `docs/api/vs-vllm.md` - routed_experts 字段说明
+- `tests/e2e/layers/proxy/scenarios/` - P501-P503 + P209/P210 适配
+
+---
+
 ## [0.3.4] - 2026-06-23
 
 **类型**: 功能增强 + 长稳运行修复 + 可观测性增强
