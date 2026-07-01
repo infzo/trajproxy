@@ -15,3 +15,5 @@ datasources:
     jsonData:
       timeInterval: "15s"
       httpMethod: POST
+      # 查询超时: 超时即主动断开, 避免长查询持续占用 prometheus 查询槽
+      queryTimeout: "30s"

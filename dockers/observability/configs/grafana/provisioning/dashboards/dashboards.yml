@@ -10,7 +10,7 @@ providers:
     folder: "TrajProxy"
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 30
+    updateIntervalSeconds: 60
     allowUiUpdates: true
     options:
       path: /var/lib/grafana/dashboards
